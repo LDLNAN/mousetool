@@ -1,0 +1,1572 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mouse Tool</title>
+<link rel="icon" href="icon.svg">
+<style>
+:root {
+  --bg: #f2f2ef; --grid: rgba(20, 20, 18, .045); --surface: #fafaf8; --surface-2: #f1f1ed; --inset: #e8e8e3;
+  --line: #e0dfd9; --line-strong: #c9c7bf; --tick: #a9a79f;
+  --ink: #111110; --ink-2: #3b3a36; --muted: #6d6c66; --faint: #a3a199;
+  --accent: #1f9e10; --accent-hi: #2bb81a; --accent-ink: #ffffff; --accent-soft: rgba(31, 158, 16, .08); --glow: rgba(31, 158, 16, .22);
+  --warn: #b5650c; --warn-soft: rgba(181, 101, 12, .09); --bad: #c6362a; --bad-soft: rgba(198, 54, 42, .08);
+  --lift: 0 1px 0 rgba(255, 255, 255, .8) inset, 0 1px 2px rgba(0, 0, 0, .05), 0 12px 28px -18px rgba(0, 0, 0, .18);
+  --press: 0 1px 2px rgba(0, 0, 0, .1), 0 0 0 1px var(--line-strong);
+  --sans: "Geist", "Inter", system-ui, sans-serif;
+  --display: "Inter Display", "Geist", "Inter", system-ui, sans-serif;
+  --mono: "JetBrainsMono Nerd Font Mono", "JetBrains Mono", ui-monospace, monospace;
+  --r: 8px;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #08080a; --grid: rgba(255, 255, 255, .03); --surface: #0f0f11; --surface-2: #151518; --inset: #0a0a0c;
+    --line: #1d1d21; --line-strong: #2c2c32; --tick: #3d3d44;
+    --ink: #f1f1ee; --ink-2: #c8c8c3; --muted: #84837d; --faint: #4f4e4a;
+    --accent: #4fe03a; --accent-hi: #74f560; --accent-ink: #031402; --accent-soft: rgba(79, 224, 58, .07); --glow: rgba(79, 224, 58, .38);
+    --warn: #eba94b; --warn-soft: rgba(235, 169, 75, .1); --bad: #f26a5d; --bad-soft: rgba(242, 106, 93, .1);
+    --lift: 0 1px 0 rgba(255, 255, 255, .035) inset, 0 18px 40px -22px rgba(0, 0, 0, .9);
+    --press: 0 1px 0 rgba(255, 255, 255, .06) inset, 0 0 0 1px var(--line-strong), 0 2px 6px rgba(0, 0, 0, .5);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #08080a; --grid: rgba(255, 255, 255, .03); --surface: #0f0f11; --surface-2: #151518; --inset: #0a0a0c;
+  --line: #1d1d21; --line-strong: #2c2c32; --tick: #3d3d44;
+  --ink: #f1f1ee; --ink-2: #c8c8c3; --muted: #84837d; --faint: #4f4e4a;
+  --accent: #4fe03a; --accent-hi: #74f560; --accent-ink: #031402; --accent-soft: rgba(79, 224, 58, .07); --glow: rgba(79, 224, 58, .38);
+  --warn: #eba94b; --warn-soft: rgba(235, 169, 75, .1); --bad: #f26a5d; --bad-soft: rgba(242, 106, 93, .1);
+  --lift: 0 1px 0 rgba(255, 255, 255, .035) inset, 0 18px 40px -22px rgba(0, 0, 0, .9);
+  --press: 0 1px 0 rgba(255, 255, 255, .06) inset, 0 0 0 1px var(--line-strong), 0 2px 6px rgba(0, 0, 0, .5);
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html { background: var(--bg); }
+body {
+  margin: 0; color: var(--ink); font: 14px/1.45 var(--sans); -webkit-font-smoothing: antialiased;
+  background-color: var(--bg);
+  background-image:
+    radial-gradient(900px 420px at 18% -8%, var(--accent-soft), transparent 70%),
+    linear-gradient(var(--grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+  background-size: auto, 24px 24px, 24px 24px;
+  background-repeat: no-repeat, repeat, repeat;
+  min-height: 100vh;
+  font-feature-settings: "ss01", "cv11";
+}
+::selection { background: var(--accent); color: var(--accent-ink); }
+.wrap { max-width: 1040px; margin: 0 auto; padding: 22px 16px 80px; }
+[hidden] { display: none !important; }
+.num { font-variant-numeric: tabular-nums; }
+
+/* crop-mark corners on panels */
+.cm { position: relative; }
+.cm::after {
+  content: ""; position: absolute; inset: -5px; pointer-events: none;
+  --c: var(--tick); --l: 9px;
+  background:
+    linear-gradient(var(--c), var(--c)) 0 0 / var(--l) 1px, linear-gradient(var(--c), var(--c)) 0 0 / 1px var(--l),
+    linear-gradient(var(--c), var(--c)) 100% 0 / var(--l) 1px, linear-gradient(var(--c), var(--c)) 100% 0 / 1px var(--l),
+    linear-gradient(var(--c), var(--c)) 0 100% / var(--l) 1px, linear-gradient(var(--c), var(--c)) 0 100% / 1px var(--l),
+    linear-gradient(var(--c), var(--c)) 100% 100% / var(--l) 1px, linear-gradient(var(--c), var(--c)) 100% 100% / 1px var(--l);
+  background-repeat: no-repeat;
+}
+
+/* ---------- controls ---------- */
+button {
+  font: 500 13px var(--sans); color: var(--ink); background: var(--surface-2); border: 0;
+  box-shadow: var(--press); border-radius: 6px; padding: 7px 13px; cursor: pointer;
+  transition: background .12s, box-shadow .12s, color .12s, transform .06s;
+}
+button:hover:not(:disabled) { background: var(--surface); }
+button:active:not(:disabled) { transform: translateY(1px); }
+button:disabled { opacity: .4; cursor: default; }
+button:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focus-visible { outline: 1.5px solid var(--accent); outline-offset: 2px; }
+button.primary {
+  background: var(--accent); color: var(--accent-ink); font-weight: 600;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, .25) inset, 0 0 0 1px var(--accent), 0 6px 20px -8px var(--glow);
+}
+button.primary:hover:not(:disabled) { background: var(--accent-hi); }
+button.ghost { background: transparent; box-shadow: none; color: var(--muted); }
+button.ghost:hover:not(:disabled) { color: var(--ink); background: var(--surface-2); box-shadow: var(--press); }
+button.danger { color: var(--bad); }
+button.danger:hover:not(:disabled) { color: var(--bad); }
+button.icon { padding: 7px; line-height: 0; }
+button.icon svg { width: 15px; height: 15px; }
+
+.seg {
+  display: inline-flex; background: var(--inset); border-radius: 7px; padding: 3px; gap: 2px; flex-wrap: wrap;
+  box-shadow: 0 0 0 1px var(--line) inset, 0 1px 2px rgba(0, 0, 0, .12) inset;
+}
+.seg button {
+  background: transparent; box-shadow: none; border-radius: 5px; padding: 6px 11px; color: var(--muted);
+  font: 500 12.5px var(--mono); display: inline-flex; align-items: center; gap: 7px;
+}
+.seg button::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: var(--line-strong); transition: background .15s, box-shadow .15s; }
+.seg button:hover:not(:disabled) { color: var(--ink); background: transparent; }
+.seg button.sel { background: var(--surface-2); color: var(--ink); box-shadow: var(--press); }
+.seg button.sel::before { background: var(--accent); box-shadow: 0 0 6px 1px var(--glow); }
+.seg button.want { color: var(--ink); outline: 1px dashed var(--muted); outline-offset: -2px; }
+.seg button.want::before { animation: blink .6s steps(2) infinite; background: var(--accent); }
+@keyframes blink { 50% { opacity: .2; } }
+
+input[type=number], input[type=text], select {
+  font: 13px var(--mono); color: var(--ink); background: var(--inset); border: 0; border-radius: 6px; padding: 7px 9px;
+  box-shadow: 0 0 0 1px var(--line-strong) inset, 0 1px 2px rgba(0, 0, 0, .1) inset;
+}
+input[type=number]:focus, input[type=text]:focus, select:focus { outline: none; box-shadow: 0 0 0 1px var(--accent) inset, 0 0 0 3px var(--accent-soft); }
+input[type=number] { width: 96px; }
+input[type=text] { width: 80px; }
+select {
+  appearance: none; -webkit-appearance: none; padding-right: 28px; cursor: pointer;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' fill='none' stroke='%23888' stroke-width='1.5'%3E%3Cpath d='M1 1l4 4 4-4'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 10px center;
+}
+select option, select optgroup { background: var(--surface); color: var(--ink); }
+
+input[type=range] { -webkit-appearance: none; appearance: none; width: 220px; height: 22px; background: transparent; --p: 50%; cursor: pointer; }
+input[type=range]::-webkit-slider-runnable-track {
+  height: 4px; border-radius: 2px;
+  background: linear-gradient(90deg, var(--accent) var(--p), var(--line-strong) var(--p));
+}
+input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 16px; height: 16px; border-radius: 5px; margin-top: -6px;
+  background: var(--ink); box-shadow: 0 0 0 3px var(--surface), 0 0 0 4px var(--line-strong), 0 2px 6px rgba(0, 0, 0, .3);
+  transition: transform .1s;
+}
+input[type=range]:active::-webkit-slider-thumb { transform: scale(1.12); }
+input[type=range]::-moz-range-track { height: 4px; border-radius: 2px; background: var(--line-strong); }
+input[type=range]::-moz-range-progress { height: 4px; border-radius: 2px; background: var(--accent); }
+input[type=range]::-moz-range-thumb { width: 14px; height: 14px; border: 0; border-radius: 5px; background: var(--ink); box-shadow: 0 0 0 3px var(--surface), 0 0 0 4px var(--line-strong); }
+input[type=range]:focus-visible { outline: none; }
+input[type=range]:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px var(--surface), 0 0 0 4.5px var(--accent); }
+
+.switch { display: inline-flex; align-items: center; gap: 9px; color: var(--muted); font-size: 12.5px; cursor: pointer; user-select: none; }
+.switch input { appearance: none; -webkit-appearance: none; width: 28px; height: 16px; border-radius: 8px; margin: 0; background: var(--inset); box-shadow: 0 0 0 1px var(--line-strong) inset; position: relative; cursor: pointer; transition: background .15s; }
+.switch input::after { content: ""; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%; background: var(--muted); transition: transform .15s, background .15s; }
+.switch input:checked { background: var(--accent-soft); box-shadow: 0 0 0 1px var(--accent) inset; }
+.switch input:checked::after { transform: translateX(12px); background: var(--accent); box-shadow: 0 0 6px var(--glow); }
+.mono { font-family: var(--mono); }
+.muted { color: var(--muted); }
+.spacer { flex: 1; }
+
+/* ---------- top bar ---------- */
+.top { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding-bottom: 22px; }
+.brand { display: flex; align-items: center; gap: 11px; }
+.brand .mark {
+  width: 34px; height: 34px; border-radius: 9px; display: grid; place-items: center; color: var(--accent);
+  background: var(--surface-2); box-shadow: var(--press);
+}
+.brand .mark svg { width: 18px; height: 18px; filter: drop-shadow(0 0 4px var(--glow)); }
+.brand h1 { font: 600 16px/1.1 var(--display); margin: 0; letter-spacing: -.015em; }
+.brand .sub { font: 11px var(--mono); color: var(--faint); margin-top: 3px; letter-spacing: .02em; }
+.pill {
+  display: inline-flex; align-items: center; gap: 8px; font: 11.5px var(--mono); color: var(--muted);
+  border-radius: 999px; padding: 4px 11px 4px 9px; background: var(--surface); box-shadow: 0 0 0 1px var(--line) inset;
+}
+.pill .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--faint); }
+.pill.on .dot { background: var(--accent); animation: pulse 2.4s ease-out infinite; }
+.pill.sleep { color: var(--warn); box-shadow: 0 0 0 1px var(--warn) inset; background: var(--warn-soft); }
+.pill.sleep .dot { background: var(--warn); }
+@keyframes pulse { 0% { box-shadow: 0 0 0 0 var(--glow); } 70%, 100% { box-shadow: 0 0 0 6px transparent; } }
+.sync { font: 11px var(--mono); color: var(--faint); letter-spacing: .02em; }
+
+/* ---------- empty state ---------- */
+.empty {
+  border-radius: var(--r); background: var(--surface); box-shadow: 0 0 0 1px var(--line) inset, var(--lift);
+  padding: 64px 24px 56px; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 14px;
+}
+.empty .halo { width: 120px; height: 120px; border-radius: 50%; display: grid; place-items: center; position: relative; margin-bottom: 6px; }
+.empty .halo::before, .empty .halo::after { content: ""; position: absolute; inset: 0; border-radius: 50%; border: 1px solid var(--line-strong); }
+.empty .halo::after { inset: 14px; border-style: dashed; animation: spin 18s linear infinite; }
+.empty svg { width: 46px; height: 72px; color: var(--muted); }
+.empty h2 { margin: 0; font: 600 20px var(--display); letter-spacing: -.02em; }
+.empty p { margin: 0; color: var(--muted); max-width: 420px; }
+.banner { box-shadow: 0 0 0 1px var(--warn) inset; background: var(--warn-soft); color: var(--ink); border-radius: 7px; padding: 10px 14px; text-align: left; max-width: 560px; font-size: 13px; }
+.banner code { font-family: var(--mono); font-size: 12px; }
+
+/* ---------- hero (instrument cluster) ---------- */
+.hero {
+  display: grid; grid-template-columns: 1.35fr 1fr 1fr 1fr; margin-bottom: 26px;
+  background: var(--surface); border-radius: var(--r); box-shadow: 0 0 0 1px var(--line) inset, var(--lift);
+}
+.tile { padding: 18px 20px 18px; min-width: 0; border-left: 1px solid var(--line); display: flex; flex-direction: column; }
+.tile:first-child { border-left: 0; }
+.tile .k { font: 11px var(--mono); color: var(--muted); display: flex; align-items: center; gap: 8px; letter-spacing: .02em; }
+.tile .k .kx { margin-left: auto; color: var(--faint); }
+.tile .v {
+  font: 600 34px/1 var(--display); font-variant-numeric: tabular-nums; letter-spacing: -.035em; margin-top: 14px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.tile .v small { font: 500 12px var(--mono); color: var(--muted); letter-spacing: 0; margin-left: 4px; }
+.tile .v.big { font-size: 52px; }
+.tile .v.txt { font: 600 17px/1.2 var(--display); letter-spacing: -.01em; margin-top: 16px; white-space: normal; }
+.tile .s { font: 11px var(--mono); color: var(--muted); margin-top: auto; padding-top: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pips { display: flex; gap: 4px; margin-top: auto; padding-top: 14px; }
+.pips i { height: 3px; flex: 1; border-radius: 2px; background: var(--line-strong); max-width: 34px; }
+.pips i.on { background: var(--accent); box-shadow: 0 0 6px var(--glow); }
+.bars { display: flex; align-items: flex-end; gap: 3px; height: 18px; margin-top: auto; padding-top: 14px; box-sizing: content-box; }
+.bars i { flex: 1; max-width: 9px; border-radius: 1px; background: var(--line-strong); }
+.bars i.on { background: var(--accent); }
+.bars i.cur { box-shadow: 0 0 6px var(--glow); }
+.cells { display: flex; gap: 3px; margin-top: auto; padding-top: 14px; }
+.cells i { height: 10px; flex: 1; border-radius: 2px; background: var(--line); box-shadow: 0 0 0 1px var(--line-strong) inset; }
+.cells i.on { background: var(--accent); box-shadow: none; }
+.cells i.on.low { background: var(--warn); }
+.cells::after { content: ""; width: 3px; height: 5px; margin-top: 2.5px; border-radius: 0 1px 1px 0; background: var(--line-strong); }
+.linkic { display: inline-flex; align-items: flex-end; gap: 2px; height: 11px; }
+.linkic i { width: 3px; background: var(--accent); border-radius: 1px; }
+@media (max-width: 760px) {
+  .hero { grid-template-columns: 1fr 1fr; }
+  .tile:nth-child(3) { border-left: 0; }
+  .tile:nth-child(n+3) { border-top: 1px solid var(--line); }
+  .tile .v.big { font-size: 40px; }
+  .tile .v { font-size: 28px; }
+}
+
+/* ---------- tabs ---------- */
+.tabsbar { display: flex; margin-bottom: 18px; }
+.tabs {
+  display: inline-flex; gap: 2px; padding: 3px; border-radius: 9px; background: var(--inset);
+  box-shadow: 0 0 0 1px var(--line) inset; overflow-x: auto; scrollbar-width: none; max-width: 100%;
+}
+.tab {
+  background: transparent; box-shadow: none; border-radius: 6px; padding: 7px 13px; color: var(--muted);
+  white-space: nowrap; display: inline-flex; align-items: baseline; gap: 7px; font-weight: 500;
+}
+.tab i { font: normal 10px var(--mono); color: var(--faint); }
+.tab:hover:not(:disabled) { color: var(--ink); background: transparent; }
+.tab[aria-selected="true"] { color: var(--ink); background: var(--surface-2); box-shadow: var(--press); }
+.tab[aria-selected="true"] i { color: var(--accent); }
+.panel { display: flex; flex-direction: column; gap: 22px; }
+
+/* ---------- groups + setting rows ---------- */
+.group { background: var(--surface); border-radius: var(--r); min-width: 0; box-shadow: 0 0 0 1px var(--line) inset, var(--lift); }
+.ghead { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 13px 18px; border-bottom: 1px solid var(--line); }
+.ghead .idx { font: 10.5px var(--mono); color: var(--accent); letter-spacing: .04em; }
+.ghead h2 { font: 600 13.5px var(--sans); margin: 0; letter-spacing: -.005em; }
+.ghead .note { font: 11.5px var(--mono); color: var(--faint); }
+.setting {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px 28px; align-items: center;
+  padding: 16px 18px; border-top: 1px solid var(--line);
+}
+.ghead + .setting, .setting:first-child { border-top: 0; }
+.setting .label b { font-weight: 500; font-size: 13.5px; }
+.setting .label p { margin: 3px 0 0; color: var(--muted); font-size: 12.5px; max-width: 440px; line-height: 1.5; }
+.control { display: flex; align-items: center; gap: 10px; justify-self: end; flex-wrap: wrap; justify-content: flex-end; }
+.readout {
+  font: 600 13px var(--mono); min-width: 64px; text-align: center; padding: 5px 8px; border-radius: 5px;
+  background: var(--inset); box-shadow: 0 0 0 1px var(--line) inset; font-variant-numeric: tabular-nums;
+}
+@media (max-width: 640px) {
+  .setting { grid-template-columns: 1fr; }
+  .control { justify-self: stretch; justify-content: flex-start; }
+  input[type=range] { width: 100%; flex: 1; min-width: 140px; }
+}
+
+/* save state chip */
+.state { font: 11.5px var(--mono); display: inline-flex; align-items: center; gap: 6px; min-height: 18px; color: var(--muted); white-space: nowrap; }
+.state:empty { display: none; }
+.state.saving::before { content: ""; width: 9px; height: 9px; border-radius: 50%; border: 1.5px solid var(--line-strong); border-top-color: var(--accent); animation: spin .7s linear infinite; }
+.state.saved { color: var(--accent); }
+.state.error { color: var(--bad); white-space: normal; max-width: 260px; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ---------- dpi stages ---------- */
+.track { position: relative; height: 52px; margin: 18px 22px 0; }
+.track .rail { position: absolute; left: 0; right: 0; top: 24px; height: 1px; background: var(--line-strong); }
+.track .tl { position: absolute; top: 24px; width: 1px; height: 6px; background: var(--tick); }
+.track .tick { position: absolute; top: 34px; font: 10px var(--mono); color: var(--faint); transform: translateX(-50%); }
+.track .tick.first { transform: none; }
+.track .tick.last { transform: translateX(-100%); }
+.track .mark {
+  position: absolute; top: 4px; transform: translateX(-50%); transition: left .25s;
+  font: 600 9.5px var(--mono); color: var(--muted); display: flex; flex-direction: column; align-items: center; gap: 3px;
+}
+.track .mark::after { content: ""; width: 1px; height: 9px; background: var(--muted); }
+.track .mark.active { color: var(--accent); }
+.track .mark.active::after { width: 3px; border-radius: 1px; background: var(--accent); box-shadow: 0 0 8px var(--glow); }
+.track .live { position: absolute; top: 20px; width: 9px; height: 9px; border-radius: 50%; transform: translateX(-50%); border: 1.5px solid var(--accent); background: var(--surface); transition: left .25s; }
+.stagegrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(156px, 1fr)); gap: 10px; padding: 12px 18px 4px; }
+.stagecard {
+  border-radius: 7px; padding: 10px 12px 12px; background: var(--surface-2); cursor: pointer; position: relative; min-width: 0;
+  box-shadow: 0 0 0 1px var(--line-strong) inset; transition: box-shadow .15s, background .15s;
+}
+.stagecard:hover { box-shadow: 0 0 0 1px var(--muted) inset; }
+.stagecard.active { background: var(--accent-soft); box-shadow: 0 0 0 1px var(--accent) inset, 0 0 28px -10px var(--glow); }
+.stagecard .sh { display: flex; align-items: center; gap: 8px; font: 10.5px var(--mono); color: var(--muted); min-height: 22px; letter-spacing: .03em; }
+.stagecard .badge { display: inline-flex; align-items: center; gap: 5px; font: 600 10px var(--mono); color: var(--accent); }
+.stagecard .badge::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 6px var(--glow); }
+.stagecard .rm { margin-left: auto; padding: 0 6px; line-height: 20px; font-size: 15px; }
+.stagecard .xy { display: flex; flex-direction: column; gap: 2px; margin-top: 6px; }
+.stagecard label { display: flex; align-items: baseline; gap: 6px; }
+.stagecard label span { font: 10px var(--mono); color: var(--faint); width: 10px; }
+.stagecard input {
+  width: 100%; font: 600 28px/1.15 var(--display); font-variant-numeric: tabular-nums; letter-spacing: -.035em;
+  background: transparent; border: 0; border-bottom: 1px dashed transparent; border-radius: 0; color: var(--ink); padding: 0; box-shadow: none;
+  -moz-appearance: textfield;
+}
+.stagecard input::-webkit-inner-spin-button { display: none; }
+.stagecard input:hover { border-bottom-color: var(--line-strong); }
+.stagecard input:focus { outline: none; box-shadow: none; border-bottom: 1px solid var(--accent); }
+.stagecard.split input { font-size: 20px; }
+.addcard {
+  background: transparent; box-shadow: none; border: 1px dashed var(--line-strong); border-radius: 7px; color: var(--muted);
+  min-height: 92px; display: grid; place-items: center; font: 12px var(--mono);
+}
+.addcard:hover:not(:disabled) { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); box-shadow: none; }
+.stagefoot { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 14px 18px 16px; }
+.stagefoot .hint { font: 11px var(--mono); color: var(--faint); }
+.dirty { font: 11.5px var(--mono); color: var(--warn); display: inline-flex; align-items: center; gap: 6px; }
+.dirty::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--warn); animation: blink 1.2s steps(2) infinite; }
+
+/* ---------- buttons ---------- */
+.btnlayout { display: grid; grid-template-columns: 250px minmax(0, 1fr); gap: 22px; padding: 20px 18px; align-items: start; }
+@media (max-width: 720px) { .btnlayout { grid-template-columns: 1fr; } .mousefig { max-width: 240px; margin: 0 auto; } }
+.mousefig { position: sticky; top: 16px; }
+.mousefig svg { width: 100%; height: auto; display: block; overflow: visible; }
+.mousefig .body { fill: url(#shell); stroke: var(--line-strong); stroke-width: 1.2; }
+.mousefig .hs { fill: transparent; stroke: var(--line-strong); stroke-width: 1.2; cursor: pointer; transition: fill .15s, stroke .15s; }
+.mousefig .hs:hover { stroke: var(--muted); fill: var(--surface-2); }
+.mousefig .hs.changed { stroke: var(--warn); fill: var(--warn-soft); }
+.mousefig .hs.sel { stroke: var(--accent); fill: var(--accent-soft); stroke-width: 1.6; filter: drop-shadow(0 0 5px var(--glow)); }
+.mousefig .hs.flash { fill: var(--accent); stroke: var(--accent); transition: none; }
+.mousefig .hs.locked { cursor: default; }
+.mousefig .rib { stroke: var(--line-strong); stroke-width: 1; pointer-events: none; }
+.mousefig .sensor { fill: none; stroke: var(--tick); stroke-width: 1; pointer-events: none; }
+.mousefig .lead { stroke: var(--tick); stroke-width: 1; fill: none; pointer-events: none; }
+.mousefig text { font: 9px var(--mono); fill: var(--faint); pointer-events: none; letter-spacing: .03em; }
+.blist { display: flex; flex-direction: column; border-radius: 7px; overflow: hidden; box-shadow: 0 0 0 1px var(--line) inset; background: var(--surface); }
+.brow {
+  display: grid; grid-template-columns: 26px 120px minmax(0, 1fr) minmax(0, 200px); align-items: center; gap: 10px;
+  padding: 9px 12px; border-top: 1px solid var(--line); transition: background .12s;
+}
+.brow:first-child { border-top: 0; }
+.brow .ix { font: 10px var(--mono); color: var(--faint); }
+.brow.sel { background: var(--accent-soft); }
+.brow.sel .ix { color: var(--accent); }
+.brow .name { font-weight: 500; font-size: 13px; }
+.brow .cur { font: 12px var(--mono); color: var(--muted); display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; overflow-wrap: anywhere; }
+.brow .cur .tag { font: 600 9.5px var(--mono); color: var(--warn); background: var(--warn-soft); border-radius: 3px; padding: 1px 5px; letter-spacing: .03em; }
+.brow select { width: 100%; }
+.keycap {
+  font: 12px var(--mono); padding: 7px 9px; border-radius: 6px; background: var(--accent-soft); color: var(--accent); width: 100%; text-align: left;
+  box-shadow: 0 0 0 1px var(--accent) inset; animation: breathe 1.4s ease-in-out infinite;
+}
+@keyframes breathe { 50% { box-shadow: 0 0 0 1px var(--accent) inset, 0 0 14px -2px var(--glow); } }
+@media (max-width: 560px) {
+  .brow { grid-template-columns: 22px 1fr; gap: 4px 8px; }
+  .brow .cur, .brow .pick { grid-column: 2; }
+}
+.tester {
+  margin-top: 12px; border-radius: 7px; padding: 16px; text-align: center; color: var(--faint); user-select: none;
+  font: 11.5px var(--mono); cursor: crosshair; background: var(--inset);
+  background-image: radial-gradient(var(--line) 1px, transparent 1.2px); background-size: 14px 14px;
+  box-shadow: 0 0 0 1px var(--line) inset; transition: box-shadow .15s;
+}
+.tester:hover, .tester:focus { box-shadow: 0 0 0 1px var(--accent) inset; outline: none; }
+.tester b { color: var(--ink); font: 600 13px var(--mono); background: var(--surface); padding: 2px 8px; border-radius: 4px; box-shadow: 0 0 0 1px var(--line) inset; }
+.footnote { padding: 12px 18px 14px; border-top: 1px solid var(--line); font: 11.5px var(--mono); color: var(--faint); line-height: 1.6; }
+
+/* ---------- lift-off ---------- */
+.lodgrid { display: grid; grid-template-columns: 60px minmax(140px, 220px) 64px; gap: 8px 12px; align-items: center; }
+.lodgrid label { color: var(--muted); font: 11.5px var(--mono); }
+.lodgrid input[type=range] { width: 100%; }
+
+/* ---------- device ---------- */
+.kv { display: grid; grid-template-columns: max-content 1fr; gap: 10px 26px; padding: 16px 18px; font-size: 13px; margin: 0; }
+.kv dt { color: var(--muted); font: 11.5px var(--mono); padding-top: 1px; }
+.kv dd { margin: 0; font-family: var(--mono); overflow-wrap: anywhere; }
+#log {
+  font: 11px/1.6 var(--mono); max-height: 340px; overflow: auto; white-space: pre; margin: 0;
+  background: var(--inset); border-top: 1px solid var(--line); padding: 12px 18px; color: var(--muted);
+  border-radius: 0 0 var(--r) var(--r);
+}
+
+/* ---------- toast ---------- */
+#toast {
+  position: fixed; left: 50%; bottom: 22px; transform: translate(-50%, 90px); opacity: 0;
+  transition: transform .25s cubic-bezier(.2, .9, .3, 1.15), opacity .2s;
+  background: var(--surface-2); color: var(--ink); padding: 9px 14px 9px 12px; border-radius: 8px; font: 12.5px var(--mono);
+  max-width: calc(100% - 32px); box-shadow: 0 0 0 1px var(--line-strong) inset, 0 14px 34px -10px rgba(0, 0, 0, .5); z-index: 10;
+  display: flex; align-items: center; gap: 9px;
+}
+#toast::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 6px var(--glow); flex: none; }
+#toast.show { transform: translate(-50%, 0); opacity: 1; }
+#toast.err { box-shadow: 0 0 0 1px var(--bad) inset, 0 14px 34px -10px rgba(0, 0, 0, .5); }
+#toast.err::before { background: var(--bad); box-shadow: none; }
+.foot { margin-top: 28px; font: 11px var(--mono); color: var(--faint); text-align: center; letter-spacing: .02em; }
+@media (max-width: 560px) {
+  .top { gap: 10px; row-gap: 12px; }
+  .top .pill { order: 5; } .top .sync { order: 6; margin-left: auto; }
+  .brand .sub, .ghead .note { display: none; }
+  .seg { display: flex; flex-wrap: nowrap; width: 100%; }
+  .seg button { flex: 1; justify-content: center; padding: 7px 4px; }
+  .seg button:not(.sel)::before { display: none; }
+  .control > .seg { flex: 1 1 100%; }
+  .stagegrid { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); }
+  .stagecard .badge { font-size: 0; gap: 0; }
+  .tile { padding: 16px; }
+}
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div class="brand">
+      <span class="mark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M12 2.5c-4 0-6 3-6 7.5v4c0 4.5 2.5 7.5 6 7.5s6-3 6-7.5v-4c0-4.5-2-7.5-6-7.5z"/><path d="M12 2.5V9M6.2 10.5q5.8 1.6 11.6 0"/><rect x="11" y="5" width="2" height="3" rx="1" fill="currentColor"/></svg></span>
+      <div><h1>Mouse Tool</h1><div class="sub">Razer Viper V2 Pro · onboard settings</div></div>
+    </div>
+    <span class="pill" id="conn"><i class="dot"></i><span id="connText">Not connected</span></span>
+    <div class="spacer"></div>
+    <span class="sync" id="sync"></span>
+    <button class="icon ghost" id="refresh" title="Read everything from the mouse again" aria-label="Refresh" hidden>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v5h-5"/></svg>
+    </button>
+    <button id="connect" class="primary">Connect</button>
+  </header>
+
+  <!-- shown when nothing is connected -->
+  <section class="empty cm" id="empty">
+    <div class="halo"><svg viewBox="0 0 64 100" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M32 3C14 3 6 16 6 38v24c0 22 11 35 26 35s26-13 26-35V38C58 16 50 3 32 3z"/><path d="M32 3v30M6 36q26 8 52 0"/><rect x="29" y="12" width="6" height="14" rx="3"/></svg></div>
+    <h2 id="emptyTitle">Connect your mouse</h2>
+    <p id="emptyText">Plug in the HyperPolling dongle (or the cable) and press Connect. The browser asks once; after that the page reconnects by itself.</p>
+    <button class="primary" id="connect2">Connect</button>
+    <div class="banner" id="nohid" hidden>This browser has no WebHID. Open the page in Brave or Chromium; Firefox and Zen don't support it.</div>
+    <div class="banner" id="permhint" hidden>
+      The mouse showed up but the browser couldn't open it. Install the udev rule from this folder:
+      <code>sudo cp 60-razer-viper.rules /etc/udev/rules.d/</code>, reload the rules and replug the dongle.
+    </div>
+  </section>
+
+  <div id="app" hidden>
+    <section class="hero cm" aria-label="Live status">
+      <div class="tile">
+        <div class="k">DPI<span class="kx" id="hStage"></span></div>
+        <div class="v big" id="hDpi">–</div>
+        <div class="pips" id="hPips"></div>
+      </div>
+      <div class="tile">
+        <div class="k">Polling rate</div>
+        <div class="v" id="hPoll">–</div>
+        <div class="bars" id="hPollBars"></div>
+      </div>
+      <div class="tile">
+        <div class="k">Battery<span class="kx" id="hBattS"></span></div>
+        <div class="v" id="hBatt">–</div>
+        <div class="cells" id="hBattCells"></div>
+      </div>
+      <div class="tile">
+        <div class="k">Link<span class="kx"><span class="linkic"><i style="height:4px"></i><i style="height:7px"></i><i style="height:11px"></i></span></span></div>
+        <div class="v txt" id="hLink">–</div>
+        <div class="s" id="hLinkS">&nbsp;</div>
+      </div>
+    </section>
+
+    <div class="tabsbar"><nav class="tabs" role="tablist">
+      <button class="tab" role="tab" data-tab="perf" aria-selected="true"><i>01</i>Sensitivity</button>
+      <button class="tab" role="tab" data-tab="buttons"><i>02</i>Buttons</button>
+      <button class="tab" role="tab" data-tab="power"><i>03</i>Power</button>
+      <button class="tab" role="tab" data-tab="dongle" id="dongleTab"><i>04</i>Dongle</button>
+      <button class="tab" role="tab" data-tab="device"><i>05</i>Device</button>
+    </nav></div>
+
+    <!-- ===== sensitivity ===== -->
+    <div class="panel" data-panel="perf">
+      <section class="group">
+        <div class="ghead">
+          <span class="idx">01.1</span><h2>DPI stages</h2>
+          <span class="note">The DPI button on the bottom cycles through these</span>
+          <div class="spacer"></div>
+          <label class="switch"><input type="checkbox" id="splitXY"> Separate X / Y</label>
+        </div>
+        <div class="track" id="track" aria-hidden="true"></div>
+        <div class="stagegrid" id="stages"></div>
+        <div class="stagefoot">
+          <span class="hint">Click a stage to make it active · up to 5 · 100–30,000</span>
+          <div class="spacer"></div>
+          <span class="state" data-for="stages"></span>
+          <span class="dirty" id="stagesDirty" hidden>Unsaved</span>
+          <button class="ghost" id="revertStages" hidden>Revert</button>
+          <button class="primary" id="applyStages" hidden>Save stages</button>
+        </div>
+      </section>
+
+      <section class="group">
+        <div class="ghead"><span class="idx">01.2</span><h2>Tracking</h2></div>
+        <div class="setting">
+          <div class="label"><b>Polling rate</b><p id="pollHint">How often the mouse reports its position.</p></div>
+          <div class="control"><span class="state" data-for="poll"></span><div class="seg" id="poll"></div></div>
+        </div>
+        <div class="setting" id="lodRow">
+          <div class="label"><b>Lift-off distance</b><p>How high you can lift the mouse before it stops tracking. Asymmetric sets lift-off and landing separately.</p></div>
+          <div class="control">
+            <span class="state" data-for="lod"></span>
+            <div class="seg" id="lodLevel" data-role="preset"><button data-l="0">Low</button><button data-l="1">Medium</button><button data-l="2">High</button></div>
+            <div class="seg" id="lodMode"><button data-mode="preset">Preset</button><button data-mode="async">Asymmetric</button></div>
+          </div>
+          <div class="control" id="lodAsync" style="grid-column:1/-1" hidden>
+            <div class="lodgrid">
+              <label for="lodLift">Lift-off</label><input type="range" id="lodLift" min="2" max="26" step="1"><span class="readout" id="lodLiftV">–</span>
+              <label for="lodLand">Landing</label><input type="range" id="lodLand" min="1" max="25" step="1"><span class="readout" id="lodLandV">–</span>
+            </div>
+            <button class="primary" id="lodApply">Apply</button>
+          </div>
+        </div>
+        <div class="setting">
+          <div class="label"><b>One-off DPI</b><p>Jump to a DPI right now without touching your stages. The DPI button goes back to the stages.</p></div>
+          <div class="control">
+            <span class="state" data-for="dpi"></span>
+            <input type="number" id="dpiNow" min="100" max="30000" step="50" placeholder="DPI" aria-label="One-off DPI">
+            <button id="dpiNowSet">Set</button>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- ===== buttons ===== -->
+    <div class="panel" data-panel="buttons" hidden>
+      <section class="group">
+        <div class="ghead">
+          <span class="idx">02.1</span><h2>Button mapping</h2>
+          <span class="note">Stored on the mouse, works without this page</span>
+          <div class="spacer"></div>
+          <button class="ghost" id="btnResetAll">Reset all</button>
+        </div>
+        <div class="btnlayout" id="btnLayout">
+          <div class="mousefig">
+            <svg viewBox="-44 0 288 336" role="img" aria-label="Mouse diagram">
+              <defs>
+                <linearGradient id="shell" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0" style="stop-color:var(--surface-2)"/><stop offset="1" style="stop-color:var(--inset)"/>
+                </linearGradient>
+              </defs>
+              <path class="body" d="M100 10C148 10 170 48 172 108C175 190 168 258 150 296C139 318 121 326 100 326C79 326 61 318 50 296C32 258 25 190 28 108C30 48 52 10 100 10Z"/>
+              <path class="hs" data-btn="1" d="M97 10C53 12 31 50 29 108L29 140Q62 150 97 152Z"/>
+              <path class="hs" data-btn="2" d="M103 10C147 12 169 50 171 108L171 140Q138 150 103 152Z"/>
+              <rect class="hs" data-btn="3" x="91" y="46" width="18" height="40" rx="9"/>
+              <path class="rib" d="M94 56h12M94 61h12M94 66h12M94 71h12M94 76h12"/>
+              <path class="hs" data-btn="9" d="M100 26L109 37H91Z"/>
+              <path class="hs" data-btn="10" d="M100 106L109 95H91Z"/>
+              <rect class="hs" data-btn="5" x="20" y="152" width="12" height="32" rx="5"/>
+              <rect class="hs" data-btn="4" x="21" y="190" width="12" height="32" rx="5"/>
+              <circle class="hs" data-btn="96" cx="100" cy="244" r="15" stroke-dasharray="3 3"/>
+              <path class="sensor" d="M93 244h14M100 237v14"/>
+              <path class="lead" d="M19 168H-4M20 206H-4"/>
+              <text x="-8" y="171" text-anchor="end">Forward</text>
+              <text x="-8" y="209" text-anchor="end">Back</text>
+              <path class="lead" d="M115 66h79"/>
+              <text x="198" y="69">Wheel</text>
+              <path class="lead" d="M160 120h34"/>
+              <text x="198" y="123">Right</text>
+              <path class="lead" d="M40 120H-4"/>
+              <text x="-8" y="123" text-anchor="end">Left</text>
+              <text x="100" y="276" text-anchor="middle">DPI · underside</text>
+            </svg>
+          </div>
+          <div>
+            <div class="blist" id="btns"></div>
+            <div class="tester" id="tester" tabindex="0">Press buttons or scroll here to see what your PC receives · <b id="testOut">–</b></div>
+          </div>
+        </div>
+        <div class="footnote">Left click is locked so you can't lose clicking. Every change is read back, so the list always shows what the mouse actually has.</div>
+      </section>
+      <section class="group" id="btnUnavailable" hidden>
+        <div class="setting"><div class="label"><b>Button mapping unavailable</b><p>This connection didn't report any remappable buttons.</p></div></div>
+      </section>
+    </div>
+
+    <!-- ===== power ===== -->
+    <div class="panel" data-panel="power" hidden>
+      <section class="group">
+        <div class="ghead"><span class="idx">03.1</span><h2>Power</h2><span class="note">Wireless only</span></div>
+        <div class="setting">
+          <div class="label"><b>Sleep after</b><p>How long the mouse waits without movement before it goes to sleep on wireless.</p></div>
+          <div class="control">
+            <span class="state" data-for="idle"></span>
+            <input type="range" id="idle" min="1" max="15" step="1" aria-label="Sleep after (minutes)">
+            <span class="readout" id="idleVal">–</span>
+          </div>
+        </div>
+        <div class="setting">
+          <div class="label"><b>Low battery warning</b><p>The mouse blinks its battery LED below this.</p></div>
+          <div class="control">
+            <span class="state" data-for="low"></span>
+            <input type="range" id="low" min="5" max="100" step="5" aria-label="Low battery warning (percent)">
+            <span class="readout" id="lowVal">–</span>
+          </div>
+        </div>
+        <div class="setting">
+          <div class="label"><b>Charging</b><p>Whether the mouse is drawing power over the cable or dock.</p></div>
+          <div class="control"><span class="mono" id="chargeVal">–</span></div>
+        </div>
+      </section>
+    </div>
+
+    <!-- ===== dongle ===== -->
+    <div class="panel" data-panel="dongle" hidden>
+      <section class="group">
+        <div class="ghead"><span class="idx">04.1</span><h2>HyperPolling dongle</h2></div>
+        <div class="setting">
+          <div class="label"><b>Indicator LED</b><p>What the light on the HyperPolling dongle shows.</p></div>
+          <div class="control">
+            <span class="state" data-for="led"></span>
+            <div class="seg" id="dongleLed"><button data-m="1">Connection</button><button data-m="2">Battery</button><button data-m="3">Low battery only</button></div>
+          </div>
+        </div>
+        <div class="setting">
+          <div class="label"><b>Pairing</b><p>The dongle looks for a mouse by its <em>wired</em> USB ID (the V2 Pro is 00a6). Unpairing drops the wireless link until you pair again; the cable keeps working.</p></div>
+          <div class="control">
+            <select id="pairPid" aria-label="Mouse to pair">
+              <option value="00a6">Viper V2 Pro</option>
+              <option value="00b7">DeathAdder V3 Pro</option>
+              <option value="custom">Other (USB ID)…</option>
+            </select>
+            <input type="text" id="pairCustom" placeholder="00a6" maxlength="4" hidden aria-label="USB product ID">
+            <button id="pairBtn">Pair</button>
+            <button class="ghost danger" id="unpairBtn">Unpair</button>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- ===== device ===== -->
+    <div class="panel" data-panel="device" hidden>
+      <section class="group">
+        <div class="ghead"><span class="idx">05.1</span><h2>Device</h2></div>
+        <dl class="kv">
+          <dt>Link</dt><dd id="link">–</dd>
+          <dt>USB ID</dt><dd id="usbid">–</dd>
+          <dt>Firmware</dt><dd id="fw">–</dd>
+          <dt>Serial</dt><dd id="serial">–</dd>
+        </dl>
+      </section>
+      <section class="group">
+        <div class="ghead">
+          <span class="idx">05.2</span><h2>Protocol log</h2>
+          <span class="note">Every command and the mouse's reply</span>
+          <div class="spacer"></div>
+          <button class="ghost" id="logCopy">Copy</button>
+          <button class="ghost" id="logClear">Clear</button>
+        </div>
+        <pre id="log"></pre>
+      </section>
+    </div>
+    <div class="foot">Changes are written to the mouse straight away and read back to confirm. Settings re-sync every 10 s and when you come back to the window.</div>
+  </div>
+</div>
+<div id="toast" role="status"></div>
+
+<script>
+"use strict";
+// ======================================================================
+// constants
+// ======================================================================
+const VID = 0x1532;
+const PIDS = { 0x00a5: "HyperSpeed dongle", 0x00a6: "USB cable", 0x00b3: "HyperPolling dongle" };
+const PRIORITY = { 0x00a6: 0, 0x00b3: 1, 0x00a5: 2 };   // cable beats either dongle
+const HYPER = 0x00b3;
+const POLL_CODES = { 1: 1000, 2: 500, 8: 125 };
+const POLL_HZ = { 1000: 1, 500: 2, 125: 8 };
+// the hyperpolling dongle uses the newer polling command with its own codes
+const POLL2_CODES = { 0x01: 8000, 0x02: 4000, 0x04: 2000, 0x08: 1000, 0x10: 500, 0x20: 250, 0x40: 125 };
+const POLL2_HZ = Object.fromEntries(Object.entries(POLL2_CODES).map(([c, hz]) => [hz, +c]));
+const STATUS = { 0: "new", 1: "busy", 2: "ok", 3: "failed", 4: "timeout", 5: "unsupported" };
+const DPI_MIN = 100, DPI_MAX = 30000, MAX_STAGES = 5;
+
+const $ = (id) => document.getElementById(id);
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const hex = (u8) => Array.from(u8, (b) => b.toString(16).padStart(2, "0")).join(" ");
+const isHyper = () => dev?.productId === HYPER;
+const fmtHz = (hz) => hz >= 1000 ? hz / 1000 + "k" : String(hz);
+
+let dev = null;
+
+// ======================================================================
+// log + toast
+// ======================================================================
+const logLines = [];
+let logQueued = false;
+function log(s) {
+  logLines.push(new Date().toLocaleTimeString() + "  " + s);
+  if (logLines.length > 400) logLines.shift();
+  if (!logQueued && !document.querySelector('[data-panel="device"]').hidden) {
+    logQueued = true;
+    requestAnimationFrame(() => { logQueued = false; paintLog(); });
+  }
+}
+function paintLog() {
+  const el = $("log");
+  const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 30;
+  el.textContent = logLines.join("\n");
+  if (atBottom) el.scrollTop = el.scrollHeight;
+}
+$("logCopy").addEventListener("click", () => navigator.clipboard?.writeText(logLines.join("\n")).then(() => toast("Log copied")));
+$("logClear").addEventListener("click", () => { logLines.length = 0; paintLog(); });
+
+let toastT;
+function toast(msg, err = false) {
+  const t = $("toast");
+  t.textContent = msg; t.className = "show" + (err ? " err" : "");
+  clearTimeout(toastT); toastT = setTimeout(() => (t.className = ""), err ? 4200 : 2400);
+}
+
+// ======================================================================
+// protocol
+// ======================================================================
+class DevErr extends Error { constructor(msg, kind) { super(msg); this.kind = kind; } }
+
+// 90-byte razer report: status, txn, remaining(2), proto, size, class, cmd, args[80], crc, reserved
+function build(cls, cmd, size, args = [], txn = 0x1f) {
+  const r = new Uint8Array(90);
+  r[1] = txn; r[5] = size; r[6] = cls; r[7] = cmd;
+  r.set(args, 8);
+  let crc = 0;
+  for (let i = 2; i < 88; i++) crc ^= r[i];
+  r[88] = crc;
+  return r;
+}
+
+async function readReply() {
+  const dv = await dev.receiveFeatureReport(0);
+  let b = new Uint8Array(dv.buffer, dv.byteOffset, dv.byteLength);
+  if (b.length === 91) b = b.subarray(1);          // chromium prepends the report id
+  return b;
+}
+
+// The dongle answers in ~5-15 ms. Status 4 means the dongle gave up waiting for the mouse: it is asleep,
+// out of range, or just waking up, so the same command is sent again with a growing pause. Callers that
+// change settings always read the value back afterwards, so a write that "failed" but took still shows up.
+async function xferRaw(cls, cmd, size, args, txn) {
+  const req = build(cls, cmd, size, args, txn);
+  let last = null;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    if (!dev) throw new DevErr("Not connected", "offline");
+    await dev.sendFeatureReport(0, req);
+    const t0 = performance.now();
+    let wait = 10;
+    for (;;) {
+      await sleep(wait); wait = 10;
+      last = await readReply();
+      const ours = last[6] === cls && last[7] === cmd;
+      const elapsed = performance.now() - t0;
+      if (ours && last[0] >= 2) break;               // final answer
+      if (elapsed > 450) break;                       // stuck busy / never got our reply
+    }
+    const ours = last[6] === cls && last[7] === cmd;
+    log(`→ ${hex(req.subarray(0, 8 + Math.max(size, 2)))}   ← ${ours ? STATUS[last[0]] ?? last[0] : "no reply"}` +
+        (ours && last[0] === 2 ? "  " + hex(last.subarray(8, 8 + Math.min(Math.max(last[5], 2), 16))) : ""));
+    if (!ours) { await sleep(30); continue; }
+    if (last[0] === 2) return last.slice(8, 88);
+    if (last[0] === 5) throw new DevErr("Not supported by this firmware", "unsupported");
+    if (last[0] === 3) throw new DevErr("The mouse rejected the command", "failed");
+    await sleep(attempt === 0 ? 80 : 160 * attempt); // timeout or still busy: give the mouse a moment and resend
+  }
+  if (last && last[0] === 4) throw new DevErr("Mouse didn't answer — move it to wake it up", "timeout");
+  throw new DevErr("No reply from the dongle", "noreply");
+}
+
+// all traffic goes through one queue so replies never get mixed up
+let queue = Promise.resolve();
+function xfer(cls, cmd, size, args = [], txn = 0x1f) {
+  const p = queue.then(() => xferRaw(cls, cmd, size, args, txn));
+  queue = p.catch(() => {});
+  return p;
+}
+
+const api = {
+  firmware: async () => { const a = await xfer(0x00, 0x81, 0x02); return `v${a[0]}.${a[1]}`; },
+  serial: async () => {
+    const a = await xfer(0x00, 0x82, 0x16);
+    return new TextDecoder().decode(a.subarray(0, 22)).replace(/\0.*$/, "").trim();
+  },
+  battery: async () => (await xfer(0x07, 0x80, 0x02))[1] / 255 * 100,
+  charging: async () => !!(await xfer(0x07, 0x84, 0x02))[1],
+  getPoll: async () => isHyper()
+    ? POLL2_CODES[(await xfer(0x00, 0xc0, 0x01))[1]] ?? null
+    : POLL_CODES[(await xfer(0x00, 0x85, 0x01))[0]] ?? null,
+  setPoll: async (hz) => {
+    if (!isHyper()) return xfer(0x00, 0x05, 0x01, [POLL_HZ[hz]]);
+    // sent twice: once for the dongle (0x00), once for the mouse (0x01). both need txn 0x1f —
+    // the mouse half with 0xff (what openrazer uses) always comes back as a timeout on this dongle.
+    await xfer(0x00, 0x40, 0x02, [0x00, POLL2_HZ[hz]]);
+    try { await xfer(0x00, 0x40, 0x02, [0x01, POLL2_HZ[hz]]); }
+    catch (e) { log(`! polling: mouse half didn't confirm (${e.message})`); }
+  },
+  // pairing (hyperpolling dongle only), per openrazer: step 1 enters pairing mode, step 2 targets a mouse pid
+  pair: async (pid) => {
+    await xfer(0x00, 0x46, 0x01, [0x01]);
+    return xfer(0x00, 0x41, 0x03, [0x01, pid >> 8, pid & 255]);
+  },
+  unpair: (pid) => xfer(0x00, 0x42, 0x02, [pid >> 8, pid & 255], 0xff),
+  getLod: async () => {
+    for (let i = 0; i < 3; i++) {
+      const a = await xfer(0x0b, 0x85, 0x01);
+      if (a[2] === 0x01 && a[3] <= 2) return { mode: "preset", level: a[3] };
+      if (a[2] === 0x04) return { mode: "async", lift: a[4] + 1, land: a[5] + 1 };
+      await sleep(60);   // rare garbled reply; read again
+    }
+    return null;
+  },
+  // sequences from h0tc0d3/razerctl, verified on this mouse
+  setLodPreset: async (level) => {
+    await xfer(0x0b, 0x03, 0x03, [0x00, 0x04, 0x28]);
+    return xfer(0x0b, 0x0b, 0x04, [0x00, 0x04, 0x01, level]);
+  },
+  setLodAsync: async (lift, land) => {
+    await xfer(0x0b, 0x03, 0x03, [0x00, 0x04, 0x01]);
+    await xfer(0x0b, 0x0b, 0x04, [0x00, 0x04, 0x04, 0x00]);
+    return xfer(0x0b, 0x05, 0x04, [0x00, 0x04, lift - 1, land - 1]);
+  },
+  // onboard button mapping (rzDevice25, decoded by Dromares/razerctl), profile 1, normal layer (0x00)
+  buttonIds: async () => { const a = await xfer(0x02, 0x84, 0x50); return Array.from(a.subarray(1, 1 + Math.min(a[0], 20))); },
+  getButton: async (b) => {
+    const a = await xfer(0x02, 0x8c, 0x0a, [0x01, b, 0x00]);
+    return { fn: a[3], size: a[4], data: Array.from(a.subarray(5, 10)) };
+  },
+  setButton: (b, act) => {
+    const data = [...act.data, 0, 0, 0, 0, 0].slice(0, 5);
+    return xfer(0x02, 0x0c, 0x50, [0x01, b, 0x00, act.fn, act.size, ...data]);
+  },
+  getDongleLed: async () => (await xfer(0x07, 0x90, 0x01, [], 0xff))[0],
+  setDongleLed: (m) => xfer(0x07, 0x10, 0x01, [m], 0xff),
+  getDpi: async () => { const a = await xfer(0x04, 0x85, 0x07, [0x00]); return [a[1] << 8 | a[2], a[3] << 8 | a[4]]; },
+  setDpi: (x, y) => xfer(0x04, 0x05, 0x07, [0x01, x >> 8, x & 255, y >> 8, y & 255, 0, 0]),
+  getStages: async () => {
+    const a = await xfer(0x04, 0x86, 0x26, [0x01]);
+    const active = a[1], n = Math.min(a[2], MAX_STAGES), list = [];
+    for (let i = 0; i < n; i++) {
+      const o = 3 + i * 7;
+      list.push({ x: a[o + 1] << 8 | a[o + 2], y: a[o + 3] << 8 | a[o + 4] });
+    }
+    return { active, list };
+  },
+  setStages: (active, list) => {
+    const args = [0x01, active, list.length];
+    list.forEach((s, i) => args.push(i + 1, s.x >> 8, s.x & 255, s.y >> 8, s.y & 255, 0, 0));   // stage ids are 1-based
+    return xfer(0x04, 0x06, 0x26, args);
+  },
+  getIdle: async () => { const a = await xfer(0x07, 0x83, 0x02); return a[0] << 8 | a[1]; },
+  setIdle: (sec) => xfer(0x07, 0x03, 0x02, [sec >> 8, sec & 255]),
+  getLow: async () => (await xfer(0x07, 0x81, 0x01))[0],   // openrazer says txn 0xff; this mouse only answers 0x1f
+  setLow: (raw) => xfer(0x07, 0x01, 0x01, [raw]),
+};
+
+// ======================================================================
+// state: S holds what the mouse last reported. the ui only ever renders S.
+// ======================================================================
+const S = {};
+const pending = new Set();   // keys with a write in flight: background sync leaves them alone
+const held = new Set();      // controls the user is dragging right now
+let userBusy = 0;
+
+function setState(key, kind, msg = "") {
+  for (const el of document.querySelectorAll(`.state[data-for="${key}"]`)) {
+    clearTimeout(el._t);
+    el.className = "state" + (kind ? " " + kind : "");
+    el.textContent = kind === "saving" ? "Saving" : kind === "saved" ? "✓ Saved" : kind === "error" ? msg : "";
+    el.title = kind === "error" ? msg : "";
+    if (kind === "saved") el._t = setTimeout(() => setState(key, ""), 1800);
+  }
+}
+
+const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+
+// write → read back → render what the mouse reports. "saved" only if the read-back matches.
+async function commit(key, { write, read, want, eq = same, label }) {
+  userBusy++; pending.add(key); setState(key, "saving");
+  let err = null, got;
+  try { await write(); } catch (e) { err = e; log(`! ${label}: write said "${e.message}", checking…`); }
+  try { await sleep(30); got = await read(); } catch (e) { err ??= e; }
+  pending.delete(key); userBusy--;
+  if (got !== undefined && got !== null) S[key] = got;
+  render(key);
+  if (got != null && eq(got, want)) { setState(key, "saved"); markAwake(); return true; }
+  const msg = got != null ? "The mouse kept the old value" : (err?.message ?? "No answer");
+  setState(key, "error", msg);
+  toast(`${label}: ${msg[0].toLowerCase() + msg.slice(1)}`, true);
+  if (err?.kind === "timeout") setAsleep(true);
+  return false;
+}
+
+// ======================================================================
+// rendering
+// ======================================================================
+const R = {
+  dpi: renderDpi, stages: renderStagesFromDevice, poll: renderPoll, idle: renderIdle, low: renderLow,
+  lod: renderLod, led: renderLed, battery: renderBattery, charging: renderBattery,
+};
+function render(key) { if (key.startsWith("btn:")) renderButtons(); else R[key]?.(); }
+
+function renderDpi() {
+  const d = S.dpi; if (!d) return;
+  const [x, y] = d;
+  $("hDpi").innerHTML = x === y ? `${x}` : `${x}<small>x</small> ${y}<small>y</small>`;
+  renderTrack();
+}
+
+function renderPips() {
+  const st = S.stages; const wrap = $("hPips");
+  if (!st) { wrap.innerHTML = ""; return; }
+  wrap.innerHTML = st.list.map((_, i) => `<i class="${i + 1 === st.active ? "on" : ""}" title="Stage ${i + 1}"></i>`).join("");
+  wrap.title = `Stage ${st.active} of ${st.list.length}`;
+  $("hStage").textContent = `Stage ${st.active}/${st.list.length}`;
+}
+
+let pollRates = [];
+function buildPollButtons() {
+  const rates = pollRates = isHyper() ? [125, 250, 500, 1000, 2000, 4000, 8000] : [125, 500, 1000];
+  $("poll").innerHTML = rates.map((hz) => `<button data-hz="${hz}">${fmtHz(hz)}</button>`).join("");
+  $("pollHint").textContent = isHyper()
+    ? "How often the mouse reports its position (Hz). Above 1k costs battery and some CPU; 2k–4k is the sweet spot."
+    : "How often the mouse reports its position (Hz). 1000 is the max on this link — the HyperPolling dongle goes to 8k.";
+}
+function renderPoll() {
+  const hz = S.poll;
+  for (const b of $("poll").children) { b.classList.toggle("sel", +b.dataset.hz === hz); b.classList.remove("want"); }
+  $("hPoll").innerHTML = hz ? `${hz >= 1000 ? hz / 1000 + "k" : hz}<small>Hz · ${+(1000 / hz).toFixed(3)} ms</small>` : "–";
+  const at = pollRates.indexOf(hz);
+  $("hPollBars").innerHTML = pollRates.map((_, i) =>
+    `<i class="${i <= at ? "on" : ""}${i === at ? " cur" : ""}" style="height:${30 + i * (70 / Math.max(1, pollRates.length - 1))}%"></i>`).join("");
+}
+
+function renderBattery() {
+  const pct = S.battery, ch = S.charging;
+  if (pct != null) {
+    $("hBatt").innerHTML = `${Math.round(pct)}<small>%</small>`;
+    const lit = Math.max(1, Math.ceil(pct / 10));
+    $("hBattCells").innerHTML = Array.from({ length: 10 }, (_, i) => `<i class="${i < lit ? "on" + (pct < 20 ? " low" : "") : ""}"></i>`).join("");
+  }
+  if (ch != null) $("hBattS").textContent = ch ? "⚡ Charging" : "";
+  if (ch != null) $("chargeVal").textContent = ch ? "Charging" : "On battery";
+}
+
+function paintRanges() {
+  for (const el of document.querySelectorAll('input[type="range"]'))
+    el.style.setProperty("--p", ((el.value - el.min) / (el.max - el.min) * 100) + "%");
+}
+document.addEventListener("input", (e) => { if (e.target.type === "range") requestAnimationFrame(paintRanges); });
+function renderIdle() {
+  if (S.idle == null || held.has("idle")) return;
+  const m = Math.max(1, Math.round(S.idle / 60));
+  $("idle").value = m; $("idleVal").textContent = `${m} min`; paintRanges();
+}
+function renderLow() {
+  if (S.low == null || held.has("low")) return;
+  const p = Math.round(S.low / 255 * 100);
+  $("low").value = p; $("lowVal").textContent = `${p}%`; paintRanges();
+}
+function renderLed() {
+  for (const b of $("dongleLed").children) b.classList.toggle("sel", +b.dataset.m === S.led);
+}
+
+// ---------- lift-off ----------
+let lodDraft = null;   // asymmetric values being edited before apply
+function renderLod() {
+  const s = S.lod;
+  $("lodRow").hidden = !s;
+  if (!s) return;
+  const mode = lodDraft ? "async" : s.mode;
+  for (const b of $("lodMode").children) b.classList.toggle("sel", b.dataset.mode === mode);
+  $("lodLevel").hidden = mode !== "preset";
+  $("lodAsync").hidden = mode !== "async";
+  for (const b of $("lodLevel").children) b.classList.toggle("sel", s.mode === "preset" && +b.dataset.l === s.level);
+  if (mode === "async" && !held.has("lod")) {
+    const v = lodDraft ?? s;
+    $("lodLift").value = v.lift; $("lodLand").value = v.land; lodLabels(); paintRanges();
+  }
+}
+function lodLabels() { $("lodLiftV").textContent = $("lodLift").value; $("lodLandV").textContent = $("lodLand").value; paintRanges(); }
+
+// ---------- dpi stages ----------
+let stagesEdit = null;   // pending edit, null when clean
+const curStages = () => stagesEdit ?? S.stages ?? { active: 1, list: [] };
+const stagesDirty = () => !!stagesEdit && !!S.stages && !same(stagesEdit, S.stages);
+
+function renderStagesFromDevice() {
+  if (stagesEdit && S.stages && same(stagesEdit, S.stages)) stagesEdit = null;
+  renderPips();
+  const typing = $("stages").contains(document.activeElement) && document.activeElement.tagName === "INPUT";
+  if (!stagesEdit && !typing) {
+    if (S.stages?.list.some((s) => s.x !== s.y)) $("splitXY").checked = true;
+    renderStages();
+  } else { markDirty(); renderTrack(); }
+}
+
+const logPos = (v) => (Math.log(v) - Math.log(DPI_MIN)) / (Math.log(DPI_MAX) - Math.log(DPI_MIN)) * 100;
+function renderTrack() {
+  const st = curStages();
+  const ticks = [100, 400, 800, 1600, 3200, 6400, 12800, 30000];
+  let h = '<div class="rail"></div>';
+  h += ticks.map((t, i) => `<span class="tl" style="left:${logPos(t)}%"></span><span class="tick${[400, 1600, 6400, 12800].includes(t) ? " minor" : ""}${i === 0 ? " first" : i === ticks.length - 1 ? " last" : ""}" style="left:${logPos(t)}%">${t >= 1000 ? t / 1000 + "k" : t}</span>`).join("");
+  if (S.dpi) h += `<span class="live" style="left:${logPos(S.dpi[0])}%" title="Current: ${S.dpi[0]}"></span>`;
+  st.list.forEach((s, i) => { h += `<span class="mark${st.active === i + 1 ? " active" : ""}" style="left:${logPos(clampDpi(s.x) ?? DPI_MIN)}%" title="Stage ${i + 1}: ${s.x}">${i + 1}</span>`; });
+  $("track").innerHTML = h;
+}
+
+function renderStages() {
+  const st = curStages();
+  const split = $("splitXY").checked;
+  const wrap = $("stages");
+  wrap.innerHTML = "";
+  st.list.forEach((s, i) => {
+    const card = document.createElement("div");
+    const active = st.active === i + 1;
+    card.className = "stagecard" + (active ? " active" : "") + (split ? " split" : "");
+    card.innerHTML = `
+      <div class="sh">Stage ${String(i + 1).padStart(2, "0")}${active ? ' <span class="badge">Active</span>' : ""}
+        <button class="ghost rm" aria-label="Remove stage ${i + 1}" ${st.list.length <= 1 ? "hidden" : ""}>×</button></div>
+      <div class="xy">
+        <label>${split ? "<span>X</span>" : ""}<input type="number" inputmode="numeric" data-k="x" min="${DPI_MIN}" max="${DPI_MAX}" step="50" value="${s.x}" aria-label="Stage ${i + 1} ${split ? "X " : ""}DPI"></label>
+        ${split ? `<label><span>Y</span><input type="number" inputmode="numeric" data-k="y" min="${DPI_MIN}" max="${DPI_MAX}" step="50" value="${s.y}" aria-label="Stage ${i + 1} Y DPI"></label>` : ""}
+      </div>`;
+    card.addEventListener("click", (e) => {
+      if (e.target.closest("input, button")) return;
+      if (curStages().active === i + 1) return;
+      edit().active = i + 1; renderStages();
+    });
+    card.querySelectorAll("input").forEach((inp) => {
+      inp.addEventListener("input", () => {
+        const v = parseInt(inp.value, 10);
+        if (Number.isNaN(v)) return;
+        const e = edit();
+        if (inp.dataset.k === "x") { e.list[i].x = v; if (!split) e.list[i].y = v; } else e.list[i].y = v;
+        markDirty(); renderTrack();
+      });
+      inp.addEventListener("keydown", (e) => { if (e.key === "Enter" && stagesDirty()) $("applyStages").click(); });
+      inp.addEventListener("blur", () => {           // snap to range when leaving the field
+        const v = clampDpi(inp.value);
+        if (v != null && String(v) !== inp.value) { inp.value = v; inp.dispatchEvent(new Event("input")); }
+      });
+    });
+    card.querySelector(".rm").addEventListener("click", () => {
+      const e = edit();
+      e.list.splice(i, 1);
+      if (e.active > e.list.length) e.active = e.list.length;
+      else if (e.active > i + 1) e.active--;
+      renderStages();
+    });
+    wrap.appendChild(card);
+  });
+  if (st.list.length < MAX_STAGES) {
+    const add = document.createElement("button");
+    add.className = "addcard"; add.textContent = "+ Add stage";
+    add.addEventListener("click", () => {
+      const e = edit();
+      const last = e.list[e.list.length - 1] ?? { x: 400, y: 400 };
+      e.list.push({ x: Math.min(DPI_MAX, last.x * 2), y: Math.min(DPI_MAX, last.y * 2) });
+      renderStages();
+      wrap.querySelectorAll(".stagecard")[e.list.length - 1]?.querySelector("input")?.select();
+    });
+    wrap.appendChild(add);
+  }
+  markDirty(); renderTrack();
+}
+function edit() { if (!stagesEdit) stagesEdit = structuredClone(S.stages ?? { active: 1, list: [] }); return stagesEdit; }
+function markDirty() {
+  const d = stagesDirty();
+  $("stagesDirty").hidden = !d; $("applyStages").hidden = !d; $("revertStages").hidden = !d;
+}
+function clampDpi(v) {
+  const n = parseInt(v, 10);
+  return Number.isNaN(n) ? null : Math.max(DPI_MIN, Math.min(DPI_MAX, n));
+}
+
+// ======================================================================
+// buttons
+// ======================================================================
+const BTN_NAMES = { 1: "Left click", 2: "Right click", 3: "Middle click", 4: "Back", 5: "Forward",
+  0x60: "DPI button", 9: "Wheel up", 10: "Wheel down" };
+const BTN_ORDER = [1, 2, 3, 9, 10, 5, 4, 0x60];
+const MOUSE_CODES = { 1: "Left click", 2: "Right click", 3: "Middle click", 4: "Back", 5: "Forward",
+  9: "Wheel up", 10: "Wheel down", 0x68: "Wheel left", 0x69: "Wheel right" };
+const DPI_FNS = { 1: "DPI up", 2: "DPI down", 5: "DPI clutch", 6: "DPI cycle up", 7: "DPI cycle down" };
+const MEDIA = { 0xe9: "Volume up", 0xea: "Volume down", 0xe2: "Mute", 0xcd: "Play / pause", 0xb5: "Next track", 0xb6: "Previous track" };
+const MODS = [[0x01, "Ctrl"], [0x02, "Shift"], [0x04, "Alt"], [0x08, "Super"], [0x10, "Right Ctrl"], [0x20, "Right Shift"], [0x40, "Right Alt"], [0x80, "Right Super"]];
+const MOD_CODES = { ControlLeft: 0x01, ShiftLeft: 0x02, AltLeft: 0x04, MetaLeft: 0x08, ControlRight: 0x10, ShiftRight: 0x20, AltRight: 0x40, MetaRight: 0x80 };
+// KeyboardEvent.code -> HID keyboard usage
+const HID = (() => {
+  const m = {};
+  for (let i = 0; i < 26; i++) m["Key" + String.fromCharCode(65 + i)] = 0x04 + i;
+  for (let i = 1; i <= 9; i++) m["Digit" + i] = 0x1d + i;
+  m.Digit0 = 0x27;
+  for (let i = 1; i <= 12; i++) m["F" + i] = 0x39 + i;
+  for (let i = 13; i <= 24; i++) m["F" + i] = 0x68 + (i - 13);
+  Object.assign(m, { Enter: 0x28, Escape: 0x29, Backspace: 0x2a, Tab: 0x2b, Space: 0x2c, Minus: 0x2d, Equal: 0x2e,
+    BracketLeft: 0x2f, BracketRight: 0x30, Backslash: 0x31, Semicolon: 0x33, Quote: 0x34, Backquote: 0x35, Comma: 0x36,
+    Period: 0x37, Slash: 0x38, CapsLock: 0x39, PrintScreen: 0x46, ScrollLock: 0x47, Pause: 0x48, Insert: 0x49, Home: 0x4a,
+    PageUp: 0x4b, Delete: 0x4c, End: 0x4d, PageDown: 0x4e, ArrowRight: 0x4f, ArrowLeft: 0x50, ArrowDown: 0x51, ArrowUp: 0x52,
+    NumLock: 0x53, NumpadDivide: 0x54, NumpadMultiply: 0x55, NumpadSubtract: 0x56, NumpadAdd: 0x57, NumpadEnter: 0x58,
+    Numpad1: 0x59, Numpad2: 0x5a, Numpad3: 0x5b, Numpad4: 0x5c, Numpad5: 0x5d, Numpad6: 0x5e, Numpad7: 0x5f, Numpad8: 0x60,
+    Numpad9: 0x61, Numpad0: 0x62, NumpadDecimal: 0x63, ContextMenu: 0x65 });
+  return m;
+})();
+const HID_NAME = Object.fromEntries(Object.entries(HID).map(([code, u]) => [u, code.replace(/^Key|^Digit/, "").replace(/([a-z])([A-Z0-9])/g, "$1 $2")]));
+
+const defaultFor = (b) => b === 0x60 ? { fn: 6, size: 1, data: [6] } : { fn: 1, size: 1, data: [b] };
+const sameAction = (a, w) => a.fn === w.fn && Array.from({ length: w.size }, (_, i) => (w.data[i] ?? 0) === a.data[i]).every(Boolean);
+const isDefault = (b, a) => sameAction(a, defaultFor(b));
+
+function describe(a) {
+  const d = a.data;
+  switch (a.fn) {
+    case 0: return "Disabled";
+    case 1: return MOUSE_CODES[d[0]] ?? `Mouse code ${d[0]}`;
+    case 2: {
+      const mods = MODS.filter(([bit]) => d[0] & bit).map(([, n]) => n);
+      return (d[1] ? [...mods, HID_NAME[d[1]] ?? `Key 0x${d[1].toString(16)}`] : mods).join(" + ") || "Key";
+    }
+    case 6: return DPI_FNS[d[0]] ?? `DPI function ${d[0]}`;
+    case 10: { const u = d[0] << 8 | d[1]; return MEDIA[u] ?? `Media 0x${u.toString(16)}`; }
+    case 11: return "Double click";
+    case 12: return "HyperShift";
+    case 13: case 14: return "Turbo";
+    default: return `Function ${a.fn} [${d.slice(0, a.size).join(",")}]`;
+  }
+}
+
+// actions offered in the picker: [value, label, mapping]
+const ACTIONS = [
+  ["default", "Factory default"],
+  ["off", "Disabled", { fn: 0, size: 0, data: [] }],
+  ...[1, 2, 3, 4, 5, 9, 10, 0x68, 0x69].map((c) => [`m${c}`, MOUSE_CODES[c], { fn: 1, size: 1, data: [c] }]),
+  ["dbl", "Double click", { fn: 11, size: 1, data: [1] }],
+  ...[6, 7, 1, 2].map((c) => [`d${c}`, DPI_FNS[c], { fn: 6, size: 1, data: [c] }]),
+  ...Object.entries(MEDIA).map(([u, n]) => [`v${u}`, n, { fn: 10, size: 2, data: [+u >> 8, +u & 255] }]),
+  ["key", "Keyboard key…"],
+];
+const ACTION_GROUPS = [["", ["default", "off"]], ["Mouse", ["m1", "m2", "m3", "m4", "m5", "m9", "m10", "m104", "m105", "dbl"]],
+  ["DPI", ["d6", "d7", "d1", "d2"]], ["Media", Object.keys(MEDIA).map((u) => "v" + u)], ["Keyboard", ["key"]]];
+
+S.buttons = {};
+let btnSel = null, capturing = null, lastButtons = 0;
+
+async function loadButtons() {
+  lastButtons = Date.now();
+  let ids;
+  try { ids = await api.buttonIds(); } catch (e) { log("! button ids: " + e.message); }
+  if (!ids) return;   // keep what we had
+  $("btnLayout").parentElement.hidden = !ids.length;
+  $("btnUnavailable").hidden = !!ids.length;
+  const next = {};
+  for (const b of ids) {
+    if (pending.has(`btn:${b}`)) { next[b] = S.buttons[b]; continue; }
+    try { next[b] = await api.getButton(b); } catch (e) { log(`! button ${b}: ${e.message}`); if (S.buttons[b]) next[b] = S.buttons[b]; }
+  }
+  S.buttons = next;
+  renderButtons();
+}
+
+function renderButtons() {
+  if (capturing) return;   // don't tear down the key-capture box
+  const wrap = $("btns");
+  const ids = Object.keys(S.buttons).map(Number).sort((a, b) => (BTN_ORDER.indexOf(a) + 99) % 99 - (BTN_ORDER.indexOf(b) + 99) % 99);
+  wrap.innerHTML = "";
+  for (const b of ids) {
+    const a = S.buttons[b]; if (!a) continue;
+    const def = isDefault(b, a), locked = b === 1;
+    const row = document.createElement("div");
+    row.className = "brow" + (btnSel === b ? " sel" : "");
+    row.dataset.btn = b;
+    const opts = ACTION_GROUPS.map(([g, vals]) => {
+      const o = vals.map((v) => ACTIONS.find((x) => x[0] === v)).filter(Boolean).map(([v, n]) => `<option value="${v}">${n}</option>`).join("");
+      return g ? `<optgroup label="${g}">${o}</optgroup>` : o;
+    }).join("");
+    row.innerHTML = `
+      <span class="ix">${String(ids.indexOf(b) + 1).padStart(2, "0")}</span>
+      <span class="name">${BTN_NAMES[b] ?? "Button " + b}</span>
+      <span class="cur"><span>${describe(a)}</span>${def ? "" : '<span class="tag">Changed</span>'}<span class="state" data-for="btn:${b}"></span></span>
+      <div class="pick">${locked ? '<span class="muted" style="font-size:12px">Locked</span>'
+        : `<select aria-label="New action for ${BTN_NAMES[b] ?? b}"><option value="">Change to…</option>${opts}</select>`}</div>`;
+    row.addEventListener("mouseenter", () => selectBtn(b, false));
+    if (!locked) {
+      const sel = row.querySelector("select");
+      sel.addEventListener("focus", () => selectBtn(b, false));
+      sel.addEventListener("change", () => {
+        const v = sel.value; if (!v) return;
+        if (v === "key") { captureKey(row, b); return; }
+        applyButton(b, v === "default" ? defaultFor(b) : ACTIONS.find((x) => x[0] === v)[2]);
+      });
+    }
+    wrap.appendChild(row);
+  }
+  for (const hs of document.querySelectorAll(".mousefig .hs")) {
+    const b = +hs.dataset.btn, a = S.buttons[b];
+    hs.classList.toggle("changed", !!a && !isDefault(b, a));
+    hs.classList.toggle("sel", btnSel === b);
+    hs.classList.toggle("locked", b === 1);
+    hs.style.opacity = a ? "" : ".35";
+    let t = hs.querySelector("title"); if (!t) { t = document.createElementNS("http://www.w3.org/2000/svg", "title"); hs.appendChild(t); }
+    t.textContent = `${BTN_NAMES[b]}: ${a ? describe(a) : "–"}`;
+  }
+}
+function selectBtn(b, focus) {
+  btnSel = b;
+  for (const r of $("btns").children) r.classList.toggle("sel", +r.dataset.btn === b);
+  for (const hs of document.querySelectorAll(".mousefig .hs")) hs.classList.toggle("sel", +hs.dataset.btn === b);
+  if (focus) $("btns").querySelector(`[data-btn="${b}"] select`)?.focus();
+}
+for (const hs of document.querySelectorAll(".mousefig .hs")) {
+  hs.addEventListener("click", () => selectBtn(+hs.dataset.btn, true));
+  hs.addEventListener("mouseenter", () => selectBtn(+hs.dataset.btn, false));
+}
+
+function captureKey(row, b) {
+  const pick = row.querySelector(".pick");
+  pick.innerHTML = '<button class="keycap">Press a key or combo… (Esc cancels)</button>';
+  const cap = pick.firstElementChild;
+  capturing = b; cap.focus();
+  const done = () => {
+    capturing = null;
+    window.removeEventListener("keydown", onKey, true); window.removeEventListener("keyup", onUp, true);
+  };
+  const onKey = (e) => {
+    e.preventDefault(); e.stopPropagation();
+    if (e.code === "Escape" && !e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey) { done(); renderButtons(); return; }
+    if (MOD_CODES[e.code] !== undefined) { cap.textContent = e.code.replace(/Left|Right/, "").replace("Meta", "Super").replace("Control", "Ctrl") + " + …"; return; }
+    const usage = HID[e.code];
+    if (usage === undefined) { cap.textContent = `"${e.code}" isn't supported, try another key`; return; }
+    const mods = (e.ctrlKey ? 1 : 0) | (e.shiftKey ? 2 : 0) | (e.altKey ? 4 : 0) | (e.metaKey ? 8 : 0);
+    done(); applyButton(b, { fn: 2, size: 2, data: [mods, usage] });
+  };
+  const onUp = (e) => {   // a modifier pressed and released on its own becomes the key
+    if (MOD_CODES[e.code] === undefined) return;
+    e.preventDefault(); done(); applyButton(b, { fn: 2, size: 2, data: [MOD_CODES[e.code], 0] });
+  };
+  window.addEventListener("keydown", onKey, true);
+  window.addEventListener("keyup", onUp, true);
+  cap.addEventListener("blur", () => { if (capturing === b) { done(); renderButtons(); } });
+}
+
+function applyButton(b, act) {
+  return commit(`btn:${b}`, {
+    label: BTN_NAMES[b] ?? `Button ${b}`, want: act,
+    write: () => api.setButton(b, act),
+    read: async () => { const a = await api.getButton(b); S.buttons[b] = a; return a; },
+    eq: (got) => sameAction(got, act),
+  }).then((ok) => { if (ok) toast(`${BTN_NAMES[b] ?? b} → ${describe(S.buttons[b])}`); renderButtons(); return ok; });
+}
+
+$("btnResetAll").addEventListener("click", async () => {
+  const changed = Object.keys(S.buttons).map(Number).filter((b) => S.buttons[b] && !isDefault(b, S.buttons[b]));
+  if (!changed.length) { toast("All buttons are already at their defaults"); return; }
+  if (!confirm(`Reset ${changed.length} button${changed.length === 1 ? "" : "s"} to factory default?`)) return;
+  for (const b of changed) await applyButton(b, defaultFor(b));
+});
+
+// tester: shows what the computer receives and lights up the matching spot on the drawing
+(() => {
+  const t = $("tester"), out = $("testOut");
+  const names = ["Left", "Middle", "Right", "Back", "Forward"], ids = [1, 3, 2, 4, 5];
+  const flash = (b) => {
+    const hs = document.querySelector(`.mousefig .hs[data-btn="${b}"]`); if (!hs) return;
+    hs.classList.add("flash"); clearTimeout(hs._f); hs._f = setTimeout(() => hs.classList.remove("flash"), 180);
+  };
+  t.addEventListener("contextmenu", (e) => e.preventDefault());
+  t.addEventListener("mousedown", (e) => { e.preventDefault(); t.focus(); out.textContent = (names[e.button] ?? "Button " + e.button) + " click"; flash(ids[e.button]); });
+  t.addEventListener("auxclick", (e) => e.preventDefault());
+  t.addEventListener("wheel", (e) => {
+    e.preventDefault();
+    const horiz = Math.abs(e.deltaX) > Math.abs(e.deltaY);
+    out.textContent = horiz ? (e.deltaX > 0 ? "Wheel right" : "Wheel left") : (e.deltaY > 0 ? "Wheel down" : "Wheel up");
+    if (!horiz) flash(e.deltaY > 0 ? 10 : 9);
+  }, { passive: false });
+  t.addEventListener("keydown", (e) => {
+    const k = [e.ctrlKey && "Ctrl", e.shiftKey && "Shift", e.altKey && "Alt", e.metaKey && "Super"].filter(Boolean);
+    if (!MOD_CODES[e.code]) k.push(e.code.replace(/^Key|^Digit/, ""));
+    out.textContent = "Key " + k.join(" + ");
+    if (e.code !== "Tab") e.preventDefault();
+  });
+  // back/forward would otherwise navigate the page
+  window.addEventListener("mouseup", (e) => { if (e.button === 3 || e.button === 4) e.preventDefault(); });
+})();
+
+// ======================================================================
+// background sync: the ui follows the mouse, so changes from the dpi button,
+// synapse on another os, or a write that reported an error all show up without refreshing
+// ======================================================================
+const FAST = ["dpi", "stages"];
+const SLOW = ["poll", "lod", "idle", "low", "led", "battery", "charging"];
+const READ = {
+  dpi: api.getDpi, stages: api.getStages, poll: api.getPoll, lod: api.getLod, idle: api.getIdle, low: api.getLow,
+  led: () => isHyper() ? api.getDongleLed() : undefined, battery: api.battery, charging: api.charging,
+};
+let syncP = null, lastSlow = 0, lastOk = 0, asleep = false, timer = null;
+
+async function doSync(keys) {
+  let ok = 0, timeouts = 0;
+  for (const k of keys) {
+    if (!dev) return;
+    while (userBusy) await sleep(40);    // user writes go first
+    if (pending.has(k)) continue;
+    try {
+      const v = await READ[k]();
+      if (v !== undefined && !pending.has(k)) { S[k] = v; render(k); }
+      ok++;
+    } catch (e) {
+      if (e.kind === "timeout") timeouts++;
+      log(`! ${k}: ${e.message}`);
+    }
+  }
+  if (ok) markAwake(); else if (timeouts) setAsleep(true);
+}
+async function sync(keys) {
+  while (syncP) await syncP.catch(() => {});
+  syncP = doSync(keys);
+  try { await syncP; } finally { syncP = null; }
+}
+function syncSlowToo() { lastSlow = Date.now(); return sync([...FAST, ...SLOW]); }
+
+function markAwake() { lastOk = Date.now(); if (asleep) setAsleep(false); renderSyncLabel(); }
+function setAsleep(v) {
+  asleep = v;
+  $("conn").className = "pill " + (v ? "sleep" : "on");
+  $("connText").textContent = v ? "Mouse asleep — move it" : PIDS[dev?.productId] ?? "Connected";
+}
+function renderSyncLabel() {
+  if (!dev) { $("sync").textContent = ""; return; }
+  const s = Math.round((Date.now() - lastOk) / 1000);
+  $("sync").textContent = lastOk ? (s < 3 ? "In sync" : `Synced ${s}s ago`) : "";
+}
+
+function startTimer() {
+  clearInterval(timer);
+  let n = 0;
+  timer = setInterval(() => {
+    renderSyncLabel();
+    if (!dev || document.hidden || syncP || userBusy || ++n % 2) return;      // every 2 s
+    if (Date.now() - lastSlow > 10000) syncSlowToo(); else sync(FAST);
+  }, 1000);
+}
+function onReturn() {
+  if (!dev || document.hidden) return;
+  if (Date.now() - lastSlow > 1500) syncSlowToo();
+  if (Date.now() - lastButtons > 20000) loadButtons();
+}
+document.addEventListener("visibilitychange", onReturn);
+window.addEventListener("focus", onReturn);
+
+async function readAll() {
+  if (!dev) return;
+  $("link").textContent = PIDS[dev.productId] ?? "Unknown";
+  $("usbid").textContent = `${dev.vendorId.toString(16).padStart(4, "0")}:${dev.productId.toString(16).padStart(4, "0")}`;
+  $("hLink").textContent = PIDS[dev.productId] ?? "Unknown";
+  buildPollButtons();
+  $("dongleTab").hidden = !isHyper();
+  if (!isHyper() && activeTab === "dongle") showTab("perf");
+  await syncSlowToo();
+  const fw = await api.firmware().catch(() => null);
+  $("fw").textContent = fw ?? "–";
+  $("hLinkS").textContent = fw ? `Firmware ${fw}` : "";
+  $("serial").textContent = (await api.serial().catch(() => "")) || "–";
+  await loadButtons();
+}
+
+// ======================================================================
+// connection
+// ======================================================================
+function pickControl(devices) {
+  const ours = devices.filter((d) => d.vendorId === VID && PIDS[d.productId] &&
+    d.collections.some((c) => c.featureReports && c.featureReports.length));
+  ours.sort((a, b) => PRIORITY[a.productId] - PRIORITY[b.productId]);
+  return ours[0] ?? null;
+}
+
+function showConnected(on) {
+  $("app").hidden = !on; $("empty").hidden = on;
+  $("refresh").hidden = !on;
+  $("connect").textContent = on ? "Disconnect" : "Connect";
+  $("connect").className = on ? "ghost" : "primary";
+  if (!on) { $("conn").className = "pill"; renderSyncLabel(); }
+  paintRanges();
+}
+
+async function attach(d) {
+  try { if (!d.opened) await d.open(); }
+  catch (e) {
+    log("! open failed: " + e.message);
+    $("permhint").hidden = false;
+    $("connText").textContent = "Couldn't open the device";
+    return;
+  }
+  $("permhint").hidden = true;
+  dev = d;
+  for (const k of Object.keys(S)) delete S[k];
+  S.buttons = {}; stagesEdit = null; lodDraft = null; lastOk = 0;
+  showConnected(true);
+  setAsleep(false);
+  await readAll();
+  startTimer();
+}
+
+async function detach(msg) {
+  clearInterval(timer);
+  const d = dev; dev = null;
+  if (d?.opened) await d.close().catch(() => {});
+  showConnected(false);
+  $("connText").textContent = "Not connected";
+  $("emptyTitle").textContent = msg ?? "Connect your mouse";
+  $("emptyText").textContent = msg ? "Plug it back in, or switch between the cable and the dongle — the page picks it up by itself."
+    : "Plug in the HyperPolling dongle (or the cable) and press Connect. The browser asks once; after that the page reconnects by itself.";
+}
+
+async function connectClick() {
+  if (dev) { await detach(); return; }
+  try {
+    const picked = await navigator.hid.requestDevice({
+      filters: Object.keys(PIDS).map((p) => ({ vendorId: VID, productId: +p })),
+    });
+    const d = pickControl([...picked, ...(await navigator.hid.getDevices())]);
+    if (!d) { if (picked.length) toast("No control interface found on that device", true); return; }
+    await attach(d);
+  } catch (e) { toast(e.message, true); }
+}
+$("connect").addEventListener("click", connectClick);
+$("connect2").addEventListener("click", connectClick);
+$("refresh").addEventListener("click", async () => {
+  const b = $("refresh"); b.disabled = true;
+  await readAll();
+  b.disabled = false; toast("Read everything from the mouse");
+});
+
+if (!("hid" in navigator)) {
+  $("nohid").hidden = false;
+  $("connect").disabled = $("connect2").disabled = true;
+} else {
+  navigator.hid.addEventListener("disconnect", (e) => { if (dev && e.device === dev) detach("mouse disconnected"); });
+  navigator.hid.addEventListener("connect", async () => {
+    if (dev) return;
+    await sleep(800);   // let all interfaces enumerate
+    const d = pickControl(await navigator.hid.getDevices());
+    if (d && !dev) attach(d);
+  });
+  navigator.hid.getDevices().then((ds) => { const d = pickControl(ds); if (d) attach(d); });
+}
+
+// ======================================================================
+// tabs
+// ======================================================================
+let activeTab = "perf";
+function showTab(name) {
+  activeTab = name;
+  for (const t of document.querySelectorAll(".tab")) t.setAttribute("aria-selected", t.dataset.tab === name);
+  for (const p of document.querySelectorAll(".panel")) p.hidden = p.dataset.panel !== name;
+  if (name === "device") paintLog();
+  try { localStorage.setItem("viper.tab", name); } catch {}
+}
+for (const t of document.querySelectorAll(".tab")) t.addEventListener("click", () => showTab(t.dataset.tab));
+try { const t = localStorage.getItem("viper.tab"); if (t && document.querySelector(`[data-panel="${t}"]`)) showTab(t); } catch {}
+
+// ======================================================================
+// controls
+// ======================================================================
+$("poll").addEventListener("click", (e) => {
+  const b = e.target.closest("button"); if (!b) return;
+  const hz = +b.dataset.hz; if (hz === S.poll && !pending.has("poll")) return;
+  for (const x of $("poll").children) x.classList.toggle("want", x === b);
+  commit("poll", { label: "Polling rate", want: hz, write: () => api.setPoll(hz), read: api.getPoll });
+});
+
+$("dongleLed").addEventListener("click", (e) => {
+  const b = e.target.closest("button"); if (!b) return;
+  const m = +b.dataset.m; if (m === S.led) return;
+  commit("led", { label: "Dongle LED", want: m, write: () => api.setDongleLed(m), read: api.getDongleLed });
+});
+
+// lift-off
+$("lodLift").addEventListener("input", () => { held.add("lod"); if (+$("lodLand").value >= +$("lodLift").value) $("lodLand").value = +$("lodLift").value - 1; lodLabels(); lodDraft = { mode: "async", lift: +$("lodLift").value, land: +$("lodLand").value }; });
+$("lodLand").addEventListener("input", () => { held.add("lod"); if (+$("lodLift").value <= +$("lodLand").value) $("lodLift").value = +$("lodLand").value + 1; lodLabels(); lodDraft = { mode: "async", lift: +$("lodLift").value, land: +$("lodLand").value }; });
+for (const id of ["lodLift", "lodLand"]) $(id).addEventListener("change", () => held.delete("lod"));
+$("lodMode").addEventListener("click", (e) => {
+  const mode = e.target.closest("button")?.dataset.mode; if (!mode) return;
+  if (mode === "preset") {
+    lodDraft = null;
+    if (S.lod?.mode === "preset") { renderLod(); return; }
+    setLod({ mode: "preset", level: 0 }, "Lift-off: low");
+    return;
+  }
+  if (S.lod?.mode === "async") return;
+  lodDraft = { mode: "async", lift: 3, land: 2 };   // show sliders; nothing is sent until apply
+  renderLod();
+});
+$("lodLevel").addEventListener("click", (e) => {
+  const b = e.target.closest("button"); if (!b) return;
+  setLod({ mode: "preset", level: +b.dataset.l }, "Lift-off: " + b.textContent.toLowerCase());
+});
+$("lodApply").addEventListener("click", () => {
+  const lift = +$("lodLift").value, land = +$("lodLand").value;
+  setLod({ mode: "async", lift, land }, `Lift-off ${lift}, landing ${land}`);
+});
+async function setLod(want, msg) {
+  const ok = await commit("lod", {
+    label: "Lift-off", want,
+    write: () => want.mode === "preset" ? api.setLodPreset(want.level) : api.setLodAsync(want.lift, want.land),
+    read: async () => { await sleep(40); return api.getLod(); },
+  });
+  if (ok) { lodDraft = null; renderLod(); toast(msg); }
+}
+
+// pairing
+function pairPid() {
+  const v = $("pairPid").value === "custom" ? $("pairCustom").value.trim() : $("pairPid").value;
+  return /^[0-9a-f]{1,4}$/i.test(v) ? parseInt(v, 16) : null;
+}
+$("pairPid").addEventListener("change", () => { $("pairCustom").hidden = $("pairPid").value !== "custom"; });
+$("pairBtn").addEventListener("click", async () => {
+  const pid = pairPid(); if (pid == null) { toast("Enter a 4-digit hex USB ID", true); return; }
+  try {
+    await api.pair(pid);
+    toast("Pairing started — switch the mouse on if it isn't");
+    await sleep(3000); await readAll();
+  } catch (err) { toast(err.message, true); }
+});
+$("unpairBtn").addEventListener("click", async () => {
+  const pid = pairPid(); if (pid == null) { toast("Enter a 4-digit hex USB ID", true); return; }
+  if (!confirm(`Unpair ${pid.toString(16).padStart(4, "0")} from the dongle? The mouse stops working wirelessly until you pair it again.`)) return;
+  try { await api.unpair(pid); toast("Unpaired"); } catch (err) { toast(err.message, true); }
+});
+
+// one-off dpi
+$("dpiNowSet").addEventListener("click", async () => {
+  const v = clampDpi($("dpiNow").value); if (v == null) { $("dpiNow").focus(); return; }
+  $("dpiNow").value = v;
+  if (await commit("dpi", { label: "DPI", want: [v, v], write: () => api.setDpi(v, v), read: api.getDpi })) toast(`DPI set to ${v}`);
+});
+$("dpiNow").addEventListener("keydown", (e) => { if (e.key === "Enter") $("dpiNowSet").click(); });
+
+// stages
+$("splitXY").addEventListener("change", () => {
+  if (!$("splitXY").checked) { const e = edit(); e.list.forEach((s) => (s.y = s.x)); }
+  renderStages();
+});
+$("revertStages").addEventListener("click", () => { stagesEdit = null; renderStages(); });
+$("applyStages").addEventListener("click", async () => {
+  const e = edit();
+  const want = { active: e.active, list: e.list.map((s) => ({ x: clampDpi(s.x) ?? 800, y: clampDpi(s.y) ?? 800 })) };
+  stagesEdit = want;
+  const ok = await commit("stages", { label: "DPI stages", want, write: () => api.setStages(want.active, want.list), read: api.getStages });
+  if (ok) { stagesEdit = null; renderStages(); toast("DPI stages saved"); }
+  // on failure the edit stays on screen so nothing typed is lost; the error sits next to the save button
+  // keep the live dpi readout honest after a stage change
+  api.getDpi().then((d) => { S.dpi = d; renderDpi(); }).catch(() => {});
+});
+
+// sliders: commit on release, ignore background updates while dragging
+function slider(id, key, label, fmt, toDevice, read, write, want2) {
+  const el = $(id);
+  el.addEventListener("input", () => { held.add(key); $(id + "Val").textContent = fmt(+el.value); });
+  el.addEventListener("change", async () => {
+    held.delete(key);
+    const v = +el.value, raw = toDevice(v);
+    if (raw === S[key]) return;
+    await commit(key, { label, want: raw, write: () => write(raw), read, eq: want2 });
+  });
+}
+slider("idle", "idle", "Sleep timer", (m) => `${m} min`, (m) => m * 60, api.getIdle, api.setIdle);
+slider("low", "low", "Low battery warning", (p) => `${p}%`, (p) => Math.max(0x0c, Math.min(0xff, Math.round(p / 100 * 255))), api.getLow, api.setLow);
+</script>
+</body>
+</html>

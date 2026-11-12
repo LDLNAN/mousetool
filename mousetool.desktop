@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Mouse Tool
+GenericName=Mouse Settings
+Comment=Configure the Razer Viper V2 Pro (DPI, polling, buttons, lift-off, battery)
+Exec=brave --app=file:///home/lucasdonald/src/viper-web/index.html
+Icon=/home/lucasdonald/src/viper-web/icon.svg
+Terminal=false
+Categories=Settings;HardwareSettings;Utility;
+Keywords=razer;mouse;viper;dpi;synapse;polling;
+StartupNotify=true
