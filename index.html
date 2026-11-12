@@ -418,7 +418,7 @@ input[type=range]:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px va
   <header class="top">
     <div class="brand">
       <span class="mark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M12 2.5c-4 0-6 3-6 7.5v4c0 4.5 2.5 7.5 6 7.5s6-3 6-7.5v-4c0-4.5-2-7.5-6-7.5z"/><path d="M12 2.5V9M6.2 10.5q5.8 1.6 11.6 0"/><rect x="11" y="5" width="2" height="3" rx="1" fill="currentColor"/></svg></span>
-      <div><h1>Mouse Tool</h1><div class="sub">Razer Viper V2 Pro · onboard settings</div></div>
+      <div><h1>Mouse Tool</h1><div class="sub">Onboard mouse settings</div></div>
     </div>
     <span class="pill" id="conn"><i class="dot"></i><span id="connText">Not connected</span></span>
     <div class="spacer"></div>
@@ -438,7 +438,7 @@ input[type=range]:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px va
     <div class="banner" id="nohid" hidden>This browser has no WebHID. Open the page in Brave or Chromium; Firefox and Zen don't support it.</div>
     <div class="banner" id="permhint" hidden>
       The mouse showed up but the browser couldn't open it. Install the udev rule from this folder:
-      <code>sudo cp 60-razer-viper.rules /etc/udev/rules.d/</code>, reload the rules and replug the dongle.
+      <code>sudo cp 60-mousetool.rules /etc/udev/rules.d/</code>, reload the rules and replug the dongle.
     </div>
   </section>
 
@@ -1455,10 +1455,10 @@ function showTab(name) {
   for (const t of document.querySelectorAll(".tab")) t.setAttribute("aria-selected", t.dataset.tab === name);
   for (const p of document.querySelectorAll(".panel")) p.hidden = p.dataset.panel !== name;
   if (name === "device") paintLog();
-  try { localStorage.setItem("viper.tab", name); } catch {}
+  try { localStorage.setItem("mousetool.tab", name); } catch {}
 }
 for (const t of document.querySelectorAll(".tab")) t.addEventListener("click", () => showTab(t.dataset.tab));
-try { const t = localStorage.getItem("viper.tab"); if (t && document.querySelector(`[data-panel="${t}"]`)) showTab(t); } catch {}
+try { const t = localStorage.getItem("mousetool.tab") || localStorage.getItem("viper.tab"); if (t && document.querySelector(`[data-panel="${t}"]`)) showTab(t); } catch {}
 
 // ======================================================================
 // controls

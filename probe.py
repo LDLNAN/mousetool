@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Read-only probe for the Razer Viper V2 Pro over hidraw.
+"""Read-only probe for mouse HID feature reports over hidraw.
 
 Sends the same 90-byte feature reports the web page uses and prints the
 decoded replies, so the protocol can be checked without a browser.
@@ -29,7 +29,7 @@ def find_node():
         rd = open(f"{d}/device/report_descriptor", "rb").read()
         if b"\x95\x5a\xb1" in rd:  # 90-byte feature report = control interface
             return "/dev/" + os.path.basename(d), PIDS[int(p, 16)], int(p, 16)
-    sys.exit("viper v2 pro control interface not found")
+    sys.exit("mouse control interface not found")
 
 
 def build(cls, cmd, size, args=(), txn=0x1F):
