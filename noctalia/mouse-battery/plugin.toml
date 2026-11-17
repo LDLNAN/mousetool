@@ -1,0 +1,11 @@
+id = "mousetool/battery"
+name = "Mouse battery"
+version = "1.0.0"
+plugin_api = 43
+author = "mousetool"
+icon = "mouse"
+description = "Mouse battery from Mouse Tool (mousetool.py battery); click opens Mouse Tool."
+
+[[widget]]
+id = "battery"
+entry = "widget.luau"
