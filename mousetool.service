@@ -1,0 +1,12 @@
+[Unit]
+Description=Mouse Tool local helper API (maccel & niri)
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/env python3 /home/lucasdonald/Documents/GitHub/mousetool/mousetool.py serve
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=default.target
