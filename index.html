@@ -590,7 +590,32 @@ input[type=range]:focus-visible::-webkit-slider-thumb { border-color: var(--acce
 .empty-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 
 /* ---------- acceleration ---------- */
-.curvewrap { padding: 14px 14px 8px; }
+.curvewrap { padding: 12px 14px 8px; }
+.curvetop {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap;
+  margin-bottom: 8px; font: 11.5px var(--mono); color: var(--muted);
+}
+.livebadge {
+  display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px; border-radius: 999px;
+  border: 1px solid var(--line); background: var(--inset); color: var(--muted); font-size: 11px;
+  white-space: nowrap;
+}
+.livebadge .livedot { width: 6px; height: 6px; border-radius: 50%; background: var(--faint); flex: none; }
+.livebadge.on { color: var(--ink); border-color: var(--line-strong); }
+.livebadge.on .livedot { background: var(--ok); }
+.livebadge.fallback { color: var(--warn); border-color: var(--warn); background: var(--warn-soft); }
+.livebadge.fallback .livedot { background: var(--warn); }
+.livereadout {
+  display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  color: var(--ink); font-variant-numeric: tabular-nums;
+}
+.livereadout b { font-weight: 600; }
+.livereadout .lv-now b { color: var(--ok); }
+.livereadout .lv-peak b { color: var(--warn); }
+.livereadout .lv-sep { color: var(--faint); }
+.livereadout .lv-dim { color: var(--faint); }
+.livereadout .lv-over { color: var(--warn); font-weight: 700; }
+.livereadout .lv-now .lv-over { color: var(--ok); }
 .curvesvg {
   width: 100%; height: auto; display: block; border-radius: var(--r);
   background: var(--inset); border: 1px solid var(--line);
@@ -601,6 +626,20 @@ input[type=range]:focus-visible::-webkit-slider-thumb { border-color: var(--acce
 .curvesvg .line-x { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .curvesvg .line-y { fill: none; stroke: var(--muted); stroke-width: 1.5; stroke-dasharray: 5 3; }
 .curvesvg .area-x { fill: var(--accent-soft); }
+.curvesvg .swipe-band { fill: var(--warn); fill-opacity: .11; }
+.curvesvg .swipe-trail { fill: none; stroke: var(--warn); stroke-width: 3.5; stroke-linecap: round; stroke-linejoin: round; opacity: .92; }
+.curvesvg .swipe-trail-y { fill: none; stroke: var(--warn); stroke-width: 2; stroke-dasharray: 4 3; opacity: .72; }
+.curvesvg .peak-line { stroke: var(--warn); stroke-width: 1.25; stroke-dasharray: 3 3; opacity: .88; }
+.curvesvg .peak-dot { fill: var(--warn); stroke: var(--surface); stroke-width: 1.5; }
+.curvesvg .peak-dot-y { fill: var(--surface); stroke: var(--warn); stroke-width: 1.5; }
+.curvesvg .live-line { stroke: var(--ok); stroke-width: 1.25; opacity: .78; }
+.curvesvg .live-halo { fill: var(--ok); fill-opacity: .22; }
+.curvesvg .live-dot { fill: var(--ok); stroke: var(--surface); stroke-width: 1.75; }
+.curvesvg .live-dot-y { fill: var(--surface); stroke: var(--ok); stroke-width: 1.75; }
+.curvesvg .over-pill { fill: var(--surface); stroke: var(--warn); stroke-width: 1; }
+.curvesvg .over-txt { font: 600 9.5px var(--mono); fill: var(--warn); }
+.curvesvg .over-pill.live { stroke: var(--ok); }
+.curvesvg .over-txt.live { fill: var(--ok); }
 .curvesvg .cross { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 2 3; }
 .curvesvg .dot-x { fill: var(--accent); stroke: var(--surface); stroke-width: 1.5; }
 .curvemeta {
@@ -610,6 +649,8 @@ input[type=range]:focus-visible::-webkit-slider-thumb { border-color: var(--acce
 .curvemeta .legend { display: inline-flex; align-items: center; gap: 6px; }
 .curvemeta .sw { width: 12px; height: 2px; background: var(--accent); }
 .curvemeta .sw.y { background: var(--muted); }
+.curvemeta .sw.live { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); }
+.curvemeta .sw.peak { width: 7px; height: 7px; transform: rotate(45deg); background: var(--warn); }
 .curvemeta .probe { margin-left: auto; color: var(--ink); font-variant-numeric: tabular-nums; }
 .accelbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 10px 14px 12px; border-top: 1px solid var(--line); }
 .accelnotice {
@@ -1091,10 +1132,20 @@ input[type=range]:focus-visible::-webkit-slider-thumb { border-color: var(--acce
           </div>
 
           <div class="curvewrap">
+            <div class="curvetop">
+              <span class="livebadge" id="accelLiveBadge" title="Live mouse motion telemetry"><i class="livedot"></i><span id="accelLiveSrc">Idle</span></span>
+              <div class="livereadout" id="accelLiveReadout">
+                <span class="lv-now">Now: <b>0.0</b> c/ms → <b>1.00×</b></span>
+                <span class="lv-sep">·</span>
+                <span class="lv-peak lv-dim">Peak: —</span>
+              </div>
+            </div>
             <svg class="curvesvg" id="accelSvg" viewBox="0 0 640 240" role="img" aria-label="Acceleration sensitivity curve"></svg>
             <div class="curvemeta">
-              <span class="legend"><i class="sw"></i> X sensitivity</span>
-              <span class="legend" id="accelLegendY" hidden><i class="sw y"></i> Y sensitivity</span>
+              <span class="legend"><i class="sw"></i> X sens</span>
+              <span class="legend" id="accelLegendY" hidden><i class="sw y"></i> Y sens</span>
+              <span class="legend"><i class="sw live"></i> Live</span>
+              <span class="legend"><i class="sw peak"></i> Swipe peak</span>
               <span>X max:</span>
               <div class="seg" id="accelXMax">
                 <button data-x="20">20</button>
@@ -4390,6 +4441,7 @@ function showConnected(on, accelOnly = false) {
   if (!on) { $("conn").className = "pill"; renderSyncLabel(); }
   if (accelOnly && !on) showTab("accel");
   paintRanges();
+  if (typeof syncAccelMotion === "function") syncAccelMotion();
 }
 
 const vpFilter = (k) => { const [v, p] = k.split(":").map((x) => parseInt(x, 16)); return { vendorId: v, productId: p }; };
@@ -4508,6 +4560,7 @@ function showTab(name) {
   for (const p of document.querySelectorAll(".panel")) p.hidden = p.dataset.panel !== name;
   if (name === "device") paintLog();
   if (name === "accel") loadAccel();
+  if (typeof syncAccelMotion === "function") syncAccelMotion();
   try { localStorage.setItem("mousetool.tab", name); } catch {}
 }
 for (const t of document.querySelectorAll(".tab")) t.addEventListener("click", () => { if (!t.disabled) showTab(t.dataset.tab); });
@@ -4942,13 +4995,400 @@ function renderAccelCurve() {
   const pathY = hasY ? pts.map(([x, , sy], i) => `${i ? "L" : "M"}${px(x).toFixed(1)},${py(sy).toFixed(1)}`).join(" ") : "";
 
   g += `<path class="area-x" d="${areaX}"/>`;
+  g += `<g id="accelSwipeGroup" style="display:none">`;
+  g += `<rect class="swipe-band" id="accelSwipeBand" x="${L}" y="${T}" width="0" height="${PH}"/>`;
+  g += `<path class="swipe-trail-y" id="accelSwipeTrailY" d="" style="display:none"/>`;
+  g += `<path class="swipe-trail" id="accelSwipeTrail" d=""/>`;
+  g += `</g>`;
   if (hasY) g += `<path class="line-y" d="${pathY}"/>`;
   g += `<path class="line-x" d="${pathX}"/>`;
-  g += `<line class="cross" id="accelCross" x1="0" y1="${T}" x2="0" y2="${H - B}" hidden/>`;
-  g += `<circle class="dot-x" id="accelDot" cx="0" cy="0" r="4" hidden/>`;
+  g += `<g id="accelPeakGroup" style="display:none">`;
+  g += `<line class="peak-line" id="accelPeakLine" x1="0" y1="${T}" x2="0" y2="${H - B}"/>`;
+  g += `<circle class="peak-dot-y" id="accelPeakDotY" cx="0" cy="0" r="3.5" style="display:none"/>`;
+  g += `<polygon class="peak-dot" id="accelPeakDot" points="0,0"/>`;
+  g += `<g id="accelPeakOver" style="display:none"><rect class="over-pill" rx="3" x="0" y="0" width="44" height="15"/><text class="over-txt" x="0" y="0" text-anchor="end"></text></g>`;
+  g += `</g>`;
+  g += `<g id="accelLiveGroup" style="display:none">`;
+  g += `<line class="live-line" id="accelLiveLine" x1="0" y1="${T}" x2="0" y2="${H - B}"/>`;
+  g += `<circle class="live-halo" id="accelLiveHalo" cx="0" cy="0" r="9" style="display:none"/>`;
+  g += `<circle class="live-dot-y" id="accelLiveDotY" cx="0" cy="0" r="3.5" style="display:none"/>`;
+  g += `<circle class="live-dot" id="accelLiveDot" cx="0" cy="0" r="4.5"/>`;
+  g += `<g id="accelLiveOver" style="display:none"><rect class="over-pill live" rx="3" x="0" y="0" width="44" height="15"/><text class="over-txt live" x="0" y="0" text-anchor="end"></text></g>`;
+  g += `</g>`;
+  g += `<line class="cross" id="accelCross" x1="0" y1="${T}" x2="0" y2="${H - B}" style="display:none"/>`;
+  g += `<circle class="dot-x" id="accelDot" cx="0" cy="0" r="4" style="display:none"/>`;
   svg.innerHTML = g;
-  svg._geom = { W, H, L, R, T, B, PW, PH, px, py };
+  svg._geom = { W, H, L, R, T, B, PW, PH, yMin, yMax, hasY, px, py };
+  renderAccelLiveOverlay();
 }
+
+function _svgShow(el, on) {
+  if (el) el.style.display = on ? "" : "none";
+}
+
+var accelMotion = {
+  es: null,
+  retryTimer: null,
+  rafId: 0,
+  ptrRafId: 0,
+  ptrOn: false,
+  connected: false,
+  state: {
+    speed: 0, raw_speed: 0, peak: 0, peak_age_ms: 0, peak_hold_ms: 2800,
+    swipe_min: 0, swipe_max: 0, swipe_id: 0, active: false, dpi: 1000, source: "none", devices: 0,
+  },
+  ptr: { lastTs: 0, lastEv: 0, lastMot: 0, speed: 0, peak: 0, peakTs: 0, min: 0, max: 0, inSwipe: false, swipeId: 0 },
+};
+
+function setAccelLiveBadge(mode, text, title) {
+  const badge = $("accelLiveBadge");
+  const label = $("accelLiveSrc");
+  if (!badge || !label) return;
+  badge.className = "livebadge" + (mode ? ` ${mode}` : "");
+  label.textContent = text;
+  if (title) badge.title = title;
+}
+
+function _placeOverPill(grp, text, g, cy) {
+  const rect = grp.querySelector("rect");
+  const txt = grp.querySelector("text");
+  txt.textContent = text;
+  const w = Math.max(42, text.length * 6.2 + 10);
+  const h = 15;
+  const rx = g.W - g.R - w - 6;
+  const ry = Math.max(g.T + 2, Math.min(g.H - g.B - h - 2, cy - h / 2));
+  rect.setAttribute("x", rx.toFixed(1));
+  rect.setAttribute("y", ry.toFixed(1));
+  rect.setAttribute("width", w.toFixed(1));
+  rect.setAttribute("height", h);
+  txt.setAttribute("x", (rx + w - 4).toFixed(1));
+  txt.setAttribute("y", (ry + 10.5).toFixed(1));
+  _svgShow(grp, true);
+  return ry;
+}
+
+function renderAccelLiveOverlay() {
+  const svg = $("accelSvg");
+  const g = svg?._geom;
+  if (!g || !accelDraft || !accelMotion) return;
+
+  const st = accelMotion.state;
+  const isPtr = st.source === "pointer";
+  const streamDpi = st.dpi > 0 ? st.dpi : 1000;
+  const draftDpi = accelDraft.INPUT_DPI > 0 ? accelDraft.INPUT_DPI : streamDpi;
+  const dpiScale = isPtr ? 1 : (streamDpi / draftDpi);
+
+  const speed = Math.max(0, (st.speed || 0) * dpiScale);
+  const peak = Math.max(0, (st.peak || 0) * dpiScale);
+  const swipeMin = Math.max(0, (st.swipe_min || 0) * dpiScale);
+  const swipeMax = Math.max(0, (st.swipe_max || 0) * dpiScale);
+
+  const [nowSx, nowSy] = maccelEval(Math.max(0.05, speed), accelDraft);
+  const hasPeak = peak > 0.05;
+  const [peakSx, peakSy] = hasPeak ? maccelEval(Math.max(0.05, peak), accelDraft) : [0, 0];
+  const clampY = (y) => Math.max(g.T, Math.min(g.H - g.B, y));
+
+  const holdMs = st.peak_hold_ms || 2800;
+  const remMs = Math.max(0, holdMs - (st.peak_age_ms || 0));
+  const fade = st.active ? 1 : Math.max(0.18, Math.min(1, remMs / 500));
+
+  // Swipe band + highlighted curve segment
+  const swipeGrp = $("accelSwipeGroup");
+  if (swipeGrp) {
+    if (hasPeak) {
+      const lo = Math.min(accelXMax, Math.max(0, Math.min(swipeMin, peak)));
+      const hi = Math.min(accelXMax, Math.max(lo, Math.max(swipeMax, peak)));
+      const x1 = g.px(lo), x2 = g.px(hi);
+      const band = $("accelSwipeBand");
+      band.setAttribute("x", x1.toFixed(1));
+      band.setAttribute("width", Math.max(2, x2 - x1).toFixed(1));
+
+      const steps = 36;
+      const dX = [], dY = [];
+      for (let i = 0; i <= steps; i++) {
+        const xv = Math.max(0.05, lo + (i / steps) * (hi - lo));
+        const [sx, sy] = maccelEval(xv, accelDraft);
+        const cmd = i ? "L" : "M";
+        dX.push(`${cmd}${g.px(xv).toFixed(1)},${clampY(g.py(sx)).toFixed(1)}`);
+        if (g.hasY) dY.push(`${cmd}${g.px(xv).toFixed(1)},${clampY(g.py(sy)).toFixed(1)}`);
+      }
+      $("accelSwipeTrail").setAttribute("d", dX.join(" "));
+      const trailY = $("accelSwipeTrailY");
+      if (g.hasY) trailY.setAttribute("d", dY.join(" "));
+      _svgShow(trailY, g.hasY);
+      swipeGrp.style.opacity = fade.toFixed(2);
+      _svgShow(swipeGrp, true);
+    } else {
+      _svgShow(swipeGrp, false);
+    }
+  }
+
+  // Peak hold marker
+  let peakPillY = null;
+  const peakGrp = $("accelPeakGroup");
+  if (peakGrp) {
+    if (hasPeak) {
+      const peakOver = peak > accelXMax;
+      const pxVal = Math.min(peak, accelXMax);
+      const [pPlotSx, pPlotSy] = maccelEval(Math.max(0.05, pxVal), accelDraft);
+      const pcx = g.px(pxVal), pcy = clampY(g.py(pPlotSx)), pcyY = clampY(g.py(pPlotSy));
+      const pl = $("accelPeakLine");
+      pl.setAttribute("x1", pcx.toFixed(1)); pl.setAttribute("x2", pcx.toFixed(1));
+      const d = 5;
+      $("accelPeakDot").setAttribute(
+        "points",
+        `${pcx.toFixed(1)},${(pcy - d).toFixed(1)} ${(pcx + d).toFixed(1)},${pcy.toFixed(1)} ${pcx.toFixed(1)},${(pcy + d).toFixed(1)} ${(pcx - d).toFixed(1)},${pcy.toFixed(1)}`
+      );
+      const pdY = $("accelPeakDotY");
+      if (g.hasY) {
+        pdY.setAttribute("cx", pcx.toFixed(1)); pdY.setAttribute("cy", pcyY.toFixed(1));
+      }
+      _svgShow(pdY, g.hasY);
+      const pOver = $("accelPeakOver");
+      if (peakOver) {
+        peakPillY = _placeOverPill(pOver, `>${peak.toFixed(1)} ▸`, g, pcy);
+      } else {
+        _svgShow(pOver, false);
+      }
+      peakGrp.style.opacity = fade.toFixed(2);
+      _svgShow(peakGrp, true);
+    } else {
+      _svgShow(peakGrp, false);
+    }
+  }
+
+  // Live current-position marker
+  const liveGrp = $("accelLiveGroup");
+  if (liveGrp) {
+    if (accelMotion.connected) {
+      const moving = speed >= 0.05;
+      const liveOver = speed > accelXMax;
+      const lxVal = Math.min(speed, accelXMax);
+      const [lPlotSx, lPlotSy] = maccelEval(Math.max(0.05, lxVal), accelDraft);
+      const lcx = g.px(lxVal), lcy = clampY(g.py(lPlotSx)), lcyY = clampY(g.py(lPlotSy));
+      const ll = $("accelLiveLine");
+      ll.setAttribute("x1", lcx.toFixed(1)); ll.setAttribute("x2", lcx.toFixed(1));
+      const halo = $("accelLiveHalo");
+      halo.setAttribute("cx", lcx.toFixed(1)); halo.setAttribute("cy", lcy.toFixed(1));
+      halo.setAttribute("r", (8 + Math.min(4, speed / 15)).toFixed(1));
+      _svgShow(halo, moving);
+      const dot = $("accelLiveDot");
+      dot.setAttribute("cx", lcx.toFixed(1)); dot.setAttribute("cy", lcy.toFixed(1));
+      const dotY = $("accelLiveDotY");
+      if (g.hasY) {
+        dotY.setAttribute("cx", lcx.toFixed(1)); dotY.setAttribute("cy", lcyY.toFixed(1));
+      }
+      _svgShow(dotY, g.hasY);
+      const lOver = $("accelLiveOver");
+      if (liveOver) {
+        let targetY = lcy;
+        if (peakPillY !== null && Math.abs((targetY - 7.5) - peakPillY) < 18) {
+          targetY = peakPillY + 26 <= g.H - g.B - 10 ? peakPillY + 25.5 : peakPillY - 10.5;
+        }
+        _placeOverPill(lOver, `>${speed.toFixed(1)} ▸`, g, targetY);
+      } else {
+        _svgShow(lOver, false);
+      }
+      liveGrp.style.opacity = moving ? "1" : "0.48";
+      _svgShow(liveGrp, true);
+    } else {
+      _svgShow(liveGrp, false);
+    }
+  }
+
+  // Telemetry numeric readout
+  const ro = $("accelLiveReadout");
+  if (ro) {
+    const nowOverTag = speed > accelXMax ? `<span class="lv-over">&gt;</span>` : "";
+    const nowYTag = g.hasY ? ` <span class="lv-dim">(Y ${nowSy.toFixed(2)}×)</span>` : "";
+    const nowHtml = `<span class="lv-now">Now: ${nowOverTag}<b>${speed.toFixed(1)}</b> c/ms → <b>${nowSx.toFixed(2)}×</b>${nowYTag}</span>`;
+    let peakHtml;
+    if (hasPeak) {
+      const peakOverTag = peak > accelXMax ? `<span class="lv-over">&gt;</span>` : "";
+      const peakYTag = g.hasY ? ` <span class="lv-dim">(Y ${peakSy.toFixed(2)}×)</span>` : "";
+      peakHtml = `<span class="lv-peak">Peak: ${peakOverTag}<b>${peak.toFixed(1)}</b> c/ms → <b>${peakSx.toFixed(2)}×</b>${peakYTag}</span>`;
+    } else {
+      peakHtml = `<span class="lv-peak lv-dim">Peak: —</span>`;
+    }
+    ro.innerHTML = `${nowHtml}<span class="lv-sep">·</span>${peakHtml}`;
+  }
+}
+
+function scheduleAccelOverlay() {
+  if (accelMotion.rafId) return;
+  accelMotion.rafId = requestAnimationFrame(() => {
+    accelMotion.rafId = 0;
+    renderAccelLiveOverlay();
+  });
+}
+
+function _ptrTick() {
+  accelMotion.ptrRafId = 0;
+  if (!accelMotion.ptrOn) return;
+  const p = accelMotion.ptr;
+  const now = performance.now();
+  const idleMs = p.lastEv ? (now - p.lastEv) : 1e9;
+  let curSpeed = 0;
+  let active = false;
+  if (idleMs <= 45) {
+    curSpeed = p.speed;
+    active = curSpeed > 0.05;
+  } else if (p.speed > 0) {
+    curSpeed = p.speed * Math.exp(-(idleMs - 45) / 35);
+    if (curSpeed < 0.05) { curSpeed = 0; p.speed = 0; p.inSwipe = false; }
+  }
+  if (idleMs >= 220) p.inSwipe = false;
+  let peakAge = 0;
+  if (p.peak > 0 && p.peakTs) {
+    peakAge = Math.max(0, now - p.peakTs);
+    if (!active && peakAge >= 2800) {
+      p.peak = 0; p.min = 0; p.max = 0; p.peakTs = 0; peakAge = 0;
+    }
+  }
+  accelMotion.state = {
+    speed: curSpeed, raw_speed: active ? curSpeed : 0, peak: p.peak,
+    peak_age_ms: Math.round(peakAge), peak_hold_ms: 2800,
+    swipe_min: p.min, swipe_max: p.max, swipe_id: p.swipeId,
+    active, dpi: accelDraft?.INPUT_DPI || 1000, source: "pointer", devices: 0,
+  };
+  renderAccelLiveOverlay();
+  if (active || curSpeed > 0 || p.peak > 0) {
+    accelMotion.ptrRafId = requestAnimationFrame(_ptrTick);
+  }
+}
+
+function _onPointerMotion(e) {
+  if (!accelMotion.ptrOn) return;
+  const p = accelMotion.ptr;
+  const evs = typeof e.getCoalescedEvents === "function" ? e.getCoalescedEvents() : [e];
+  const list = evs.length ? evs : [e];
+  let moved = false;
+  for (const ev of list) {
+    const ts = ev.timeStamp || performance.now();
+    const dx = ev.movementX || 0, dy = ev.movementY || 0;
+    if (p.lastTs > 0 && (dx !== 0 || dy !== 0)) {
+      const dt = ts - p.lastTs;
+      if (dt > 0 && dt < 250) {
+        const inst = Math.hypot(dx, dy) / dt;
+        const now = performance.now();
+        const gap = p.lastEv ? (now - p.lastEv) : 1e9;
+        if (p.speed <= 0.05 || gap >= 45) p.speed = inst;
+        else p.speed += (1 - Math.exp(-Math.max(0.1, dt) / 10)) * (inst - p.speed);
+        p.lastEv = now;
+        if (p.speed >= 0.35) {
+          const isNew = (!p.inSwipe && (!p.lastMot || now - p.lastMot >= 220)) || p.peak <= 0;
+          if (isNew) {
+            p.swipeId++; p.peak = p.speed; p.peakTs = now; p.min = p.speed; p.max = p.speed; p.inSwipe = true;
+          } else {
+            p.inSwipe = true;
+            if (p.speed > p.peak) p.peak = p.speed;
+            p.peakTs = now;
+            p.min = Math.min(p.min, p.speed);
+            p.max = Math.max(p.max, p.speed);
+          }
+          p.lastMot = now;
+        }
+        moved = true;
+      }
+    }
+    p.lastTs = ts;
+  }
+  if (moved && !accelMotion.ptrRafId) accelMotion.ptrRafId = requestAnimationFrame(_ptrTick);
+}
+
+function enablePointerFallback(reason) {
+  if (accelMotion.ptrOn) return;
+  accelMotion.ptrOn = true;
+  accelMotion.connected = true;
+  accelMotion.ptr = { lastTs: 0, lastEv: 0, lastMot: 0, speed: 0, peak: 0, peakTs: 0, min: 0, max: 0, inSwipe: false, swipeId: 0 };
+  accelMotion.state = {
+    speed: 0, raw_speed: 0, peak: 0, peak_age_ms: 0, peak_hold_ms: 2800,
+    swipe_min: 0, swipe_max: 0, swipe_id: 0, active: false, dpi: accelDraft?.INPUT_DPI || 1000, source: "pointer", devices: 0,
+  };
+  window.addEventListener("pointermove", _onPointerMotion, { passive: true });
+  setAccelLiveBadge("fallback", "Window only", reason || "Fallback: browser pointermove (window-only)");
+  scheduleAccelOverlay();
+}
+
+function disablePointerFallback() {
+  if (!accelMotion.ptrOn) return;
+  accelMotion.ptrOn = false;
+  window.removeEventListener("pointermove", _onPointerMotion);
+  if (accelMotion.ptrRafId) { cancelAnimationFrame(accelMotion.ptrRafId); accelMotion.ptrRafId = 0; }
+}
+
+function shouldStreamMotion() {
+  return !document.hidden
+    && activeTab === "accel"
+    && !$("app").hidden
+    && !$("accelBody").hidden
+    && !!accelDraft;
+}
+
+function stopAccelMotion() {
+  if (!accelMotion) return;
+  if (accelMotion.retryTimer) { clearTimeout(accelMotion.retryTimer); accelMotion.retryTimer = null; }
+  if (accelMotion.es) { accelMotion.es.close(); accelMotion.es = null; }
+  disablePointerFallback();
+  if (accelMotion.rafId) { cancelAnimationFrame(accelMotion.rafId); accelMotion.rafId = 0; }
+  accelMotion.connected = false;
+  accelMotion.state.speed = 0;
+  accelMotion.state.active = false;
+  setAccelLiveBadge("", "Idle", "Live telemetry pauses when leaving the Acceleration tab");
+  renderAccelLiveOverlay();
+}
+
+function startAccelMotion() {
+  if (!accelMotion || !shouldStreamMotion()) return;
+  if (accelMotion.es) return;
+  if (accelMotion.retryTimer) { clearTimeout(accelMotion.retryTimer); accelMotion.retryTimer = null; }
+  setAccelLiveBadge("", "Connecting…", "Connecting to local helper motion stream");
+  const es = new EventSource(`${HELPER}/api/motion`);
+  accelMotion.es = es;
+  es.onmessage = (ev) => {
+    if (accelMotion.es !== es) return;
+    let data;
+    try { data = JSON.parse(ev.data); } catch { return; }
+    if (data.source === "none") {
+      es.close();
+      accelMotion.es = null;
+      enablePointerFallback("No /dev/input or /dev/maccel read permission — using window-only pointermove fallback");
+      return;
+    }
+    disablePointerFallback();
+    accelMotion.connected = true;
+    accelMotion.state = data;
+    const devs = data.devices || 0;
+    if (data.source === "maccel+evdev") {
+      setAccelLiveBadge("on", "Live · evdev", `Kernel pre-accel speed (/dev/maccel) + ${devs} evdev mouse device${devs === 1 ? "" : "s"}`);
+    } else if (data.source === "evdev") {
+      setAccelLiveBadge("on", "Live · evdev", `Raw evdev mouse motion (${devs} device${devs === 1 ? "" : "s"})`);
+    } else if (data.source === "maccel") {
+      setAccelLiveBadge("on", "Live · maccel", "Kernel pre-accel speed via /dev/maccel");
+    }
+    scheduleAccelOverlay();
+  };
+  es.onerror = () => {
+    if (accelMotion.es !== es) return;
+    es.close();
+    accelMotion.es = null;
+    if (!shouldStreamMotion()) return;
+    enablePointerFallback("Helper motion stream unavailable — using window-only pointermove fallback");
+    accelMotion.retryTimer = setTimeout(() => {
+      accelMotion.retryTimer = null;
+      if (shouldStreamMotion() && !accelMotion.es) startAccelMotion();
+    }, 10000);
+  };
+}
+
+function syncAccelMotion() {
+  if (!accelMotion) return;
+  if (shouldStreamMotion()) startAccelMotion();
+  else stopAccelMotion();
+}
+
+document.addEventListener("visibilitychange", () => syncAccelMotion());
+window.addEventListener("pagehide", () => stopAccelMotion());
 
 $("accelSvg").addEventListener("mousemove", (e) => {
   const g = $("accelSvg")._geom; if (!g || !accelDraft) return;
@@ -4959,15 +5399,14 @@ $("accelSvg").addEventListener("mousemove", (e) => {
   const cx = g.px(xv), cy = g.py(vx);
   const cross = $("accelCross"), dot = $("accelDot");
   if (cross && dot) {
-    cross.setAttribute("x1", cx); cross.setAttribute("x2", cx); cross.hidden = false;
-    dot.setAttribute("cx", cx); dot.setAttribute("cy", cy); dot.hidden = false;
+    cross.setAttribute("x1", cx); cross.setAttribute("x2", cx); _svgShow(cross, true);
+    dot.setAttribute("cx", cx); dot.setAttribute("cy", cy); _svgShow(dot, true);
   }
   $("accelProbe").textContent = `${xv.toFixed(1)} counts/ms → ${vx.toFixed(3)}×` + (Math.abs(vx - vy) > 1e-4 ? ` (Y: ${vy.toFixed(3)}×)` : "");
 });
 $("accelSvg").addEventListener("mouseleave", () => {
-  const cross = $("accelCross"), dot = $("accelDot");
-  if (cross) cross.hidden = true;
-  if (dot) dot.hidden = true;
+  _svgShow($("accelCross"), false);
+  _svgShow($("accelDot"), false);
   $("accelProbe").textContent = "Hover curve to inspect speed → multiplier";
 });
 
@@ -5077,6 +5516,7 @@ async function loadAccel() {
     $("niriGroup").hidden = true;
   } finally {
     accelLoading = false;
+    syncAccelMotion();
   }
 }
 
