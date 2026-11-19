@@ -3145,7 +3145,10 @@ def parse_evdev_events(data, pending=None):
 
 def _read_maccel_fd(fd):
     """Read maccel kernel module's LAST_INPUT_MOUSE_SPEED (big-endian Q32.32 fixed-point counts/ms)."""
-    raw = os.read(fd, 8)
+    try:
+        raw = os.read(fd, 8)
+    except OSError:
+        return None
     if len(raw) == 8:
         val = struct.unpack(">q", raw)[0]
         return val, max(0.0, val / FIX)
@@ -3209,6 +3212,12 @@ class MotionTracker:
 
     def set_input_dpi(self, dpi):
         if dpi and math.isfinite(dpi) and dpi > 0:
+            scale = self.input_dpi / dpi
+            self._speed *= scale
+            self.raw_speed *= scale
+            self._peak *= scale
+            self._swipe_min *= scale
+            self._swipe_max *= scale
             self.input_dpi = float(dpi)
 
     def record_delta(self, dx, dy, dt_ms, now=None):
@@ -3319,6 +3328,17 @@ def _default_kernel_dpi():
     return NORMALIZED_DPI
 
 
+def _raw_evdev_available():
+    # Only a confirmed absent module permits interpreting REL events as input.
+    try:
+        os.stat(os.path.dirname(SYS))
+    except FileNotFoundError:
+        return os.path.isdir("/sys/module")
+    except OSError:
+        pass
+    return False
+
+
 class MotionHub:
     """Lazy, hotplug-safe live mouse motion hub shared by SSE subscribers.
 
@@ -3327,10 +3347,13 @@ class MotionHub:
     """
 
     def __init__(self, evdev_discover=discover_evdev_mice, maccel_dev=MACCEL_DEV,
-                 dpi_provider=_default_kernel_dpi):
+                 dpi_provider=_default_kernel_dpi, raw_evdev_available=_raw_evdev_available):
         self._evdev_discover = evdev_discover
         self._maccel_dev = maccel_dev
         self._dpi_provider = dpi_provider
+        self._raw_evdev_available = raw_evdev_available
+        self._lifecycle = threading.Lock()
+        self._last_kernel_sample = None
         self._lock = threading.Lock()
         self._cond = threading.Condition(self._lock)
         self._tracker = MotionTracker(input_dpi=NORMALIZED_DPI)
@@ -3369,7 +3392,7 @@ class MotionHub:
                 pass
 
     def subscribe(self):
-        with self._lock:
+        with self._lifecycle, self._lock:
             self._subscribers += 1
             if self._subscribers == 1 and (self._thread is None or not self._thread.is_alive()):
                 self._stop.clear()
@@ -3383,6 +3406,10 @@ class MotionHub:
                 t.start()
 
     def unsubscribe(self):
+        with self._lifecycle:
+            self._unsubscribe()
+
+    def _unsubscribe(self):
         t = None
         with self._lock:
             self._subscribers = max(0, self._subscribers - 1)
@@ -3392,10 +3419,14 @@ class MotionHub:
                 t = self._thread
                 self._cond.notify_all()
         if t is not None and t is not threading.current_thread():
-            t.join(timeout=1.5)
+            t.join()
         with self._lock:
             if self._subscribers == 0:
                 self._thread = None
+                self._tracker = MotionTracker()
+                self._source = "none"
+                self._device_count = 0
+                self._last_kernel_sample = None
                 for fd in (self._wake_r, self._wake_w):
                     if fd is not None:
                         try:
@@ -3408,6 +3439,10 @@ class MotionHub:
     def snapshot(self, dpi=None, now=None):
         with self._lock:
             snap = self._tracker.snapshot(now=now, dpi=dpi)
+            if self._source == "maccel":
+                last = self._last_kernel_sample
+                snap["last_speed"] = (last[0] * last[1] / snap["dpi"]
+                                      if last is not None else None)
             snap["source"] = self._source
             snap["devices"] = self._device_count
             return snap
@@ -3447,7 +3482,7 @@ class MotionHub:
     def _update_source(self, has_evdev, has_maccel, dev_count):
         if has_evdev and has_maccel:
             src = "maccel+evdev"
-        elif has_evdev:
+        elif has_evdev and self._raw_evdev_available():
             src = "evdev"
         elif has_maccel:
             src = "maccel"
@@ -3455,6 +3490,9 @@ class MotionHub:
             src = "none"
         with self._cond:
             changed = (src != self._source) or (dev_count != self._device_count)
+            if src != self._source:
+                self._last_kernel_sample = None
+                self._tracker = MotionTracker(input_dpi=self._tracker.input_dpi)
             self._source = src
             self._device_count = dev_count
             if changed:
@@ -3465,7 +3503,6 @@ class MotionHub:
         fds_by_path = {}
         maccel_fd = None
         last_scan = 0.0
-        last_maccel_raw = None
         try:
             while not self._stop.is_set():
                 now = time.monotonic()
@@ -3531,18 +3568,8 @@ class MotionHub:
                         if not frames:
                             continue
 
-                        used_maccel = False
                         if maccel_fd is not None:
-                            try:
-                                res = _read_maccel_fd(maccel_fd)
-                            except OSError:
-                                res = None
-                                try:
-                                    os.close(maccel_fd)
-                                except OSError:
-                                    pass
-                                maccel_fd = None
-                                rescan = True
+                            res = _read_maccel_fd(maccel_fd)
                             if res is not None:
                                 _, spd = res
                                 last_ts = st["last_ts"]
@@ -3552,9 +3579,12 @@ class MotionHub:
                                 with self._lock:
                                     self._tracker.record_speed(spd, dt_ms=dt_ms, now=now)
                                 any_motion = True
-                                used_maccel = True
+                            else:
+                                os.close(maccel_fd)
+                                maccel_fd = None
+                                self._update_source(True, False, len(fds_by_path))
 
-                        if not used_maccel:
+                        elif self._source == "evdev" and self._raw_evdev_available():
                             with self._lock:
                                 for ts_s, dx, dy in frames:
                                     last_ts = st["last_ts"]
@@ -3583,24 +3613,18 @@ class MotionHub:
                             pass
                         if self._stop.is_set():
                             break
-                    try:
-                        res = _read_maccel_fd(maccel_fd)
-                    except OSError:
-                        try:
-                            os.close(maccel_fd)
-                        except OSError:
-                            pass
+                    res = _read_maccel_fd(maccel_fd)
+                    if res is None:
+                        os.close(maccel_fd)
                         maccel_fd = None
-                        last_scan = 0.0
+                        self._update_source(False, False, 0)
                         continue
-                    if res is not None:
-                        raw_val, spd = res
-                        if last_maccel_raw is not None and raw_val != last_maccel_raw:
-                            with self._cond:
-                                self._tracker.record_speed(spd, now=time.monotonic())
-                                self._seq += 1
-                                self._cond.notify_all()
-                        last_maccel_raw = raw_val
+                    _, speed = res
+                    with self._cond:
+                        if self._last_kernel_sample is None or speed != self._last_kernel_sample[0]:
+                            self._last_kernel_sample = (speed, self._tracker.input_dpi)
+                            self._seq += 1
+                            self._cond.notify_all()
                 else:
                     try:
                         rlist, _, _ = select.select([wake_r], [], [], 2.0)

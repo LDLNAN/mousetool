@@ -754,7 +754,78 @@ class TestMotionTelemetry(unittest.TestCase):
         self.assertEqual(s5["peak"], 0.0)
         self.assertEqual(s5["swipe_max"], 0.0)
 
+    def test_reconnect_waits_for_reader_ownership(self):
+        entered = threading.Event()
+        release = threading.Event()
+        replacement = threading.Event()
+
+        def discover():
+            if entered.is_set():
+                replacement.set()
+            else:
+                entered.set()
+                release.wait(3)
+            return []
+
+        hub = mousetool.MotionHub(discover, None, lambda: 1000)
+        hub.subscribe()
+        self.assertTrue(entered.wait(1))
+        closing = threading.Thread(target=hub.unsubscribe)
+        closing.start()
+        self.assertTrue(hub._stop.wait(1))
+        joining = threading.Thread(target=hub.subscribe)
+        joining.start()
+        release.set()
+        closing.join(2)
+        joining.join(2)
+        try:
+            self.assertTrue(replacement.wait(1))
+            self.assertTrue(hub.running)
+            self.assertEqual(hub.subscriber_count, 1)
+        finally:
+            hub.unsubscribe()
+        self.assertFalse(hub.running)
+
+    def test_dpi_change_preserves_history_and_smoothing_at_fixed_draft(self):
+        tracker = mousetool.MotionTracker(input_dpi=2000)
+        tracker.record_speed(20, now=10)
+        before = tracker.snapshot(now=10, dpi=2000)
+        tracker.set_input_dpi(1000)
+        self.assertEqual(tracker.snapshot(now=10, dpi=2000), before)
+        tracker.record_speed(40, dt_ms=2, now=10.002)
+        self.assertEqual(tracker.snapshot(now=10.002, dpi=2000)["speed"], 20)
+
+    def test_maccel_only_stable_value_has_unknown_freshness(self):
+        with tempfile.NamedTemporaryFile() as dev:
+            hub = mousetool.MotionHub(lambda: [], dev.name, lambda: 2000)
+            with mock.patch.object(mousetool, "_read_maccel_fd", return_value=(123, 20.0)):
+                hub.subscribe()
+                try:
+                    deadline = time.monotonic() + 1
+                    while hub.snapshot().get("last_speed") is None and time.monotonic() < deadline:
+                        time.sleep(.01)
+                    self.assertEqual(hub.snapshot(dpi=1000)["last_speed"], 40)
+                    time.sleep(.4)
+                    snap = hub.snapshot()
+                    self.assertEqual(snap["last_speed"], 20)
+                    self.assertFalse(snap["active"])
+                    self.assertEqual(snap["peak"], 0)
+                finally:
+                    hub.unsubscribe()
+
     def test_motion_hub_lazy_lifecycle_and_evdev_fifo(self):
+        self._check_evdev_fifo(raw=True)
+
+    def test_loaded_module_without_speed_device_excludes_evdev_output(self):
+        self._check_evdev_fifo(raw=False)
+
+    def test_short_kernel_read_excludes_evdev_batch(self):
+        with tempfile.NamedTemporaryFile() as dev:
+            dev.write(b"x")
+            dev.flush()
+            self._check_evdev_fifo(raw=False, kernel_device=dev.name)
+
+    def _check_evdev_fifo(self, raw, kernel_device=None):
         with tempfile.TemporaryDirectory() as tmp:
             fifo = os.path.join(tmp, "event99")
             os.mkfifo(fifo)
@@ -762,7 +833,8 @@ class TestMotionTelemetry(unittest.TestCase):
             wfd = os.open(fifo, os.O_RDWR | os.O_NONBLOCK)
             hub = mousetool.MotionHub(
                 evdev_discover=lambda: [fifo],
-                maccel_dev=None,
+                maccel_dev=kernel_device,
+                raw_evdev_available=lambda: raw,
                 dpi_provider=lambda: 1000.0,
             )
             try:
@@ -775,9 +847,10 @@ class TestMotionTelemetry(unittest.TestCase):
 
                 # Wait briefly for initial device scan
                 deadline = time.monotonic() + 1.0
-                while time.monotonic() < deadline and hub.snapshot()["source"] != "evdev":
+                while time.monotonic() < deadline and hub.snapshot()["devices"] != 1:
                     time.sleep(0.01)
-                self.assertEqual(hub.snapshot()["source"], "evdev")
+                initial_source = "maccel+evdev" if kernel_device else ("evdev" if raw else "none")
+                self.assertEqual(hub.snapshot()["source"], initial_source)
                 self.assertEqual(hub.snapshot()["devices"], 1)
 
                 # Inject two EV_REL + SYN_REPORT frames separated by 2 ms (dx=40 => 20 c/ms at 1000 DPI)
@@ -791,11 +864,11 @@ class TestMotionTelemetry(unittest.TestCase):
 
                 deadline = time.monotonic() + 1.0
                 snap = hub.snapshot()
-                while time.monotonic() < deadline and snap["peak"] < 15.0:
+                while time.monotonic() < deadline and snap["peak"] == 0:
                     time.sleep(0.01)
                     snap = hub.snapshot()
-                self.assertAlmostEqual(snap["peak"], 20.0, places=1)
-                self.assertEqual(snap["source"], "evdev")
+                self.assertAlmostEqual(snap["peak"], 20.0 if raw else 0.0, places=1)
+                self.assertEqual(snap["source"], "evdev" if raw else "none")
 
                 hub.unsubscribe()
                 self.assertEqual(hub.subscriber_count, 0)
@@ -813,8 +886,6 @@ class TestMotionTelemetry(unittest.TestCase):
         now = time.monotonic()
         hub._tracker.set_input_dpi(2000.0)
         hub._tracker.record_speed(15.0, dt_ms=10.0, now=now)
-        hub._source = "evdev"
-        hub._device_count = 2
 
         srv = ThreadingHTTPServer(("127.0.0.1", 0), mousetool.Api)
         port = srv.server_address[1]
