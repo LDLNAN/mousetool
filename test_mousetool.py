@@ -3,8 +3,10 @@ import http.client
 import json
 import os
 import re
+import struct
 import tempfile
 import threading
+import time
 import unittest
 from http.server import ThreadingHTTPServer
 from unittest import mock
@@ -622,6 +624,331 @@ class TestUniversalProtocols(unittest.TestCase):
                 sys_we = [m for m in sys_mice if m["driver"] == "egg_we"]
                 self.assertEqual(len(sys_we), 2)
                 self.assertNotEqual(sys_we[0]["id"], sys_we[1]["id"])
+
+
+class TestMotionTelemetry(unittest.TestCase):
+    @staticmethod
+    def _pack_ev(sec, usec, ev_type, code, value):
+        return mousetool.INPUT_EVENT_STRUCT.pack(sec, usec, ev_type, code, value)
+
+    def test_parse_evdev_events_and_chunking(self):
+        # Frame 1: REL_X=12, REL_Y=-5, ignored REL_WHEEL=1, SYN_REPORT at 100.001s
+        raw = (
+            self._pack_ev(100, 1000, mousetool.EV_REL, mousetool.REL_X, 12)
+            + self._pack_ev(100, 1000, mousetool.EV_REL, mousetool.REL_Y, -5)
+            + self._pack_ev(100, 1000, mousetool.EV_REL, 8, 1)  # REL_WHEEL ignored
+            + self._pack_ev(100, 1000, mousetool.EV_SYN, mousetool.SYN_REPORT, 0)
+            # Empty SYN_REPORT should emit nothing
+            + self._pack_ev(100, 2000, mousetool.EV_SYN, mousetool.SYN_REPORT, 0)
+            # Frame 2 split across chunks
+            + self._pack_ev(100, 3000, mousetool.EV_REL, mousetool.REL_X, 6)
+            + self._pack_ev(100, 3000, mousetool.EV_REL, mousetool.REL_Y, 8)
+            + self._pack_ev(100, 3000, mousetool.EV_SYN, mousetool.SYN_REPORT, 0)
+        )
+        # Split mid-struct to test partial byte buffering
+        cut = mousetool.INPUT_EVENT_STRUCT.size * 5 + 7
+        pending = {"dx": 0, "dy": 0, "buf": b""}
+        f1, pending = mousetool.parse_evdev_events(raw[:cut], pending)
+        f2, pending = mousetool.parse_evdev_events(raw[cut:], pending)
+        self.assertEqual(len(f1), 1)
+        self.assertAlmostEqual(f1[0][0], 100.001, places=6)
+        self.assertEqual((f1[0][1], f1[0][2]), (12, -5))
+        self.assertEqual(len(f2), 1)
+        self.assertAlmostEqual(f2[0][0], 100.003, places=6)
+        self.assertEqual((f2[0][1], f2[0][2]), (6, 8))
+        self.assertEqual(pending["buf"], b"")
+
+    def test_discover_evdev_mice_sysfs_capabilities(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            def _mk_ev(name, ev_hex, rel_hex):
+                cap = os.path.join(tmp, name, "device", "capabilities")
+                os.makedirs(cap)
+                with open(os.path.join(cap, "ev"), "w") as f:
+                    f.write(ev_hex + "\n")
+                with open(os.path.join(cap, "rel"), "w") as f:
+                    f.write(rel_hex + "\n")
+
+            _mk_ev("event2", "120013", "0")           # keyboard (no EV_REL)
+            _mk_ev("event5", "17", "1943")            # standard mouse (EV_REL + REL_X + REL_Y)
+            _mk_ev("event9", "4", "100")              # scroll-only dial (no REL_X/REL_Y)
+            _mk_ev("event11", "0 17", "0 3")          # multi-word capability bitmap mouse
+
+            found = mousetool.discover_evdev_mice(
+                sys_input_glob=os.path.join(tmp, "event*"),
+                dev_dir="/dev/input",
+            )
+            self.assertEqual(found, ["/dev/input/event11", "/dev/input/event5"])
+
+    def test_speed_and_dpi_normalization(self):
+        # 3-4-5 right triangle: distance=5 counts in 1 ms at 1000 DPI => 5.0 counts/ms
+        self.assertAlmostEqual(mousetool.compute_normalized_speed(3, 4, 1.0, 1000.0), 5.0, places=6)
+        # At 2000 DPI, 1000/2000 = 0.5x => 2.5 counts/ms
+        self.assertAlmostEqual(mousetool.compute_normalized_speed(3, 4, 1.0, 2000.0), 2.5, places=6)
+        # At 3200 DPI, 32 counts in 1 ms => 10.0 counts/ms
+        self.assertAlmostEqual(mousetool.compute_normalized_speed(32, 0, 1.0, 3200.0), 10.0, places=6)
+        # Invalid dt or DPI safely returns 0.0
+        self.assertEqual(mousetool.compute_normalized_speed(10, 0, 0.0, 1000.0), 0.0)
+        self.assertEqual(mousetool.compute_normalized_speed(10, 0, -1.0, 1000.0), 0.0)
+        self.assertEqual(mousetool.compute_normalized_speed(10, 0, 1.0, 0.0), 0.0)
+        self.assertEqual(mousetool.compute_normalized_speed(10, 0, float("nan"), 1000.0), 0.0)
+
+        # /dev/maccel big-endian Q32.32 fixed-point decoding
+        with tempfile.NamedTemporaryFile() as tf:
+            raw_fixed = int(round(18.5 * mousetool.FIX))
+            tf.write(struct.pack(">q", raw_fixed))
+            tf.flush()
+            res = mousetool.read_maccel_speed(tf.name)
+            self.assertIsNotNone(res)
+            self.assertEqual(res[0], raw_fixed)
+            self.assertAlmostEqual(res[1], 18.5, places=6)
+
+    def test_motion_tracker_swipe_peak_decay_and_dpi_rescale(self):
+        tr = mousetool.MotionTracker(input_dpi=3200.0, peak_hold_s=2.5)
+        s0 = tr.snapshot(now=10.0)
+        self.assertEqual(s0["speed"], 0.0)
+        self.assertEqual(s0["peak"], 0.0)
+        self.assertFalse(s0["active"])
+        self.assertEqual(s0["dpi"], 3200.0)
+
+        # Start swipe: 32 counts/ms at 3200 DPI => 10.0 normalized c/ms
+        tr.record_delta(32, 0, 1.0, now=10.0)
+        s1 = tr.snapshot(now=10.005)
+        self.assertTrue(s1["active"])
+        self.assertAlmostEqual(s1["speed"], 10.0, places=2)
+        self.assertAlmostEqual(s1["peak"], 10.0, places=2)
+        self.assertEqual(s1["swipe_id"], 1)
+
+        # Ramp up swipe to 30 c/ms over several 10ms steps
+        for step in range(1, 8):
+            tr.record_delta(960, 0, 10.0, now=10.0 + step * 0.01)
+        s2 = tr.snapshot(now=10.08)
+        self.assertTrue(s2["active"])
+        self.assertGreater(s2["peak"], 28.0)
+        self.assertAlmostEqual(s2["swipe_min"], 10.0, places=1)
+        self.assertEqual(s2["swipe_max"], s2["peak"])
+        self.assertEqual(s2["swipe_id"], 1)
+
+        # Draft DPI override: 1600 DPI should double normalized speed/peak vs 3200 DPI
+        s2_1600 = tr.snapshot(now=10.08, dpi=1600.0)
+        self.assertEqual(s2_1600["dpi"], 1600.0)
+        self.assertAlmostEqual(s2_1600["speed"], s2["speed"] * 2.0, places=1)
+        self.assertAlmostEqual(s2_1600["peak"], s2["peak"] * 2.0, places=1)
+
+        # After 400ms idle: speed decays to 0 while peak remains held
+        s3 = tr.snapshot(now=10.50)
+        self.assertFalse(s3["active"])
+        self.assertEqual(s3["speed"], 0.0)
+        self.assertAlmostEqual(s3["peak"], s2["peak"], places=2)
+        self.assertGreater(s3["peak_age_ms"], 300)
+
+        # New swipe after swipe_gap_s replaces peak and increments swipe_id
+        tr.record_delta(16, 0, 1.0, now=11.0)  # 5.0 c/ms
+        s4 = tr.snapshot(now=11.01)
+        self.assertEqual(s4["swipe_id"], 2)
+        self.assertAlmostEqual(s4["peak"], 5.0, places=2)
+        self.assertAlmostEqual(s4["swipe_min"], 5.0, places=2)
+
+        # After peak_hold_s elapses without motion, peak clears cleanly
+        s5 = tr.snapshot(now=14.0)
+        self.assertEqual(s5["speed"], 0.0)
+        self.assertEqual(s5["peak"], 0.0)
+        self.assertEqual(s5["swipe_max"], 0.0)
+
+    def test_reconnect_waits_for_reader_ownership(self):
+        entered = threading.Event()
+        release = threading.Event()
+        replacement = threading.Event()
+
+        def discover():
+            if entered.is_set():
+                replacement.set()
+            else:
+                entered.set()
+                release.wait(3)
+            return []
+
+        hub = mousetool.MotionHub(discover, None, lambda: 1000)
+        hub.subscribe()
+        self.assertTrue(entered.wait(1))
+        closing = threading.Thread(target=hub.unsubscribe)
+        closing.start()
+        self.assertTrue(hub._stop.wait(1))
+        joining = threading.Thread(target=hub.subscribe)
+        joining.start()
+        release.set()
+        closing.join(2)
+        joining.join(2)
+        try:
+            self.assertTrue(replacement.wait(1))
+            self.assertTrue(hub.running)
+            self.assertEqual(hub.subscriber_count, 1)
+        finally:
+            hub.unsubscribe()
+        self.assertFalse(hub.running)
+
+    def test_dpi_change_preserves_history_and_smoothing_at_fixed_draft(self):
+        tracker = mousetool.MotionTracker(input_dpi=2000)
+        tracker.record_speed(20, now=10)
+        before = tracker.snapshot(now=10, dpi=2000)
+        tracker.set_input_dpi(1000)
+        self.assertEqual(tracker.snapshot(now=10, dpi=2000), before)
+        tracker.record_speed(40, dt_ms=2, now=10.002)
+        self.assertEqual(tracker.snapshot(now=10.002, dpi=2000)["speed"], 20)
+
+    def test_maccel_only_stable_value_has_unknown_freshness(self):
+        with tempfile.NamedTemporaryFile() as dev:
+            hub = mousetool.MotionHub(lambda: [], dev.name, lambda: 2000)
+            with mock.patch.object(mousetool, "_read_maccel_fd", return_value=(123, 20.0)):
+                hub.subscribe()
+                try:
+                    deadline = time.monotonic() + 1
+                    while hub.snapshot().get("last_speed") is None and time.monotonic() < deadline:
+                        time.sleep(.01)
+                    self.assertEqual(hub.snapshot(dpi=1000)["last_speed"], 40)
+                    time.sleep(.4)
+                    snap = hub.snapshot()
+                    self.assertEqual(snap["last_speed"], 20)
+                    self.assertFalse(snap["active"])
+                    self.assertEqual(snap["peak"], 0)
+                finally:
+                    hub.unsubscribe()
+
+    def test_motion_hub_lazy_lifecycle_and_evdev_fifo(self):
+        self._check_evdev_fifo(raw=True)
+
+    def test_loaded_module_without_speed_device_excludes_evdev_output(self):
+        self._check_evdev_fifo(raw=False)
+
+    def test_short_kernel_read_excludes_evdev_batch(self):
+        with tempfile.NamedTemporaryFile() as dev:
+            dev.write(b"x")
+            dev.flush()
+            self._check_evdev_fifo(raw=False, kernel_device=dev.name)
+
+    def _check_evdev_fifo(self, raw, kernel_device=None):
+        with tempfile.TemporaryDirectory() as tmp:
+            fifo = os.path.join(tmp, "event99")
+            os.mkfifo(fifo)
+            # Open write end non-blocking only after reader opens; use O_RDWR to keep FIFO open cleanly
+            wfd = os.open(fifo, os.O_RDWR | os.O_NONBLOCK)
+            hub = mousetool.MotionHub(
+                evdev_discover=lambda: [fifo],
+                maccel_dev=kernel_device,
+                raw_evdev_available=lambda: raw,
+                dpi_provider=lambda: 1000.0,
+            )
+            try:
+                self.assertFalse(hub.running)
+                self.assertEqual(hub.subscriber_count, 0)
+
+                hub.subscribe()
+                self.assertTrue(hub.running)
+                self.assertEqual(hub.subscriber_count, 1)
+
+                # Wait briefly for initial device scan
+                deadline = time.monotonic() + 1.0
+                while time.monotonic() < deadline and hub.snapshot()["devices"] != 1:
+                    time.sleep(0.01)
+                initial_source = "maccel+evdev" if kernel_device else ("evdev" if raw else "none")
+                self.assertEqual(hub.snapshot()["source"], initial_source)
+                self.assertEqual(hub.snapshot()["devices"], 1)
+
+                # Inject two EV_REL + SYN_REPORT frames separated by 2 ms (dx=40 => 20 c/ms at 1000 DPI)
+                pkt = (
+                    self._pack_ev(200, 0, mousetool.EV_REL, mousetool.REL_X, 1)
+                    + self._pack_ev(200, 0, mousetool.EV_SYN, mousetool.SYN_REPORT, 0)
+                    + self._pack_ev(200, 2000, mousetool.EV_REL, mousetool.REL_X, 40)
+                    + self._pack_ev(200, 2000, mousetool.EV_SYN, mousetool.SYN_REPORT, 0)
+                )
+                os.write(wfd, pkt)
+
+                deadline = time.monotonic() + 1.0
+                snap = hub.snapshot()
+                while time.monotonic() < deadline and snap["peak"] == 0:
+                    time.sleep(0.01)
+                    snap = hub.snapshot()
+                self.assertAlmostEqual(snap["peak"], 20.0 if raw else 0.0, places=1)
+                self.assertEqual(snap["source"], "evdev" if raw else "none")
+
+                hub.unsubscribe()
+                self.assertEqual(hub.subscriber_count, 0)
+                self.assertFalse(hub.running)
+            finally:
+                os.close(wfd)
+
+    def test_motion_sse_endpoint_cors_framing_and_dpi_param(self):
+        hub = mousetool.MotionHub(
+            evdev_discover=lambda: [],
+            maccel_dev=None,
+            dpi_provider=lambda: 2000.0,
+        )
+        # Pre-seed tracker with a known swipe so the initial SSE frame carries live values
+        now = time.monotonic()
+        hub._tracker.set_input_dpi(2000.0)
+        hub._tracker.record_speed(15.0, dt_ms=10.0, now=now)
+
+        srv = ThreadingHTTPServer(("127.0.0.1", 0), mousetool.Api)
+        port = srv.server_address[1]
+        t = threading.Thread(target=srv.serve_forever, daemon=True)
+        t.start()
+        try:
+            with mock.patch.object(mousetool, "MOTION_HUB", hub):
+                # 1) Evil origin rejected
+                c = http.client.HTTPConnection("127.0.0.1", port, timeout=2)
+                c.request("GET", "/api/motion", headers={"Origin": "https://evil.example"})
+                r = c.getresponse()
+                r.read()
+                self.assertEqual(r.status, 403)
+                c.close()
+
+                # 2) Invalid dpi rejected with 400
+                c = http.client.HTTPConnection("127.0.0.1", port, timeout=2)
+                c.request("GET", "/api/motion?dpi=999999", headers={"Origin": "null"})
+                r = c.getresponse()
+                r.read()
+                self.assertEqual(r.status, 400)
+                c.close()
+
+                # 3) Valid SSE from file:// (Origin: null) with ?dpi=1000 (2x rescale vs 2000 DPI)
+                c = http.client.HTTPConnection("127.0.0.1", port, timeout=2)
+                c.request("GET", "/api/motion?dpi=1000", headers={"Origin": "null"})
+                r = c.getresponse()
+                self.assertEqual(r.status, 200)
+                self.assertEqual(r.getheader("Access-Control-Allow-Origin"), "null")
+                self.assertIn("text/event-stream", r.getheader("Content-Type", ""))
+                self.assertIn("no-cache", r.getheader("Cache-Control", ""))
+                line = r.fp.readline().decode().strip()
+                blank = r.fp.readline()
+                self.assertTrue(line.startswith("data: "), f"unexpected SSE line: {line!r}")
+                self.assertEqual(blank, b"\n")
+                frame = json.loads(line[6:])
+                self.assertEqual(frame["dpi"], 1000.0)
+                self.assertAlmostEqual(frame["peak"], 30.0, places=1)
+                self.assertIn("speed", frame)
+                self.assertIn("swipe_min", frame)
+                self.assertIn("swipe_max", frame)
+                r.close()
+                c.close()
+
+                # 4) Alias /api/motion/stream with localhost origin
+                c = http.client.HTTPConnection("127.0.0.1", port, timeout=2)
+                c.request("GET", "/api/motion/stream", headers={"Origin": "http://127.0.0.1:8766"})
+                r = c.getresponse()
+                self.assertEqual(r.status, 200)
+                self.assertEqual(r.getheader("Access-Control-Allow-Origin"), "http://127.0.0.1:8766")
+                line = r.fp.readline().decode().strip()
+                self.assertTrue(line.startswith("data: "))
+                r.close()
+                c.close()
+
+                # Wait briefly for handler threads to observe closed sockets and unsubscribe
+                deadline = time.monotonic() + 1.5
+                while time.monotonic() < deadline and hub.subscriber_count > 0:
+                    time.sleep(0.02)
+                self.assertEqual(hub.subscriber_count, 0)
+        finally:
+            srv.shutdown()
+            srv.server_close()
 
 
 if __name__ == "__main__":
