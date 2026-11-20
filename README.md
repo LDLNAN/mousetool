@@ -44,6 +44,7 @@ A lightweight, universal web and CLI suite for managing **multiple connected mic
   - `battery [-d SEL | --all] [--json]`: Battery percentage and charging state with offline/asleep cache fallback (`~/.cache/mousetool/battery.json`).
   - `dpi [-d SEL] [X [Y]]`, `stages [-d SEL] ...`, `poll [-d SEL] [HZ]`, `lod [-d SEL] ...`, `power [-d SEL] ...`, `tune [-d SEL] [--debounce MS ...]`: Configure one or more mice directly from the terminal.
   - `maccel [--set K=V ...]`: Inspect or update `maccel` kernel parameters and reboot-persistent reset scripts.
+  - `rawaccel {preview|export|import}`: Offline preview/export of the current `maccel` curve as [Raw Accel](https://github.com/RawAccelOfficial/rawaccel) v1.7.1 settings for Windows (see below). Never applies anything.
   - `serve [--port N]`: Local HTTP API (`127.0.0.1:8766`) serving `/api/status` (with `system_mice`), `/api/devices`, `/api/maccel`, and `/api/desktop`. The original `/api/niri` write endpoint remains available.
   - `open`: Launches `index.html` in a WebHID-capable browser (`brave`, `chromium`, or `google-chrome`).
 - **Diagnostics (`probe.py`)**: Read-only diagnostic tool that scans all connected HID mice (`Razer`, `Endgame Gear 8k / -we`, `Logitech HID++`, `Pulsar`, `CompX ODM`, `Glorious`, and generic mice) without altering device state.
@@ -120,7 +121,37 @@ MT-005 testing used temporary files, mocked command output and upstream document
 ./mousetool.py maccel --set MODE=natural LIMIT=1.5 DECAY_RATE=0.1
 ```
 
+### Raw Accel export (Windows, offline)
+`rawaccel_export.py` maps the four `maccel` modes and `SENS_MULT`, `YX_RATIO`, `ANGLE_ROTATION` and `INPUT_DPI` to a Raw Accel v1.7.1 `settings.json`, the file Raw Accel's `writer.exe` reads. It is pure Python with no Linux-only imports, so it also runs on Windows as `python rawaccel_export.py ...`. It only writes files you name; it never runs the writer or touches a driver.
+
+| maccel | Raw Accel v1.7.1 |
+| --- | --- |
+| `linear` (`ACCEL`, `OFFSET`, `OUTPUT_CAP`) | Classic, exponent 2, Gain off, cap mode `output` |
+| `natural` (`DECAY_RATE`, `OFFSET`, `LIMIT`) | Natural, Gain on |
+| `synchronous` (`GAMMA`, `SMOOTH`, `MOTIVITY`, `SYNC_SPEED`) | Synchronous, Gain off |
+| `no_accel` | No Acceleration |
+| `SENS_MULT` / `YX_RATIO` / `ANGLE_ROTATION` | Output DPI = `SENS_MULT` × 1000 / Y/X output DPI ratio / Degrees of rotation |
+| `INPUT_DPI` | `defaultDeviceConfig` DPI (applies to every mouse without its own device entry) |
+
+Anything that can't be carried exactly is listed under **Lossy** rather than dropped: `ACCEL=0`, the app default, because Raw Accel requires acceleration > 0, and a non-integer DPI. Linear with `ACCEL=0` and natural with `LIMIT=1` are flat curves, so they export as No Acceleration. Per-device settings and timing (polling rate, time clamp) are listed as **Unsupported**. Every `export` prints its lossy and unsupported items and the curve check result on stderr, whether the JSON goes to stdout or `-o`.
+
+The curve check samples about 460 speeds from 1e-6 to 1e6 counts/ms, including points just around each formula's branch points (offset, cap, sync speed and clamp edges). It compares Raw Accel's formula on the exported settings with both the Studio preview curve and maccel 0.5.9's formula, plus a motion pipeline check, at a relative tolerance of 1e-6. Raw Accel and maccel use the same formulas. The Studio preview has two synchronous-only shortcuts: it floors speeds below 1e-6 and returns exactly 1× within 1e-9 counts/ms of `SYNC_SPEED`. With steep settings, or a very small `SYNC_SPEED`, this can put the preview more than 1e-6 away from both. The check then reports **NOT EQUIVALENT** and names the shortcut. Natural mode with a steep `LIMIT` or a tiny `DECAY_RATE` cancels badly at very low speeds. Studio (JavaScript) and Raw Accel (C++) compute the same expression there with different `exp()` implementations, so they can disagree. Where a 2-ulp `exp()` difference would move the result past the tolerance, the check reports **NOT VERIFIED** instead of claiming equivalence. The versioned export embeds the full report; `--settings-only` only prints its result line, and `--no-check` skips it.
+
+```bash
+# Show the mapping and curve check for the loaded maccel settings (read-only)
+./mousetool.py rawaccel preview --live
+
+# Versioned export (schema_version 1): source parameters, mapping report, curve check, Raw Accel settings
+./mousetool.py rawaccel export --live -o mousetool-rawaccel.json
+
+# Only the Raw Accel settings.json, from explicit parameters
+./mousetool.py rawaccel export --settings-only --set MODE=natural LIMIT=1.5 DECAY_RATE=0.1 -o settings.json
+
+# Read an export or a Raw Accel settings.json back into maccel parameters (prints JSON; applies nothing)
+./mousetool.py rawaccel import settings.json
+```
+
 ## Tests
 ```bash
-python3 -m unittest -v test_mousetool.py test_desktop_pointer.py
+python3 -m unittest -v test_mousetool.py test_desktop_pointer.py test_rawaccel_export.py
 ```
