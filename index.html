@@ -711,7 +711,7 @@ input[type=range]:focus-visible::-webkit-slider-thumb { border-color: var(--acce
 @media (max-width: 560px) {
   .top { gap: 8px; row-gap: 10px; }
   .top .pill { order: 5; } .top .sync { order: 6; margin-left: auto; }
-  .ghead .note { display: none; }
+  .ghead .note:not(#desktopNote) { display: none; }
   .seg { display: flex; flex-wrap: nowrap; width: 100%; }
   .seg button { flex: 1; justify-content: center; padding: 6px 4px; }
   .control > .seg { flex: 1 1 100%; }
@@ -1168,26 +1168,26 @@ input[type=range]:focus-visible::-webkit-slider-thumb { border-color: var(--acce
         </div>
       </section>
 
-      <section class="group" id="niriGroup" hidden>
+      <section class="group" id="desktopGroup" hidden>
         <div class="ghead">
-          <span class="idx">06.2</span><h2>Desktop compositor (niri)</h2>
-          <span class="note">From ~/.config/niri/config.kdl (set flat when using maccel)</span>
+          <span class="idx">06.2</span><h2 id="desktopHeading">Desktop pointer settings</h2>
+          <span class="note" id="desktopNote" role="status"></span>
         </div>
         <div class="setting">
-          <div class="label"><b>Accel profile</b><p>Use <em>Flat</em> so niri doesn't stack desktop acceleration on top of maccel.</p></div>
+          <div class="label"><b>Accel profile</b><p>Choose <em>Flat</em> to use your maccel curve without additional desktop acceleration.</p></div>
           <div class="control">
-            <span class="state" data-for="niri"></span>
-            <div class="seg" id="niriProfile">
+            <span class="state" data-for="desktop"></span>
+            <div class="seg" id="desktopProfile">
               <button data-prof="flat">Flat</button>
               <button data-prof="adaptive">Adaptive</button>
             </div>
           </div>
         </div>
         <div class="setting">
-          <div class="label"><b>Pointer speed</b><p>Desktop pointer speed multiplier in niri (−1.0 to 1.0).</p></div>
+          <div class="label"><b>Pointer speed</b><p>Adjust desktop sensitivity from −1 to 1. Zero is neutral.</p></div>
           <div class="control">
-            <input type="range" id="niriSpeed" min="-1" max="1" step="0.05" aria-label="Niri pointer speed">
-            <span class="readout" id="niriSpeedVal">0</span>
+            <input type="range" id="desktopSpeed" min="-1" max="1" step="0.05" aria-label="Desktop pointer speed">
+            <span class="readout" id="desktopSpeedVal">0</span>
           </div>
         </div>
       </section>
@@ -4842,7 +4842,7 @@ slider("idle", "idle", "Sleep timer", (m) => `${m} min`, (m) => m * 60);
 slider("low", "low", "Low battery warning", (p) => `${p}%`, (p) => Math.max(0x0c, Math.min(0xff, Math.round(p / 100 * 255))));
 
 // ======================================================================
-// acceleration (maccel + niri via local helper on 127.0.0.1:8766)
+// acceleration (maccel + desktop pointer settings via local helper on 127.0.0.1:8766)
 // ======================================================================
 const HELPER = "http://127.0.0.1:8766";
 const MACCEL_DEFAULTS = {
@@ -4883,7 +4883,7 @@ const GLOBAL_ACCEL_PARAMS = [
   { k: "ANGLE_ROTATION", label: "Angle rotation (°)", min: -45, max: 45, step: 0.5, desc: "Rotates input movement vector in degrees." },
 ];
 
-let accelLive = null;   // { maccel, niri } from helper
+let accelLive = null;   // { maccel, desktop } from helper
 let accelDraft = null;  // working copy of mode + params
 let accelXMax = 40;
 let accelLoading = false;
@@ -5481,13 +5481,23 @@ function renderAccelDpiHint() {
   if (mdpi) b.textContent = `Use mouse DPI (${mdpi})`;
 }
 
-function renderNiri() {
-  const n = accelLive?.niri;
-  $("niriGroup").hidden = !n;
+function renderDesktop() {
+  const n = accelLive?.desktop;
+  $("desktopGroup").hidden = !n;
   if (!n) return;
-  for (const b of $("niriProfile").children) b.classList.toggle("sel", b.dataset.prof === n.accel_profile);
-  $("niriSpeed").value = n.accel_speed;
-  $("niriSpeedVal").textContent = n.accel_speed.toFixed(2);
+  $("desktopHeading").textContent = `Desktop pointer settings (${n.label})`;
+  const other = n.accel_profile && !["flat", "adaptive"].includes(n.accel_profile);
+  $("desktopNote").textContent = n.message + (other ? ` · Current profile: ${n.accel_profile}` : "");
+  for (const row of $("desktopGroup").querySelectorAll(".setting")) row.hidden = n.accel_speed == null;
+  if (n.accel_speed == null) return;
+  for (const b of $("desktopProfile").children) {
+    b.disabled = !n.writable || desktopSaving;
+    b.classList.toggle("sel", b.dataset.prof === n.accel_profile);
+    b.setAttribute("aria-pressed", String(b.dataset.prof === n.accel_profile));
+  }
+  $("desktopSpeed").disabled = !n.writable || desktopSaving;
+  $("desktopSpeed").value = n.accel_speed;
+  $("desktopSpeedVal").textContent = n.accel_speed.toFixed(2);
   paintRanges();
 }
 
@@ -5528,7 +5538,7 @@ async function loadAccel() {
       renderAccelCurve();
       renderAccelDirty();
     }
-    renderNiri();
+    renderDesktop();
   } catch {
     $("accelOffline").hidden = false;
     $("accelPerm").hidden = true;
@@ -5540,7 +5550,7 @@ async function loadAccel() {
     renderAccelDirty();
     clearTimeout(accelMotion.statusTimer);
     if (shouldStreamMotion()) accelMotion.statusTimer = setTimeout(loadAccel, 10000);
-    $("niriGroup").hidden = true;
+    $("desktopGroup").hidden = true;
   } finally {
     accelLoading = false;
     syncAccelMotion();
@@ -5592,33 +5602,38 @@ $("accelApply").addEventListener("click", async () => {
   }
 });
 
-async function postNiri(updates) {
-  setState("niri", "saving");
+let desktopSaving = false;
+async function postDesktop(updates) {
+  if (desktopSaving || !accelLive?.desktop?.writable) return;
+  desktopSaving = true;
+  renderDesktop();
+  setState("desktop", "saving");
   try {
-    const res = await fetch(`${HELPER}/api/niri`, {
+    const res = await fetch(`${HELPER}/api/desktop`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-Mouse-Tool": "1" },
       body: JSON.stringify(updates),
     });
     const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "Failed to update niri config");
-    accelLive.niri = data.niri;
-    renderNiri();
-    setState("niri", "saved");
+    if (data.desktop) accelLive.desktop = data.desktop;
+    if (!res.ok) throw new Error(data.error || "Failed to update desktop settings");
+    setState("desktop", "saved");
   } catch (err) {
-    setState("niri", "error", err.message);
+    setState("desktop", "error", err.message);
     toast(err.message, true);
-    renderNiri();
+  } finally {
+    desktopSaving = false;
+    renderDesktop();
   }
 }
-$("niriProfile").addEventListener("click", (e) => {
+$("desktopProfile").addEventListener("click", (e) => {
   const b = e.target.closest("button"); if (!b) return;
   const prof = b.dataset.prof;
-  if (accelLive?.niri?.accel_profile === prof) return;
-  postNiri({ accel_profile: prof });
+  if (accelLive?.desktop?.accel_profile === prof) return;
+  postDesktop({ accel_profile: prof });
 });
-$("niriSpeed").addEventListener("input", () => { $("niriSpeedVal").textContent = (+$("niriSpeed").value).toFixed(2); });
-$("niriSpeed").addEventListener("change", () => { postNiri({ accel_speed: +$("niriSpeed").value }); });
+$("desktopSpeed").addEventListener("input", () => { $("desktopSpeedVal").textContent = (+$("desktopSpeed").value).toFixed(2); });
+$("desktopSpeed").addEventListener("change", () => { postDesktop({ accel_speed: +$("desktopSpeed").value }); });
 </script>
 </body>
 </html>

@@ -372,7 +372,8 @@ class TestLocalApi(unittest.TestCase):
         t.start()
         fake_sys_mice = [{"id": "egg:1964:/dev/hidraw11", "driver": "egg", "name": "Endgame Gear OP1 8k", "configurable": True}]
         try:
-            with mock.patch.object(mousetool, "maccel_state", return_value={"loaded": False}), \
+            with mock.patch.dict(os.environ, {"MOUSETOOL_DESKTOP": "xfce"}), \
+                 mock.patch.object(mousetool, "maccel_state", return_value={"loaded": False}), \
                  mock.patch.object(mousetool, "niri_state", return_value={"accel_profile": "flat", "accel_speed": 0.0}), \
                  mock.patch.object(mousetool, "discover_system_mice", return_value=fake_sys_mice):
                 c = http.client.HTTPConnection("127.0.0.1", port, timeout=2)
@@ -390,6 +391,32 @@ class TestLocalApi(unittest.TestCase):
                 self.assertEqual(r.status, 200)
                 devs = json.loads(r.read())
                 self.assertEqual(devs["mice"][0]["name"], "Endgame Gear OP1 8k")
+
+                c.request("GET", "/api/desktop")
+                r = c.getresponse()
+                self.assertEqual(r.status, 200)
+                desktop = json.loads(r.read())["desktop"]
+                self.assertEqual(desktop, body["desktop"])
+                self.assertFalse(desktop["writable"])
+                self.assertEqual(desktop["backend"], "xfce")
+                for update, status in (({"accel_speed": 1.1}, 400), ({"accel_speed": 1}, 409)):
+                    c.request("POST", "/api/desktop", body=json.dumps(update), headers={"X-Mouse-Tool": "1"})
+                    r = c.getresponse()
+                    self.assertEqual(r.status, status)
+                    self.assertIn("error", json.loads(r.read()))
+
+                with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(os.environ, {
+                    "MOUSETOOL_DESKTOP": "cosmic", "XDG_CONFIG_HOME": tmp,
+                    "XDG_DATA_HOME": tmp, "XDG_DATA_DIRS": tmp,
+                }):
+                    c.request("POST", "/api/desktop", body='{"accel_profile":"flat","accel_speed":-0.25}',
+                              headers={"X-Mouse-Tool": "1"})
+                    r = c.getresponse()
+                    self.assertEqual(r.status, 200)
+                    saved = json.loads(r.read())["desktop"]
+                    self.assertEqual((saved["accel_profile"], saved["accel_speed"]), ("flat", -0.25))
+                    c.request("GET", "/api/desktop")
+                    self.assertEqual(json.loads(c.getresponse().read())["desktop"], saved)
 
                 # Evil origin blocked
                 c.request("GET", "/api/status", headers={"Origin": "https://evil.example"})
