@@ -2992,6 +2992,24 @@ def maccel_cmd(args):
         print(json.dumps(maccel_state(), indent=2))
 
 
+def maccel_live_config():
+    """Read-only snapshot of the loaded maccel module as {"MODE": ..., PARAM: value} (for rawaccel --live)."""
+    st = maccel_state()
+    if not st["loaded"]:
+        raise PermissionError("maccel isn't loaded; use --input FILE or --set KEY=VAL instead of --live")
+    missing = [k for k in PARAMS if k not in st["params"]]
+    if st["mode"] is None or missing:
+        raise OSError(f"could not read maccel MODE/{', '.join(missing) or 'params'} from {SYS}")
+    return {"MODE": st["mode"], **st["params"]}
+
+
+def rawaccel_cmd(args):
+    import rawaccel_export  # pure module; offline preview/export only, never applies settings
+    code = rawaccel_export.main(args.argv, live_loader=maccel_live_config, prog="mousetool.py rawaccel")
+    if code:
+        sys.exit(code)
+
+
 # ----------------------------------------------------------------------------- live mouse motion telemetry
 EV_SYN = 0x00
 SYN_REPORT = 0x00
@@ -3819,10 +3837,19 @@ def main():
     m.add_argument("--set", nargs="+", metavar="KEY=VAL", help="update maccel parameters, e.g. MODE=natural LIMIT=1.5")
     m.set_defaults(fn=maccel_cmd)
 
+    ra = sub.add_parser("rawaccel", add_help=False,
+                        help="offline Raw Accel (Windows) preview/export of maccel curves; never applies settings")
+    ra.add_argument("argv", nargs=argparse.REMAINDER, help="export | preview | import ... (see `rawaccel --help`)")
+    ra.set_defaults(fn=rawaccel_cmd)
+
     s = sub.add_parser("serve"); s.add_argument("--port", type=int, default=8766); s.set_defaults(fn=serve)
     o = sub.add_parser("open"); o.set_defaults(fn=open_ui)
 
-    args = ap.parse_args()
+    if sys.argv[1:2] == ["rawaccel"]:
+        # Hand everything after `rawaccel` (including --help) to rawaccel_export's own parser.
+        args = argparse.Namespace(fn=rawaccel_cmd, argv=sys.argv[2:])
+    else:
+        args = ap.parse_args()
     try:
         args.fn(args)
     except (FileNotFoundError, Asleep, ValueError, PermissionError, OSError) as e:
