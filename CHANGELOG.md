@@ -5,6 +5,7 @@ Notable user-visible changes to Mouse Tool. Updated with every merge to local `d
 ## Unreleased
 
 ### Added
+- **Pointer settings on more desktops**: Plasma, Hyprland, COSMIC and GNOME backends alongside niri, with plain-language messages when a tool is missing or the desktop isn't supported (MT-005, 11-20, verified 87.9/100). Negative speeds on Plasma and niri detection when the helper starts early are fixed.
 - **Live speed and swipe indicator** on the acceleration curve graph, plotting where your current mouse speed sits on the curve and showing swipes (MT-001, 11-20, verified 86.9/100). The reconnect and accelerated-sample issues found in review are fixed.
 
 ## Before 2026-11-19
