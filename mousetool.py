@@ -11,7 +11,7 @@
   mousetool.py power [-d D] [--idle MIN] [--low PCT] get or set wireless power settings
   mousetool.py tune [-d D] [flags...]               get or set sensor, click & performance filters
   mousetool.py maccel [--set K=V ...]               print or update maccel kernel parameters
-  mousetool.py serve [--port N]                     local HTTP API for maccel, niri, and fleet discovery
+  mousetool.py serve [--port N]                     local HTTP API for maccel, desktop settings, and fleet discovery
   mousetool.py open                                 open index.html in a WebHID-capable browser
 
 Supported protocols:
@@ -41,6 +41,9 @@ import threading
 import time
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+import desktop_pointer
+from desktop_pointer import NIRI_CONFIG, desktop_state, niri_set, niri_state
 
 # ----------------------------------------------------------------------------- known devices
 RAZER_VID = 0x1532
@@ -2989,91 +2992,6 @@ def maccel_cmd(args):
         print(json.dumps(maccel_state(), indent=2))
 
 
-# ----------------------------------------------------------------------------- niri config
-NIRI_CONFIG = os.path.expanduser("~/.config/niri/config.kdl")
-
-
-def _find_niri_mouse_block(cfg):
-    m = re.search(r"^[ \t]*mouse[ \t]*\{", cfg, re.M)
-    if not m:
-        return None
-    depth = 1
-    i = m.end()
-    while i < len(cfg) and depth > 0:
-        ch = cfg[i]
-        if ch == "{":
-            depth += 1
-        elif ch == "}":
-            depth -= 1
-            if depth == 0:
-                return m.start(), i + 1, m.end(), i
-        i += 1
-    return None
-
-
-def niri_state(path=NIRI_CONFIG):
-    try:
-        with open(path) as f:
-            cfg = f.read()
-        span = _find_niri_mouse_block(cfg)
-        block = cfg[span[2]:span[3]] if span else ""
-        prof = re.search(r'^\s*accel-profile\s+"(\w+)"', block, re.M)
-        speed = re.search(r"^\s*accel-speed\s+(-?[\d.]+)", block, re.M)
-        return {
-            "accel_profile": prof.group(1) if prof else "adaptive",
-            "accel_speed": float(speed.group(1)) if speed else 0.0,
-        }
-    except OSError:
-        return None
-
-
-def niri_set(updates, path=NIRI_CONFIG):
-    if not os.path.isfile(path):
-        raise FileNotFoundError(f"niri config not found at {path}")
-    with open(path) as f:
-        cfg = f.read()
-    span = _find_niri_mouse_block(cfg)
-    if not span:
-        raise ValueError("no `mouse { ... }` block found in niri config")
-
-    if "accel_profile" in updates:
-        p = updates["accel_profile"]
-        if p not in ("flat", "adaptive"):
-            raise ValueError("accel_profile must be 'flat' or 'adaptive'")
-    if "accel_speed" in updates:
-        s = updates["accel_speed"]
-        if isinstance(s, bool) or not isinstance(s, (int, float)) or not math.isfinite(s) or not (-1.0 <= s <= 1.0):
-            raise ValueError("accel_speed must be between -1.0 and 1.0")
-
-    _, _, inner_s, inner_e = span
-    block = cfg[inner_s:inner_e]
-    indent_m = re.search(r"\n([ \t]+)\S", block)
-    indent = indent_m.group(1) if indent_m else "        "
-
-    if "accel_profile" in updates:
-        line = f'accel-profile "{updates["accel_profile"]}"'
-        if re.search(r'^[ \t]*accel-profile\s+"[^"]+"', block, re.M):
-            block = re.sub(r'^([ \t]*)accel-profile\s+"[^"]+"', rf"\1{line}", block, count=1, flags=re.M)
-        else:
-            block = f"\n{indent}{line}" + block
-
-    if "accel_speed" in updates:
-        val = f"{updates['accel_speed']:.3f}".rstrip("0").rstrip(".")
-        if val in ("", "-0"):
-            val = "0"
-        line = f"accel-speed {val}"
-        if re.search(r"^[ \t]*accel-speed\s+-?[\d.]+", block, re.M):
-            block = re.sub(r"^([ \t]*)accel-speed\s+-?[\d.]+", rf"\1{line}", block, count=1, flags=re.M)
-        else:
-            block = f"\n{indent}{line}" + block
-
-    new_cfg = cfg[:inner_s] + block + cfg[inner_e:]
-    with open(path + ".tmp", "w") as f:
-        f.write(new_cfg)
-    os.replace(path + ".tmp", path)
-    return niri_state(path)
-
-
 # ----------------------------------------------------------------------------- live mouse motion telemetry
 EV_SYN = 0x00
 SYN_REPORT = 0x00
@@ -3769,11 +3687,14 @@ class Api(BaseHTTPRequestHandler):
         if not self._origin_ok():
             return self._send(403, {"error": "origin not allowed"})
         parsed = urllib.parse.urlsplit(self.path)
+        if parsed.path == "/api/desktop":
+            return self._send(200, {"desktop": desktop_state()})
         if parsed.path == "/api/status":
             return self._send(200, {
                 "version": 2,
                 "maccel": maccel_state(),
                 "niri": niri_state(),
+                "desktop": desktop_state(),
                 "system_mice": discover_system_mice(),
             })
         if parsed.path == "/api/devices":
@@ -3786,7 +3707,7 @@ class Api(BaseHTTPRequestHandler):
         if not self._origin_ok() or self.headers.get("X-Mouse-Tool") != "1":
             return self._send(403, {"error": "forbidden"})
         parsed = urllib.parse.urlsplit(self.path)
-        if parsed.path not in ("/api/maccel", "/api/niri"):
+        if parsed.path not in ("/api/maccel", "/api/niri", "/api/desktop"):
             return self._send(404, {"error": "not found"})
         try:
             n = min(int(self.headers.get("Content-Length", 0)), 4096)
@@ -3797,9 +3718,14 @@ class Api(BaseHTTPRequestHandler):
                 st = maccel_set(body)
                 MOTION_HUB.refresh_dpi()
                 self._send(200, {"maccel": st})
+            elif parsed.path == "/api/desktop":
+                self._send(200, {"desktop": desktop_state(body)})
             else:
-                self._send(200, {"niri": niri_set(body)})
+                with desktop_pointer.LOCK:
+                    self._send(200, {"niri": niri_set(body)})
         except PermissionError as e:
+            if parsed.path == "/api/desktop":
+                return self._send(409, {"error": str(e), "desktop": desktop_state()})
             self._send(409, {"error": str(e), "maccel": maccel_state()})
         except (ValueError, TypeError) as e:
             self._send(400, {"error": str(e)})
