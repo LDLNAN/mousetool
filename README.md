@@ -1,6 +1,6 @@
 # Mouse Tool
 
-A lightweight, universal web and CLI suite for managing **multiple connected mice at once**, kernel-level mouse acceleration (`maccel`), and `niri` desktop pointer settings on Linux — without vendor bloatware.
+A lightweight, universal web and CLI suite for managing **multiple connected mice at once**, kernel-level mouse acceleration (`maccel`), and desktop pointer settings on Linux — without vendor bloatware.
 
 ## Supported Protocols & Hardware
 
@@ -37,14 +37,14 @@ A lightweight, universal web and CLI suite for managing **multiple connected mic
   - **01.3 Sensor, click & performance tuning**: Capability-driven controls for Click Debounce (`ms`), Motion Sync, Angle Snapping, Ripple Control, Performance/Turbo mode, 20K Scan Mode (Scyrox V8S), Anti-mistouch (ATK F1 Ultimate 2.0), plus Endgame Gear Slamclick, Motion Jitter, Glass Mode, Lift-Off LED disable, Force Max FPS, Angle Tuning, and GX Speed/Safe SPDT.
   - **Live Polling Rate Meter & Input Tester**: Works with every connected mouse (`pointerrawupdate` / `getCoalescedEvents`) alongside onboard Razer Normal + HyperShift remaps and EGG left-handed swap.
   - **Power & Device Info**: Battery/sleep controls for wireless mice, protocol & HID collection diagnostics, cached write-only state notices where hardware offers no getter, EGG factory reset, and a **raw HID input snooper**.
-  - **Acceleration (`maccel` + `niri`)**: Interactive SVG curve visualizer and parameter editor for `Linear`, `Natural`, `Synchronous`, and `No accel` modes, `niri` pointer profile controls, and one-click `Use mouse DPI` synced to the active fleet mouse.
+  - **Acceleration (`maccel` + desktop pointer settings)**: Interactive SVG curve visualizer and parameter editor for `Linear`, `Natural`, `Synchronous`, and `No accel` modes, desktop pointer profile and speed controls, and one-click `Use mouse DPI` synced to the active fleet mouse.
 - **CLI & Local API (`mousetool.py`)**:
   - `list [--json]`: Discover all configurable and passive generic mice connected to the system.
   - `status [-d SEL | --all] [--json]`: Full hardware readout across one or all connected mice (supports index `1`/`2`, `VID:PID`, `/dev/hidrawN`, driver name, or substring).
   - `battery [-d SEL | --all] [--json]`: Battery percentage and charging state with offline/asleep cache fallback (`~/.cache/mousetool/battery.json`).
   - `dpi [-d SEL] [X [Y]]`, `stages [-d SEL] ...`, `poll [-d SEL] [HZ]`, `lod [-d SEL] ...`, `power [-d SEL] ...`, `tune [-d SEL] [--debounce MS ...]`: Configure one or more mice directly from the terminal.
   - `maccel [--set K=V ...]`: Inspect or update `maccel` kernel parameters and reboot-persistent reset scripts.
-  - `serve [--port N]`: Local HTTP API (`127.0.0.1:8766`) serving `/api/status` (with `system_mice`), `/api/devices`, `/api/maccel`, and `/api/niri`.
+  - `serve [--port N]`: Local HTTP API (`127.0.0.1:8766`) serving `/api/status` (with `system_mice`), `/api/devices`, `/api/maccel`, and `/api/desktop`. The original `/api/niri` write endpoint remains available.
   - `open`: Launches `index.html` in a WebHID-capable browser (`brave`, `chromium`, or `google-chrome`).
 - **Diagnostics (`probe.py`)**: Read-only diagnostic tool that scans all connected HID mice (`Razer`, `Endgame Gear 8k / -we`, `Logitech HID++`, `Pulsar`, `CompX ODM`, `Glorious`, and generic mice) without altering device state.
 
@@ -79,6 +79,24 @@ Launch from your app menu (**Mouse Tool**), or run:
 ./mousetool.py open
 ```
 
+### Desktop pointer settings
+
+Open **Acceleration → Desktop pointer settings** to change the acceleration profile or pointer speed. Choose **Flat** to avoid stacking desktop acceleration on a maccel curve. The controls work independently of the kernel module. Each desktop accepts speed directly on the **−1 to 1** scale. The slider moves in increments of 0.05. Existing native profiles such as GNOME’s `default` appear by name until you choose Flat or Adaptive.
+
+| Desktop | Where the two settings go | Scope and fixture coverage |
+| --- | --- | --- |
+| niri | `mouse { accel-profile …; accel-speed …; }` in `$XDG_CONFIG_HOME/niri/config.kdl` | Existing mouse block in the main file. KDL fixtures exercise both profiles, insertion and preservation of adjacent settings. Speed writes retain the existing three-decimal precision. [niri input configuration](https://niri-wm.github.io/niri/Configuration:-Input.html#pointing-devices) |
+| GNOME | `gsettings` keys `accel-profile` and `speed` in `org.gnome.desktop.peripherals.mouse` | Persistent mouse preferences. Requires a running GNOME Shell on the helper’s user bus, `busctl`, and both keys writable. Schema and mocked command replies cover default, locked and writable states. [GNOME schema 49.0](https://github.com/GNOME/gsettings-desktop-schemas/blob/49.0/schemas/org.gnome.desktop.peripherals.gschema.xml.in) |
+| Plasma Wayland | `busctl` reads KWin input devices and sets `pointerAccelerationProfileFlat` or `pointerAccelerationProfileAdaptive`, and `pointerAcceleration` | KWin applies and saves the selected mouse’s preferences. It stores speed to three decimals. D-Bus fixtures cover capabilities, multiple mice and touchpad exclusion. X11 is unsupported. [KWin Plasma 6.5 properties](https://github.com/KDE/kwin/blob/Plasma/6.5/src/backends/libinput/device.h) · [persistence](https://github.com/KDE/kwin/blob/Plasma/6.5/src/backends/libinput/device.cpp) |
+| Hyprland | `hyprctl -j getoption` for `input.accel_profile` and `input.sensitivity`, then `hyprctl eval` with `hl.config`. Older hyprlang sessions use colon-separated names and `hyprctl keyword`. | Global runtime settings expire on reload. Device overrides can take precedence. JSON and command fixtures cover both command dialects. [0.54 variables](https://wiki.hypr.land/0.54.0/configuring/variables/) · [current config options](https://github.com/hyprwm/hyprland-wiki/blob/main/content/configuring/core/config-options.md) · [hyprctl](https://github.com/hyprwm/hyprland-wiki/blob/main/content/configuring/core/advanced-configuration/using-hyprctl.md) |
+| COSMIC | `acceleration` record with `profile: Some(Flat/Adaptive)` and `speed` in `$XDG_CONFIG_HOME/cosmic/com.system76.CosmicComp/v1/input_default` | Persistent non-touchpad defaults. Device entries can override them. RON fixtures exercise serialized v1 records and creation from system defaults. Unrecognized acceleration syntax disables editing. [v1 input types](https://github.com/pop-os/cosmic-comp/blob/abb6ebc49ba58daa14163872954cdef3f830a04a/cosmic-comp-config/src/input.rs) · [watch and apply](https://github.com/pop-os/cosmic-comp/blob/abb6ebc49ba58daa14163872954cdef3f830a04a/src/config/mod.rs) |
+
+The helper detects the desktop from its session environment, starting with `XDG_CURRENT_DESKTOP`. If the helper started before login and has no desktop hints, it checks the systemd user manager’s environment on each detection attempt. To select one explicitly, set **`MOUSETOOL_DESKTOP`** to `niri`, `gnome`, `plasma`, `hyprland`, or `cosmic` in the helper’s environment. For example, launch `MOUSETOOL_DESKTOP=plasma ./mousetool.py serve`. With multiple Plasma mice, also set `MOUSETOOL_PLASMA_DEVICE` to the intended current kernel event name, such as `event7`. Event names can change after reconnecting or rebooting. An explicit niri or COSMIC selection edits stored preferences even when that compositor is offline. With no override, an unknown or undetected desktop leaves editing unavailable.
+
+`GET /api/desktop` and the `desktop` field of `GET /api/status` expose the backend, label, writability, profile, speed and status message. Send `POST /api/desktop` with the existing `X-Mouse-Tool: 1` header and a JSON object such as `{"accel_profile":"flat","accel_speed":0.25}`. A successful response includes the settings read back from that backend.
+
+MT-005 testing used temporary files, mocked command output and upstream documentation for all five desktops. **None of the five backends was exercised on a real desktop session for this change.**
+
 ### CLI Examples
 ```bash
 # List all connected mice (configurable + generic)
@@ -104,5 +122,5 @@ Launch from your app menu (**Mouse Tool**), or run:
 
 ## Tests
 ```bash
-python3 -m unittest -v test_mousetool.py
+python3 -m unittest -v test_mousetool.py test_desktop_pointer.py
 ```
