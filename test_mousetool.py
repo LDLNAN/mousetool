@@ -1339,5 +1339,421 @@ class TestMotionTelemetry(unittest.TestCase):
             srv.server_close()
 
 
+class TestBatteryIndicator(unittest.TestCase):
+    """MT-009: shared battery reading, Waybar JSON, /api/battery and low-battery notifications."""
+
+    HYPER = {"driver": "razer", "vid": 0x1532, "pid": 0x00B3, "hyper": True, "wireless": True,
+             "name": "Razer HyperPolling Dongle", "link": "HyperPolling dongle", "hidraw": "/dev/hidraw-fixture"}
+    SETTINGS = {"notifications": True, "low": 20, "critical": 10, "interval": 60}
+
+    def setUp(self):
+        self.real_send = mousetool.send_notification  # exercised only with a fake `run`
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.cache = os.path.join(self.tmp.name, "cache", "battery.json")
+        self.state = os.path.join(self.tmp.name, "cache", "battery_notify.json")
+        for patcher in (mock.patch.object(mousetool, "CACHE", self.cache),
+                        mock.patch.object(mousetool, "NOTIFY_STATE", self.state),
+                        mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": os.path.join(self.tmp.name, "config")}),
+                        # never reach the real session bus from a test
+                        mock.patch.object(mousetool.subprocess, "run", side_effect=AssertionError("real subprocess")),
+                        mock.patch.object(mousetool, "send_notification", side_effect=AssertionError("real bus"))):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def reading(self, pct, charging=False, stale=False, device="Pulsar 8K Dongle", age=0):
+        return {"device": device, "percent": pct, "charging": charging, "link": "Dongle",
+                "time": 1000, "stale": stale, "age": age}
+
+    # --- shared reading & stale handling -------------------------------------------------------------
+    def _razer_xfer(self, battery_raw=None, asleep=False):
+        def fake(fd, cls, cmd, size, args=(), txn=0x1F):
+            if asleep:
+                raise mousetool.Asleep("mouse didn't answer (asleep or out of range)")
+            return bytes([0, battery_raw if cmd == 0x80 else 0])
+        return fake
+
+    def _read_hyper(self, **kw):
+        real_open = os.open
+        def fixture_open(path, flags, *args):
+            if path == self.HYPER["hidraw"]:
+                return real_open(os.devnull, os.O_RDONLY)
+            return real_open(path, flags, *args)
+
+        with mock.patch.object(mousetool.os, "open", side_effect=fixture_open), \
+             mock.patch.object(mousetool, "xfer", side_effect=self._razer_xfer(**kw)):
+            return mousetool.battery_snapshot(dict(self.HYPER), now=1600, cache_path=self.cache)
+
+    def test_hyperpolling_fresh_reading_is_cached(self):
+        with mock.patch.object(mousetool.time, "time", return_value=1000):
+            b = self._read_hyper(battery_raw=128)
+        self.assertEqual((b["percent"], b["charging"], b["stale"], b["age"]), (50, False, False, 0))
+        self.assertEqual(b["link"], "HyperPolling dongle")
+        with open(self.cache) as f:
+            self.assertEqual(json.load(f)["percent"], 50)
+
+    def test_hyperpolling_asleep_falls_back_to_cache_as_stale(self):
+        mousetool._write_battery_cache(dict(self.reading(64), **mousetool._battery_identity(self.HYPER)))
+        b = self._read_hyper(asleep=True)
+        self.assertTrue(b["stale"])
+        self.assertEqual((b["percent"], b["age"]), (64, 600))
+        self.assertIn("asleep", b["reason"])
+
+    def test_zero_percent_reply_is_never_a_reading(self):
+        mousetool._write_battery_cache(dict(self.reading(41), **mousetool._battery_identity(self.HYPER)))
+        b = self._read_hyper(battery_raw=0)
+        self.assertTrue(b["stale"])
+        self.assertEqual(b["percent"], 41)
+        with open(self.cache) as f:
+            self.assertEqual(json.load(f)["percent"], 41)  # the 0 % reply didn't overwrite the cache
+        # no cache at all: unknown, not 0 %
+        os.remove(self.cache)
+        b = self._read_hyper(battery_raw=0)
+        self.assertIsNone(b["percent"])
+        self.assertTrue(b["stale"])
+        self.assertIsNone(mousetool.waybar_output(b)["percentage"])
+
+    def test_cached_zero_percent_is_ignored(self):
+        mousetool._write_battery_cache(self.reading(0))
+        b = mousetool.battery_snapshot(reader=mock.Mock(side_effect=FileNotFoundError("no wireless mouse found")))
+        self.assertIsNone(b["percent"])
+        self.assertEqual(b["reason"], "no wireless mouse found")
+
+    # --- Waybar JSON ---------------------------------------------------------------------------------
+    def test_waybar_json_for_each_state(self):
+        cases = [
+            (self.reading(80), "normal", "80%", 80),
+            (self.reading(20), "low", "20%", 20),
+            (self.reading(11), "low", "11%", 11),
+            (self.reading(10), "critical", "10%", 10),
+            (self.reading(4), "critical", "4%", 4),
+            (self.reading(4, charging=True), "charging", "4%", 4),
+            (self.reading(95, charging=True), "charging", "95%", 95),
+            (self.reading(15, stale=True, age=1800), "stale", "15%", 15),
+            ({"device": None, "percent": None, "charging": False, "link": None, "stale": True,
+              "age": None, "reason": "no wireless mouse found"}, "stale", "–", None),
+        ]
+        for b, cls, text, pct in cases:
+            with self.subTest(cls=cls, pct=b["percent"], charging=b["charging"]):
+                out = mousetool.waybar_output(b, 20, 10)
+                self.assertEqual(out["class"], cls)
+                self.assertEqual(out["alt"], cls)
+                self.assertEqual(out["text"], text)
+                self.assertEqual(out.get("percentage"), pct)
+                self.assertTrue(out["tooltip"])
+                self.assertEqual(json.loads(json.dumps(out)), out)
+        stale = mousetool.waybar_output(self.reading(15, stale=True, age=1800))
+        self.assertIn("30 min ago", stale["tooltip"])
+        self.assertIn("Asleep", stale["tooltip"])
+        self.assertIn("charging", mousetool.waybar_output(self.reading(50, charging=True))["tooltip"])
+        # thresholds come from the settings, not hard-coded
+        self.assertEqual(mousetool.waybar_output(self.reading(25), 30, 15)["class"], "low")
+
+    # --- notification state machine ------------------------------------------------------------------
+    def _notifier(self, fail=False):
+        sent = []
+
+        def send(summary, body, urgency=1, icon="", replace_id=0):
+            if fail:
+                raise OSError("no notification daemon")
+            sent.append({"summary": summary, "body": body, "urgency": urgency, "icon": icon, "replace": replace_id})
+            return 40 + len(sent)
+        return mousetool.BatteryNotifier(send=send, state_path=self.state, log=lambda m: None), sent
+
+    def feed(self, n, readings, settings=None):
+        return [n.update(r, settings or self.SETTINGS) for r in readings]
+
+    def test_one_notification_per_crossing_with_hysteresis(self):
+        n, sent = self._notifier()
+        seq = [50, 30, 21, 20, 21, 19, 20, 24, 18, 11, 10, 11, 9, 10, 14, 12, 15, 10, 22, 24, 25, 20]
+        results = self.feed(n, [self.reading(p) for p in seq])
+        fired = [(p, r["level"]) for p, r in zip(seq, results) if r]
+        # 20 -> low; 10 -> critical; 15 re-arms critical so 10 fires again; 25 re-arms low so 20 fires again
+        self.assertEqual(fired, [(20, 1), (10, 2), (10, 2), (20, 1)])
+        self.assertEqual([s["urgency"] for s in sent], [1, 2, 2, 1])
+        self.assertEqual(sent[0]["summary"], "Mouse battery low")
+        self.assertEqual(sent[0]["body"], "Pulsar 8K Dongle is at 20%. Charge it soon.")
+        self.assertEqual(sent[1]["summary"], "Mouse battery critical")
+        self.assertEqual(sent[1]["icon"], "battery-caution")
+        # each notification replaces the previous one instead of stacking
+        self.assertEqual([s["replace"] for s in sent], [0, 41, 42, 43])
+
+    def test_straight_to_critical_sends_only_critical(self):
+        n, sent = self._notifier()
+        self.feed(n, [self.reading(60), self.reading(8), self.reading(7)])
+        self.assertEqual([s["urgency"] for s in sent], [2])
+
+    def test_charging_rearms_and_never_notifies(self):
+        n, sent = self._notifier()
+        self.feed(n, [self.reading(18), self.reading(9, charging=True), self.reading(5, charging=True),
+                      self.reading(18)])
+        self.assertEqual([s["summary"] for s in sent], ["Mouse battery low", "Mouse battery low"])
+
+    def test_stale_and_unknown_readings_are_silent_and_keep_state(self):
+        n, sent = self._notifier()
+        self.feed(n, [self.reading(19)])
+        self.assertEqual(len(sent), 1)
+        quiet = [self.reading(5, stale=True), self.reading(None), self.reading(0),
+                 {"device": None, "percent": None, "charging": False, "stale": True}]
+        self.assertEqual(self.feed(n, quiet), [None] * 4)
+        self.assertEqual(n.level, 1)  # asleep didn't re-arm or escalate
+        self.feed(n, [self.reading(19)])
+        self.assertEqual(len(sent), 1)
+
+    def test_disabled_setting_sends_nothing(self):
+        n, sent = self._notifier()
+        off = dict(self.SETTINGS, notifications=False)
+        self.assertEqual(self.feed(n, [self.reading(15), self.reading(5)], off), [None, None])
+        self.assertEqual(sent, [])
+
+    def test_failed_send_retries_on_next_poll_only_until_it_works(self):
+        n, _ = self._notifier(fail=True)
+        self.assertIsNone(n.update(self.reading(15), self.SETTINGS))
+        self.assertEqual(n.level, 0)
+        n2, sent = self._notifier()
+        self.feed(n2, [self.reading(15), self.reading(15)])
+        self.assertEqual(len(sent), 1)
+
+    def test_state_survives_restart_and_resets_for_another_mouse(self):
+        n, sent = self._notifier()
+        self.feed(n, [self.reading(15)])
+        n2, sent2 = self._notifier()
+        self.assertEqual((n2.level, n2.notification_id), (1, 0))
+        self.feed(n2, [self.reading(14)])
+        self.assertEqual(sent2, [])
+        self.feed(n2, [self.reading(14, device="Endgame Gear OP1 8k")])
+        self.assertEqual(len(sent2), 1)
+
+    # --- D-Bus sender ------------------------------------------------------------------------------
+    def test_send_notification_uses_gdbus_with_urgency_category_and_replace_id(self):
+        calls = []
+
+        def run(cmd, **kw):
+            calls.append(cmd)
+            return mock.Mock(returncode=0, stdout="(uint32 57,)\n", stderr="")
+        nid = self.real_send("Mouse battery critical", "Bob's mouse is at 9%.", urgency=2,
+                                          icon="battery-caution", replace_id=41, run=run,
+                                          which=lambda name: f"/usr/bin/{name}")
+        self.assertEqual(nid, 57)
+        cmd = calls[0]
+        self.assertEqual(cmd[:3], ["gdbus", "call", "--session"])
+        self.assertIn("org.freedesktop.Notifications.Notify", cmd)
+        self.assertIn("41", cmd)
+        self.assertIn("'Bob\\'s mouse is at 9%.'", cmd)
+        self.assertIn("'urgency': <byte 2>", cmd[-2])
+        self.assertIn("'category': <'device'>", cmd[-2])
+        self.assertLess(cmd.index("--"), cmd.index("-1"))  # "-1" (timeout) must not parse as an option
+
+    def test_send_notification_falls_back_to_busctl_then_errors(self):
+        calls = []
+
+        def run(cmd, **kw):
+            calls.append(cmd[0])
+            if cmd[0] == "gdbus":
+                return mock.Mock(returncode=1, stdout="", stderr="Error: ServiceUnknown")
+            return mock.Mock(returncode=0, stdout="u 12\n", stderr="")
+        which = lambda name: None if name == "notify-send" else f"/usr/bin/{name}"
+        self.assertEqual(self.real_send("s", "b", urgency=1, run=run, which=which), 12)
+        self.assertEqual(calls, ["gdbus", "busctl"])
+        with self.assertRaises(OSError):
+            self.real_send("s", "b", run=run, which=lambda name: None)
+
+    # --- settings ------------------------------------------------------------------------------------
+    def test_cli_uses_custom_port_owner_and_unreachable_owner_cache(self):
+        port = self._server()
+        w = mousetool.BatteryWatcher(snapshot=lambda: self.reading(39), notifier=None)
+        w.poll_once()
+        with mousetool._battery_lock(".owner") as owner, mock.patch.object(mousetool, "BATTERY_WATCHER", w), \
+             mock.patch.object(mousetool, "read_battery", side_effect=AssertionError("second reader")):
+            mousetool.fcntl.flock(owner, mousetool.fcntl.LOCK_EX)
+            owner.write(str(port))
+            owner.flush()
+            self.assertEqual(mousetool._cli_sample()["percent"], 39)
+            with mock.patch.object(mousetool, "_service_battery", return_value=None):
+                self.assertEqual(mousetool._cli_sample(direct=True)["source"], "cache")
+
+    def test_notification_handle_scoped_to_owner_and_invalid_id_retry(self):
+        n = mousetool.BatteryNotifier(state_path=self.state)
+        owner = mock.Mock(side_effect=[("bus", ":1.2"), ("bus", ":1.3"), ("bus", ":1.3")])
+        sender = mock.Mock(side_effect=[501, 501, mousetool.InvalidNotificationId("unknown replacement ID"), 502])
+        with mock.patch.object(mousetool, "notification_owner", owner), mock.patch.object(mousetool, "send_notification", sender):
+            self.feed(n, [self.reading(p) for p in (20, 10, 25, 20)])
+        self.assertEqual([(c.kwargs["destination"], c.kwargs["replace_id"]) for c in sender.call_args_list],
+                         [(":1.2", 0), (":1.3", 0), (":1.3", 501), (":1.3", 0)])
+        self.assertEqual(n.notification_id, 502)
+
+    def test_dispatch_observes_opt_out_and_muted_recovery(self):
+        n, sent = self._notifier()
+        n.update(self.reading(20), self.SETTINGS)
+        def snapshot():
+            mousetool.save_battery_settings({"notifications": False})
+            return self.reading(10)
+        w = mousetool.BatteryWatcher(snapshot=snapshot, notifier=n)
+        w.poll_once()
+        self.assertEqual(len(sent), 1)
+        n.update(self.reading(60, charging=True), mousetool.load_battery_settings())
+        n.update(self.reading(18), mousetool.save_battery_settings({"notifications": True}))
+        self.assertEqual([s["urgency"] for s in sent], [1, 1])
+
+    def test_cache_requires_complete_record_and_matching_mouse(self):
+        mousetool._write_battery_cache({"percent": 77, "time": 1000})
+        self.assertIsNone(mousetool._read_battery_cache())
+        first = dict(self.HYPER, uniq="mouse-a")
+        second = dict(self.HYPER, uniq="mouse-b")
+        mousetool.battery_snapshot(first, reader=lambda _: self.reading(53))
+        mousetool._write_battery_cache(dict(self.reading(77), **mousetool._battery_identity(second)))
+        asleep = mock.Mock(side_effect=mousetool.Asleep("asleep"))
+        self.assertEqual(mousetool.battery_snapshot(first, reader=asleep)["percent"], 53)
+        self.assertIsNone(mousetool.battery_snapshot(dict(first, uniq="mouse-c"), reader=asleep)["percent"])
+        self.assertEqual(mousetool._read_battery_cache()["percent"], 77)
+
+    def test_waybar_example_escapes_and_all_is_rejected(self):
+        import contextlib, io, pathlib
+        readme = pathlib.Path(__file__).with_name("README.md").read_text()
+        snippet = readme.split("### Mouse battery in Waybar")[1].split("```json")[1].split("```")[0]
+        self.assertTrue(json.loads("{" + snippet + "}")["custom/mouse-battery"]["escape"])
+        errors = io.StringIO()
+        with mock.patch.object(mousetool.sys, "argv", ["mousetool", "battery", "--all", "--waybar"]), \
+             contextlib.redirect_stderr(errors), self.assertRaises(SystemExit) as caught:
+            mousetool.main()
+        self.assertEqual(caught.exception.code, 2)
+        self.assertIn("--all and --waybar", errors.getvalue())
+
+    def test_settings_defaults_save_and_validation(self):
+        self.assertEqual(mousetool.load_battery_settings(), mousetool.BATTERY_DEFAULTS)
+        st = mousetool.save_battery_settings({"notifications": False})
+        self.assertFalse(st["notifications"])
+        self.assertEqual(mousetool.load_battery_settings()["notifications"], False)
+        self.assertTrue(mousetool.battery_settings_path().startswith(os.path.join(self.tmp.name, "config")))
+        for bad in ({"notifications": "no"}, {"low": 5, "critical": 10}, {"critical": 0}, {"interval": 1},
+                    {"low": True}, {"volume": 3}):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                mousetool.save_battery_settings(bad)
+        with open(mousetool.battery_settings_path(), "w") as f:
+            f.write("{broken")
+        self.assertEqual(mousetool.load_battery_settings(), mousetool.BATTERY_DEFAULTS)
+
+    # --- watcher & API -----------------------------------------------------------------------------
+    def test_watcher_payload_staleness_and_notifier_feed(self):
+        clock = [1030]
+        notifier = mock.Mock()
+        w = mousetool.BatteryWatcher(snapshot=lambda: self.reading(19), notifier=notifier,
+                                     settings=lambda: dict(self.SETTINGS), clock=lambda: clock[0])
+        mousetool._write_battery_cache(self.reading(77))
+        before = w.state()
+        self.assertTrue(before["stale"])
+        self.assertEqual(before["percent"], 77)
+        w.poll_once()
+        notifier.update.assert_called_once()
+        st = w.state()
+        self.assertEqual((st["percent"], st["stale"], st["age"], st["class"]), (19, False, 30, "low"))
+        self.assertEqual(st["notifications"], {"enabled": True, "low": 20, "critical": 10})
+        clock[0] = 1000 + 3 * 60 + 1  # watcher stuck for over three polls
+        st = w.state()
+        self.assertTrue(st["stale"])
+        self.assertEqual(st["class"], "stale")
+        # a reader exception never kills the watcher and never reports 0 %
+        w2 = mousetool.BatteryWatcher(snapshot=mock.Mock(side_effect=RuntimeError("boom")), notifier=None,
+                                      settings=lambda: dict(self.SETTINGS))
+        self.assertIsNone(w2.poll_once()["percent"])
+
+    def test_watcher_thread_polls_and_stops(self):
+        polled = threading.Event()
+
+        def snap():
+            polled.set()
+            return self.reading(50)
+        w = mousetool.BatteryWatcher(snapshot=snap, notifier=None, settings=lambda: dict(self.SETTINGS)).start()
+        self.assertTrue(polled.wait(2))
+        w.stop()
+        w._thread.join(2)
+        self.assertFalse(w._thread.is_alive())
+
+    def _server(self):
+        srv = ThreadingHTTPServer(("127.0.0.1", 0), mousetool.Api)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        self.addCleanup(srv.server_close)
+        self.addCleanup(srv.shutdown)
+        return srv.server_address[1]
+
+    def test_api_battery_get_and_post(self):
+        port = self._server()
+        w = mousetool.BatteryWatcher(snapshot=lambda: dict(self.reading(9), time=int(time.time())),
+                                     notifier=None)
+        w.poll_once()
+        with mock.patch.object(mousetool, "BATTERY_WATCHER", w):
+            c = http.client.HTTPConnection("127.0.0.1", port, timeout=2)
+            c.request("GET", "/api/battery", headers={"Origin": "null"})
+            r = c.getresponse()
+            self.assertEqual(r.status, 200)
+            self.assertEqual(r.getheader("Access-Control-Allow-Origin"), "null")
+            body = json.loads(r.read())
+            for k in ("percent", "charging", "stale", "age"):
+                self.assertIn(k, body)
+            self.assertEqual((body["percent"], body["stale"], body["class"]), (9, False, "critical"))
+            self.assertTrue(body["notifications"]["enabled"])
+
+            c.request("POST", "/api/battery", body=b'{"notifications": false}', headers={"Origin": "null"})
+            r = c.getresponse(); r.read()
+            self.assertEqual(r.status, 403)  # needs X-Mouse-Tool
+            c.request("POST", "/api/battery", body=b'{"notifications": "maybe"}', headers={"X-Mouse-Tool": "1"})
+            r = c.getresponse(); r.read()
+            self.assertEqual(r.status, 400)
+            c.request("POST", "/api/battery", body=b'{"notifications": false}',
+                      headers={"Origin": "null", "X-Mouse-Tool": "1", "Content-Type": "application/json"})
+            r = c.getresponse()
+            self.assertEqual(r.status, 200)
+            self.assertFalse(json.loads(r.read())["notifications"]["enabled"])
+            self.assertFalse(mousetool.load_battery_settings()["notifications"])
+
+            c.request("GET", "/api/battery", headers={"Origin": "https://evil.example"})
+            r = c.getresponse(); r.read()
+            self.assertEqual(r.status, 403)
+            c.close()
+        # no watcher (serve --no-battery-watch): cached value, stale, and no hidraw access
+        mousetool._write_battery_cache(self.reading(66))
+        with mock.patch.object(mousetool, "BATTERY_WATCHER", None), \
+             mock.patch.object(mousetool, "read_battery", side_effect=AssertionError("hidraw touched")):
+            c = http.client.HTTPConnection("127.0.0.1", port, timeout=2)
+            c.request("GET", "/api/battery")
+            body = json.loads(c.getresponse().read())
+            c.close()
+        self.assertEqual((body["percent"], body["stale"], body["class"]), (66, True, "stale"))
+
+    def test_cli_prefers_service_and_falls_back_to_direct(self):
+        port = self._server()
+        w = mousetool.BatteryWatcher(snapshot=lambda: dict(self.reading(33), time=int(time.time())),
+                                     notifier=None)
+        w.poll_once()
+        with mock.patch.object(mousetool, "BATTERY_WATCHER", w):
+            from_service = mousetool._service_battery(port=port)
+        self.assertEqual((from_service["percent"], from_service["source"]), (33, "service"))
+        self.assertIsNone(mousetool._service_battery(port=1))  # nothing listening
+
+        def run(argv):
+            import contextlib, io
+            buf = io.StringIO()
+            with mock.patch.object(mousetool.sys, "argv", ["mousetool.py", *argv]), contextlib.redirect_stdout(buf):
+                mousetool.main()
+            return buf.getvalue().strip()
+
+        with mock.patch.object(mousetool, "_service_battery", return_value=dict(from_service)), \
+             mock.patch.object(mousetool, "read_battery", side_effect=AssertionError("hidraw touched")):
+            out = json.loads(run(["battery", "--waybar"]))
+            self.assertEqual((out["text"], out["class"], out["percentage"]), ("33%", "normal", 33))
+            self.assertRegex(run(["battery"]), r"^33 0 0 \d+$")
+        with mock.patch.object(mousetool, "_service_battery", return_value=None), \
+             mock.patch.object(mousetool, "read_battery", side_effect=mousetool.Asleep("asleep")):
+            self.assertEqual(json.loads(run(["battery", "--waybar"]))["class"], "stale")
+            self.assertEqual(run(["battery"]), "- 0 1 -")
+        with mock.patch.object(mousetool, "_service_battery", side_effect=AssertionError("asked service")), \
+             mock.patch.object(mousetool, "read_battery", return_value=self.reading(12)):
+            out = json.loads(run(["battery", "--direct", "--json"]))
+            self.assertEqual((out["percent"], out["source"]), (12, "direct"))
+        self.assertIn("notifications off", run(["battery", "--notifications", "off"]))
+        self.assertFalse(mousetool.load_battery_settings()["notifications"])
+        self.assertIn("notifications on", run(["battery", "--notifications", "on"]))
+
+
 if __name__ == "__main__":
     unittest.main()
