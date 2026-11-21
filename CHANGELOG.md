@@ -5,6 +5,7 @@ Notable user-visible changes to Mouse Tool. Updated with every merge to local `d
 ## Unreleased
 
 ### Changed
+- **mouseaccel support**: mousetool now uses the `mouseaccel` kernel module when it is loaded and falls back to `maccel` otherwise, with the module in use shown on the Acceleration tab. Saving a stale draft after the backend changes is refused instead of overwriting the other module, the privileged helper no longer follows symlinks, and unreadable parameters now say so (MA-002, 11-21, verified 89.9/100, cross-provider reviewer). Install the new udev rule with `./install.sh --mouseaccel-perms`; nothing is loaded or swapped for you.
 - **README screenshots**: six full-size screenshots of the sensitivity, acceleration, desktop pointer and tuning views, a script that regenerates them, and corrected hardware and command-line notes (MT-004, 11-21, verified 90.2/100, cross-provider reviewer).
 - **Mouse outline and device text**: a redrawn mouse wireframe shape and a cleaner device-name font that fits at narrow widths (MT-008/010, 11-21, verified 93.3/91.4, same-family reviewer).
 
