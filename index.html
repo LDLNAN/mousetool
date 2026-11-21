@@ -752,6 +752,7 @@ input[type=range]:focus-visible::-webkit-slider-thumb { border-color: var(--acce
     <div class="empty-actions">
       <button class="primary" id="connect2">Connect mouse</button>
       <button id="connectAny2">Any HID device…</button>
+      <button id="openPowerOnly">Power settings</button>
       <button id="openAccelOnly">Acceleration &amp; desktop</button>
     </div>
     <div class="banner" id="nohid" hidden>This browser does not support WebHID. Open this page in Chromium or Brave.</div>
@@ -1040,6 +1041,13 @@ input[type=range]:focus-visible::-webkit-slider-thumb { border-color: var(--acce
         <div class="setting">
           <div class="label"><b>Power source</b><p>Battery / charging status reported by the mouse or dongle.</p></div>
           <div class="control"><span class="mono" id="chargeVal">–</span></div>
+        </div>
+        <div class="setting" id="notifyRow">
+          <div class="label"><b id="notifyTitle">Desktop notifications</b><p id="notifyDesc">The local helper warns you when the battery runs low, even with this window closed.</p></div>
+          <div class="control">
+            <span class="state" data-for="notify" role="status"></span>
+            <label class="switch"><input type="checkbox" id="batteryNotify" aria-labelledby="notifyTitle" aria-describedby="notifyDesc" disabled> Enabled</label>
+          </div>
         </div>
       </section>
     </div>
@@ -3236,6 +3244,11 @@ function renderBattery() {
     $("hBattCells").innerHTML = "";
   }
   $("hBattS").textContent = ch ? "⚡ Charging" : "";
+  if (s?.sharedBattery?.stale) {
+    $("hBattS").textContent = pct == null ? "No reading" : "Last known";
+    $("chargeVal").textContent = "Awaiting a fresh reading";
+    return;
+  }
   $("chargeVal").textContent = ch == null ? (s?.caps?.batteryRead ? "Reading…" : "N/A") : (ch ? "Charging" : "On battery");
 }
 
@@ -3840,11 +3853,37 @@ $("btnResetAll").addEventListener("click", async () => {
 // ======================================================================
 let timer = null;
 
+async function sharedBattery(sess) {
+  try {
+    const res = await fetch(`${HELPER}/api/battery`, {cache: "no-store", signal: AbortSignal.timeout(1500)});
+    if (!res.ok) throw new Error("Helper unavailable");
+    const b = await res.json();
+    const modelMatches = b.vid != null ? b.vid === sess.vid && b.pid === sess.pid
+      : b.device === sess.name && b.link === sess.link;
+    const serial = sess.dev.serialNumber;
+    const unique = b.model_unique !== false && ![...sessions.values()].some(
+      other => other !== sess && other.vid === sess.vid && other.pid === sess.pid);
+    const serialsKnown = Boolean(b.serial && serial);
+    const matched = modelMatches && (serialsKnown ? b.serial === serial : unique);
+    const ambiguous = modelMatches && !serialsKnown && !unique;
+    const pending = b.reason === "waiting for the first reading";
+    sess.sharedBattery = null;
+    if (b.watching !== false) {
+      if (matched) sess.sharedBattery = b;
+      else if (ambiguous || pending) sess.sharedBattery = {percent: null, charging: null, stale: true};
+    }
+  } catch {
+    if (sess.sharedBattery) sess.sharedBattery = {...sess.sharedBattery, stale: true};
+  }
+  return sess.sharedBattery;
+}
+
 async function syncKeys(sess, keys) {
   if (!sess || !sessions.has(sess.id)) return;
   if (sess.syncP) { await sess.syncP.catch(() => {}); return; }
   sess.syncP = (async () => {
     let ok = 0, timeouts = 0;
+    const sample = sess.caps.batteryRead && keys.includes("battery") ? await sharedBattery(sess) : null;
     const readers = {
       dpi: () => sess.api.getDpi?.(),
       stages: () => sess.api.getStages?.(),
@@ -3854,8 +3893,8 @@ async function syncKeys(sess, keys) {
       idle: () => sess.caps.powerTune && sess.caps.wireless ? sess.api.getIdle?.() : undefined,
       low: () => sess.caps.powerTune && sess.caps.wireless ? sess.api.getLow?.() : undefined,
       led: () => sess.caps.hyper ? sess.api.getDongleLed?.() : undefined,
-      battery: () => sess.caps.batteryRead ? sess.api.battery?.() : undefined,
-      charging: () => sess.caps.batteryRead ? sess.api.charging?.() : undefined,
+      battery: () => sample ? sample.percent : sess.caps.batteryRead ? sess.api.battery?.() : undefined,
+      charging: () => sample ? (sample.stale ? null : sample.charging) : sess.caps.batteryRead ? sess.api.charging?.() : undefined,
       eggAll: () => sess.api.readKey?.(),
       compxAll: () => sess.api.readKey?.(),
       pproAll: () => sess.api.readKey?.(),
@@ -4425,7 +4464,7 @@ async function detachSession(id, msg) {
   renderFleet();
 }
 
-const MOUSE_TABS = ["perf", "buttons", "power", "dongle", "device"];
+const MOUSE_TABS = ["perf", "buttons", "dongle", "device"];
 function setTabAccess(mouseOn) {
   for (const t of document.querySelectorAll(".tab")) {
     if (MOUSE_TABS.includes(t.dataset.tab)) {
@@ -4433,18 +4472,24 @@ function setTabAccess(mouseOn) {
       t.title = mouseOn ? "" : "Connect a mouse first";
     }
   }
+  $("powerNote").hidden = !mouseOn;
+  $("chargeVal").closest(".setting").hidden = !mouseOn;
+  if (!mouseOn) {
+    $("idleRow").hidden = true;
+    $("lowRow").hidden = true;
+  }
   $("hero").hidden = !mouseOn;
   $("appFoot").hidden = !mouseOn;
 }
 
-function showConnected(on, accelOnly = false) {
-  const showApp = on || accelOnly;
+function showConnected(on, helperOnly = false, tab = "accel") {
+  const showApp = on || helperOnly;
   $("app").hidden = !showApp;
   $("empty").hidden = showApp;
   $("refresh").hidden = !on;
   setTabAccess(on);
   if (!on) { $("conn").className = "pill"; renderSyncLabel(); }
-  if (accelOnly && !on) showTab("accel");
+  if (helperOnly && !on) showTab(tab);
   paintRanges();
   if (typeof syncAccelMotion === "function") syncAccelMotion();
 }
@@ -4505,6 +4550,7 @@ $("connect").addEventListener("click", () => connectSupportedDevices());
 $("connect2").addEventListener("click", () => connectSupportedDevices());
 $("connectAny").addEventListener("click", connectGenericDevice);
 $("connectAny2").addEventListener("click", connectGenericDevice);
+$("openPowerOnly").addEventListener("click", () => { showConnected(false, true, "power"); });
 $("openAccelOnly").addEventListener("click", () => { showConnected(false, true); loadAccel(); });
 $("refresh").addEventListener("click", async () => {
   const s = cur(); if (!s) return;
@@ -4565,6 +4611,7 @@ function showTab(name) {
   for (const p of document.querySelectorAll(".panel")) p.hidden = p.dataset.panel !== name;
   if (name === "device") paintLog();
   if (name === "accel") loadAccel();
+  if (name === "power") setTimeout(loadBatteryNotify);
   if (typeof syncAccelMotion === "function") syncAccelMotion();
   try { localStorage.setItem("mousetool.tab", name); } catch {}
 }
@@ -5639,6 +5686,64 @@ $("desktopProfile").addEventListener("click", (e) => {
 });
 $("desktopSpeed").addEventListener("input", () => { $("desktopSpeedVal").textContent = (+$("desktopSpeed").value).toFixed(2); });
 $("desktopSpeed").addEventListener("change", () => { postDesktop({ accel_speed: +$("desktopSpeed").value }); });
+
+// ======================================================================
+// low-battery desktop notifications (sent by the local helper's battery watcher)
+// ======================================================================
+let batteryNotify = null;  // { enabled, low, critical } from GET /api/battery, null when the helper is offline
+let batteryNotifyRequest = 0;
+let batteryNotifySaving = false;
+let batteryNotifyLoading = true;
+function renderBatteryNotify() {
+  const box = $("batteryNotify");
+  box.disabled = batteryNotifyLoading || batteryNotifySaving || !batteryNotify;
+  box.checked = !!batteryNotify?.enabled;
+  $("notifyDesc").textContent = batteryNotifyLoading ? "Loading notification settings…" : batteryNotify
+    ? `The local helper warns you at ${batteryNotify.low}% and again at ${batteryNotify.critical}%, even with this window closed.`
+    : "Needs the local helper on 127.0.0.1:8766 (mousetool.service), which reads the battery and sends the warnings.";
+}
+async function loadBatteryNotify() {
+  if (batteryNotifySaving) return;
+  const request = ++batteryNotifyRequest;
+  batteryNotifyLoading = true;
+  renderBatteryNotify();
+  try {
+    const res = await fetch(`${HELPER}/api/battery`, { cache: "no-store" });
+    const data = await res.json();
+    if (request !== batteryNotifyRequest) return;
+    if (!res.ok || !data.notifications) throw new Error("Battery API unavailable");
+    batteryNotify = data.notifications;
+  } catch {
+    if (request !== batteryNotifyRequest) return;
+    batteryNotify = null;
+  }
+  batteryNotifyLoading = false;
+  renderBatteryNotify();
+}
+$("batteryNotify").addEventListener("change", async () => {
+  const want = $("batteryNotify").checked;
+  batteryNotifyRequest++;
+  batteryNotifySaving = true;
+  $("batteryNotify").disabled = true;
+  setState("notify", "saving");
+  try {
+    const res = await fetch(`${HELPER}/api/battery`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Mouse-Tool": "1" },
+      body: JSON.stringify({ notifications: want }),
+    });
+    const data = await res.json();
+    if (!res.ok || !data.notifications) throw new Error(data.error || "Failed to save");
+    batteryNotify = data.notifications;
+    setState("notify", batteryNotify.enabled === want ? "saved" : "error", "The helper kept the old value");
+  } catch (err) {
+    setState("notify", "error", err.message);
+    toast(err.message, true);
+  }
+  batteryNotifySaving = false;
+  renderBatteryNotify();
+});
+renderBatteryNotify();
 </script>
 </body>
 </html>
