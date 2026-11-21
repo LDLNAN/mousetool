@@ -1,0 +1,10 @@
+# Mouse Tool: mouseaccel permissions, mirroring maccel's 99-maccel.rules.
+# Installed by `./install.sh --mouseaccel-perms` to /etc/udev/rules.d/ (helper to /usr/lib/udev/).
+# Members of the `mouseaccel` group can then edit /sys/module/mouseaccel/parameters/* from the Acceleration tab,
+# read the live speed from /dev/mouseaccel, and keep values across reboots (/var/opt/mouseaccel/resets).
+
+# Module loaded: parameter ownership and saved values.
+ACTION=="add", SUBSYSTEM=="module", DEVPATH=="/module/mouseaccel", RUN+="/usr/lib/udev/mouseaccel_param_ownership_and_resets"
+
+# Speed device (class "mouseaccel"): readable by the group. The helper also does this, in case the node already exists.
+ACTION=="add", SUBSYSTEM=="mouseaccel", KERNEL=="mouseaccel", GROUP="mouseaccel", MODE="0640"

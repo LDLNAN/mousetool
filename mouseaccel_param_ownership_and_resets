@@ -1,0 +1,77 @@
+#!/bin/sh
+# Mouse Tool: mouseaccel parameter ownership and saved values, run by udev (as root) when the module loads.
+# Mirrors maccel's /usr/lib/udev/maccel_param_ownership_and_resets for the mouseaccel module, except:
+#  - saved values are parsed, never executed. Group members can write the reset files and this runs as root.
+#    Only `echo <integer> > ...` is accepted, and it goes to the parameter named in the file name.
+#  - symlinks and hard links in the resets directory are skipped (chown/chmod would follow them).
+#  - POSIX redirections: under /bin/sh, maccel's `cmd &>file` runs cmd in the background.
+
+PATH='/sbin:/bin:/usr/sbin:/usr/bin'
+
+GROUP=mouseaccel
+PARAMS_DIR=/sys/module/mouseaccel/parameters
+SPEED_DEV=/dev/mouseaccel
+STATE_DIR=/var/opt/mouseaccel
+LOG_DIR=$STATE_DIR/logs
+RESET_SCRIPTS_DIR=$STATE_DIR/resets
+
+# Validate from a trusted ancestor down. Once each parent is private to root,
+# unprivileged users cannot replace its entries between checks and opens.
+TRUST_ROOT=/
+TRUST_UID=0
+umask 022
+
+trusted_mode() {
+  owner=$(stat -c %u -- "$1") && mode=$(stat -c %a -- "$1") &&
+    [ "$owner" = "$TRUST_UID" ] && [ $((0$mode & 022)) -eq 0 ]
+}
+
+prepare_directory() (
+  if [ "$1" != "$TRUST_ROOT" ]; then
+    parent=$(dirname -- "$1") || exit 1
+    [ "$parent" != "$1" ] && prepare_directory "$parent" || exit 1
+    [ ! -L "$1" ] || exit 1
+    [ -e "$1" ] || mkdir -m 0755 -- "$1" || exit 1
+  fi
+  [ ! -L "$1" ] && [ -d "$1" ] && trusted_mode "$1"
+)
+
+prepare_directory "$RESET_SCRIPTS_DIR" && prepare_directory "$LOG_DIR" || exit 1
+LOG=$LOG_DIR/udev.log
+[ ! -L "$LOG" ] || exit 1
+if [ -e "$LOG" ]; then
+  [ -f "$LOG" ] && [ "$(stat -c %h "$LOG")" = 1 ] && trusted_mode "$LOG" || exit 1
+fi
+: >"$LOG" || exit 1
+
+# Group ownership for the parameters and the speed device.
+chown -v ":$GROUP" "$PARAMS_DIR"/* >>"$LOG" 2>&1
+if [ -e "$SPEED_DEV" ]; then
+  chown -v ":$GROUP" "$SPEED_DEV" >>"$LOG" 2>&1
+  chmod -v g+r "$SPEED_DEV" >>"$LOG" 2>&1
+fi
+
+# Reset files (written by mousetool as set_last_<PARAM>_value.sh) persist values across reboots.
+# Keep directory entries under root's control. Group members only edit file contents.
+
+for param in "$PARAMS_DIR"/*; do
+  [ -f "$param" ] || continue
+  name=${param##*/}
+  script=$RESET_SCRIPTS_DIR/set_last_${name}_value.sh
+  if [ -L "$script" ]; then
+    echo "skip $script: not a plain file" >>"$LOG"
+    continue
+  fi
+  if [ ! -e "$script" ]; then
+    : >"$script" || exit 1
+  fi
+  if [ ! -f "$script" ] || [ "$(stat -c %h "$script")" != 1 ]; then
+    echo "skip $script: not a plain file" >>"$LOG"
+    continue
+  fi
+  chown ":$GROUP" "$script" && chmod 0660 "$script" || exit 1
+  [ -s "$script" ] || continue
+  value=$(head -c 256 "$script" | sed -n '1s/^echo \(-\{0,1\}[0-9]\{1,20\}\) > [^;]*;$/\1/p')
+  [ -n "$value" ] || continue
+  printf '%s' "$value" >"$param" && echo "set $name=$value" >>"$LOG"
+done

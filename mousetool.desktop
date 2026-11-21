@@ -2,10 +2,10 @@
 Type=Application
 Name=Mouse Tool
 GenericName=Mouse Settings
-Comment=Configure mouse settings (DPI, polling, buttons, lift-off, battery, maccel)
+Comment=Configure mouse settings (DPI, polling, buttons, lift-off, battery, kernel acceleration)
 Exec=/usr/bin/env python3 @INSTALL_DIR@/mousetool.py open
 Icon=@INSTALL_DIR@/icon.svg
 Terminal=false
 Categories=Settings;HardwareSettings;Utility;
-Keywords=mouse;dpi;synapse;polling;maccel;razer;
+Keywords=mouse;dpi;synapse;polling;mouseaccel;maccel;acceleration;razer;
 StartupNotify=true
