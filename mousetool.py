@@ -10,8 +10,9 @@
   mousetool.py lod [-d D] [--preset P | --async L R] get or set lift-off distance
   mousetool.py power [-d D] [--idle MIN] [--low PCT] get or set wireless power settings
   mousetool.py tune [-d D] [flags...]               get or set sensor, click & performance filters
-  mousetool.py maccel [--set K=V ...]               print or update maccel kernel parameters
-  mousetool.py serve [--port N]                     local HTTP API for maccel, desktop settings, and fleet discovery
+  mousetool.py accel [--set K=V ...]                print or update kernel acceleration parameters
+                                                    (mouseaccel, or maccel legacy; "maccel" is an alias)
+  mousetool.py serve [--port N]                     local HTTP API for kernel accel, desktop settings, and fleet discovery
   mousetool.py open                                 open index.html in a WebHID-capable browser
 
 Supported protocols:
@@ -2899,10 +2900,20 @@ def tune_cmd(args):
 
 
 
-# ----------------------------------------------------------------------------- maccel
-SYS = "/sys/module/maccel/parameters"
-RESETS = "/var/opt/maccel/resets"
-FIX = 1 << 32                      # maccel is built with 64-bit fixed point on x86_64: value * 2^32
+# ----------------------------------------------------------------------------- kernel acceleration (mouseaccel / maccel)
+# mouseaccel is a maccel 0.5.9 fork with the same parameter names and value formats. It refuses to load next to
+# maccel. mousetool prefers mouseaccel when its module directory exists and falls back to maccel (legacy).
+SYS_MODULE = "/sys/module"         # where loaded modules appear
+DEV_DIR = "/dev"                   # speed device lives at DEV_DIR/<module>
+SRC_DIR = "/usr/src"               # DKMS sources: SRC_DIR/<module>-<version>
+VAR_OPT = "/var/opt"               # reset scripts: VAR_OPT/<module>/resets
+ACCEL_BACKENDS = (                 # detection order = preference
+    {"name": "mouseaccel", "label": "mouseaccel", "legacy": False},
+    {"name": "maccel", "label": "maccel (legacy)", "legacy": True},
+)
+SYS = None                         # override for the parameters directory (None: the detected module's)
+RESETS = None                      # override for the reset-scripts directory (None: the detected module's)
+FIX = 1 << 32                      # both modules are built with 64-bit fixed point on x86_64: value * 2^32
 MODES = ["linear", "natural", "synchronous", "no_accel"]
 PARAMS = {
     "SENS_MULT": (0.01, 50), "YX_RATIO": (0.01, 50), "INPUT_DPI": (50, 50000), "ANGLE_ROTATION": (-180, 180),
@@ -2912,51 +2923,131 @@ PARAMS = {
 }
 
 
-def maccel_state():
-    st = {"installed": os.path.isdir("/usr/src") and bool(glob.glob("/usr/src/maccel-*")),
-          "loaded": os.path.isdir(SYS), "writable": False, "params": {}, "mode": None,
-          "in_group": False, "group_exists": False}
-    try:
-        import grp
-        g = grp.getgrnam("maccel")
-        st["group_exists"] = True
-        st["in_group"] = g.gr_gid in os.getgroups()
-    except (KeyError, ImportError):
-        pass
+def _backend_info(b, sys_module, dev_dir, src_dir, var_opt):
+    name = b["name"]
+    return {
+        "name": name, "label": b["label"], "legacy": b["legacy"],
+        "module_path": os.path.join(sys_module, name),
+        "params_path": os.path.join(sys_module, name, "parameters"),
+        "speed_device": os.path.join(dev_dir, name),
+        "resets_path": os.path.join(var_opt, name, "resets"),
+        "group": name,
+        "installed": os.path.isdir(src_dir) and bool(glob.glob(os.path.join(glob.escape(src_dir), f"{name}-*"))),
+    }
+
+
+def detect_accel_backend(sys_module=None, dev_dir=None, src_dir=None, var_opt=None):
+    """Pick the kernel acceleration module mousetool talks to.
+
+    mouseaccel if SYS_MODULE/mouseaccel exists, else maccel if SYS_MODULE/maccel exists, else none. Returns
+    {"name", "label", "legacy", "loaded", "module_path", "params_path", "speed_device", "resets_path", "group",
+    "installed", "installed_backends", "also_loaded"}. With nothing loaded, name/label/paths are None and
+    "candidate" names the module the not-loaded hint should mention (an installed one, mouseaccel first).
+    """
+    sys_module = sys_module or SYS_MODULE
+    dev_dir = dev_dir or DEV_DIR
+    src_dir = src_dir or SRC_DIR
+    var_opt = var_opt or VAR_OPT
+    infos = [_backend_info(b, sys_module, dev_dir, src_dir, var_opt) for b in ACCEL_BACKENDS]
+    loaded = [i for i in infos if os.path.isdir(i["module_path"])]
+    installed = [i["name"] for i in infos if i["installed"]]
+    if loaded:
+        out = dict(loaded[0], loaded=True)
+        # mouseaccel switches to pass-through if maccel loads after it; report it so the UI can warn.
+        out["also_loaded"] = [i["name"] for i in loaded[1:]]
+    else:
+        cand = next((i for i in infos if i["installed"]), None)
+        out = {"name": None, "label": None, "legacy": False, "loaded": False, "module_path": None,
+               "params_path": None, "speed_device": None, "resets_path": None,
+               "group": cand["group"] if cand else None, "installed": bool(cand),
+               "candidate": cand["name"] if cand else None, "also_loaded": []}
+    out["installed_backends"] = installed
+    return out
+
+
+def _params_dir(backend):
+    return SYS if SYS is not None else backend.get("params_path")
+
+
+def _resets_dir(backend):
+    return RESETS if RESETS is not None else backend.get("resets_path")
+
+
+def maccel_state(backend=None):
+    """State of the detected kernel acceleration module (mouseaccel, or maccel legacy).
+
+    The historical name is kept for the CLI, the /api/maccel route and rawaccel --live.
+    """
+    b = backend or detect_accel_backend()
+    sys_dir = _params_dir(b)
+    loaded = b["loaded"] if SYS is None else os.path.isdir(SYS)
+    st = {"installed": b["installed"] or loaded, "parameters_available": False,
+          "loaded": loaded, "writable": False, "params": {}, "mode": None,
+          "in_group": False, "group_exists": False, "group": b.get("group"),
+          "backend": {k: b.get(k) for k in ("name", "label", "legacy", "loaded", "params_path", "speed_device",
+                                             "also_loaded", "installed_backends")}}
+    if SYS is not None:
+        st["backend"]["params_path"] = SYS
+    if b.get("candidate"):
+        st["backend"]["candidate"] = b["candidate"]
+    if b.get("group"):
+        try:
+            import grp
+            g = grp.getgrnam(b["group"])
+            st["group_exists"] = True
+            st["in_group"] = g.gr_gid in os.getgroups()
+        except (KeyError, ImportError):
+            pass
     if not st["loaded"]:
         return st
-    st["writable"] = os.access(f"{SYS}/ACCEL", os.W_OK)
     for name in PARAMS:
         try:
-            with open(f"{SYS}/{name}") as f:
+            with open(f"{sys_dir}/{name}") as f:
                 st["params"][name] = int(f.read().strip()) / FIX
         except (OSError, ValueError):
             pass
     try:
-        with open(f"{SYS}/MODE") as f:
+        with open(f"{sys_dir}/MODE") as f:
             m = int(f.read().strip())
         st["mode"] = MODES[m % len(MODES)]
     except (OSError, ValueError):
         pass
+    st["parameters_available"] = st["mode"] is not None and st["params"].keys() == PARAMS.keys()
+    st["writable"] = st["parameters_available"] and all(
+        os.access(f"{sys_dir}/{name}", os.W_OK) for name in ("MODE", *PARAMS))
     return st
 
 
-def _write_param(name, raw):
-    with open(f"{SYS}/{name}", "w") as f:
+accel_state = maccel_state
+
+
+def _write_param(name, raw, backend):
+    sys_dir = _params_dir(backend)
+    with open(f"{sys_dir}/{name}", "w") as f:
         f.write(str(raw))
+    resets = _resets_dir(backend)
+    if not resets:
+        return
     try:
-        with open(f"{RESETS}/set_last_{name}_value.sh", "w") as f:
-            f.write(f"echo {raw} > /sys/module/maccel/parameters/{name};")
+        with open(f"{resets}/set_last_{name}_value.sh", "w") as f:
+            f.write(f"echo {raw} > {sys_dir}/{name};")
     except OSError:
         pass
 
 
-def maccel_set(updates):
-    st = maccel_state()
+def maccel_set(updates, expected_backend=None):
+    b = detect_accel_backend()
+    if expected_backend is not None and expected_backend != b["name"]:
+        raise PermissionError("Acceleration backend changed. Review the current curve before saving.")
+    st = maccel_state(b)
+    label = b.get("label") or "kernel acceleration"
     if not st["loaded"]:
-        raise PermissionError("maccel isn't loaded")
+        raise PermissionError("no kernel acceleration module is loaded (mouseaccel, or maccel legacy)")
+    if not st["parameters_available"]:
+        raise PermissionError(f"{label} is loaded, but its curve parameters could not all be read")
     if not st["writable"]:
-        raise PermissionError("no write access to maccel — add yourself to the maccel group and log in again")
+        grp_name = b.get("group") or "mouseaccel"
+        raise PermissionError(f"no write access to {label} — add yourself to the {grp_name} group and log in again")
     todo = []
     for k, v in updates.items():
         if k == "MODE":
@@ -2973,8 +3064,11 @@ def maccel_set(updates):
             raise ValueError(f"{k} must be between {lo} and {hi}")
         todo.append((k, int(round(v * FIX))))
     for k, raw in todo:
-        _write_param(k, raw)
-    return maccel_state()
+        _write_param(k, raw, b)
+    return maccel_state(b)
+
+
+accel_set = maccel_set
 
 
 def maccel_cmd(args):
@@ -2993,13 +3087,15 @@ def maccel_cmd(args):
 
 
 def maccel_live_config():
-    """Read-only snapshot of the loaded maccel module as {"MODE": ..., PARAM: value} (for rawaccel --live)."""
+    """Read-only snapshot of the loaded module as {"MODE": ..., PARAM: value} (for rawaccel --live)."""
     st = maccel_state()
     if not st["loaded"]:
-        raise PermissionError("maccel isn't loaded; use --input FILE or --set KEY=VAL instead of --live")
+        raise PermissionError("the kernel acceleration module isn't loaded (neither mouseaccel nor maccel); "
+                              "use --input FILE or --set KEY=VAL instead of --live")
     missing = [k for k in PARAMS if k not in st["params"]]
     if st["mode"] is None or missing:
-        raise OSError(f"could not read maccel MODE/{', '.join(missing) or 'params'} from {SYS}")
+        where = (st.get("backend") or {}).get("params_path") or SYS
+        raise OSError(f"could not read MODE/{', '.join(missing) or 'params'} from {where}")
     return {"MODE": st["mode"], **st["params"]}
 
 
@@ -3017,7 +3113,9 @@ EV_REL = 0x02
 REL_X = 0x00
 REL_Y = 0x01
 INPUT_EVENT_STRUCT = struct.Struct("llHHi")
-MACCEL_DEV = "/dev/maccel"
+MACCEL_DEV = "/dev/maccel"           # legacy maccel speed device
+MOUSEACCEL_DEV = "/dev/mouseaccel"   # mouseaccel speed device (same 8-byte big-endian read)
+AUTO_SPEED_DEV = "auto"              # MotionHub: use the detected backend's speed device
 NORMALIZED_DPI = 1000.0
 
 
@@ -3080,7 +3178,10 @@ def parse_evdev_events(data, pending=None):
 
 
 def _read_maccel_fd(fd):
-    """Read maccel kernel module's LAST_INPUT_MOUSE_SPEED (big-endian Q32.32 fixed-point counts/ms)."""
+    """Read the module's LAST_INPUT_MOUSE_SPEED (big-endian Q32.32 fixed-point counts/ms).
+
+    /dev/mouseaccel and /dev/maccel use the same format.
+    """
     try:
         raw = os.read(fd, 8)
     except OSError:
@@ -3094,8 +3195,18 @@ def _read_maccel_fd(fd):
     return None
 
 
-def read_maccel_speed(dev_path=MACCEL_DEV):
-    """Read (raw_fixed, speed_counts_per_ms) from /dev/maccel, or None if unreadable."""
+def accel_speed_device(backend=None):
+    """Speed device path of the detected backend (/dev/mouseaccel or /dev/maccel), or None."""
+    b = backend or detect_accel_backend()
+    return b.get("speed_device") if b.get("loaded") else None
+
+
+def read_maccel_speed(dev_path=None):
+    """Read (raw_fixed, speed_counts_per_ms) from the detected speed device, or None if unreadable."""
+    if dev_path is None:
+        dev_path = accel_speed_device()
+        if dev_path is None:
+            return None
     try:
         fd = os.open(dev_path, os.O_RDONLY | os.O_NONBLOCK)
     except OSError:
@@ -3264,28 +3375,32 @@ def _default_kernel_dpi():
     return NORMALIZED_DPI
 
 
-def _raw_evdev_available():
-    # Only a confirmed absent module permits interpreting REL events as input.
-    try:
-        os.stat(os.path.dirname(SYS))
-    except FileNotFoundError:
-        return os.path.isdir("/sys/module")
-    except OSError:
-        pass
-    return False
+def _raw_evdev_available(sys_module=None):
+    # Only confirmed absent modules permit interpreting REL events as input: either module rewrites them.
+    sys_module = sys_module or SYS_MODULE
+    for b in ACCEL_BACKENDS:
+        try:
+            os.stat(os.path.join(sys_module, b["name"]))
+        except FileNotFoundError:
+            continue
+        except OSError:
+            return False
+        return False
+    return os.path.isdir(sys_module)
 
 
 class MotionHub:
     """Lazy, hotplug-safe live mouse motion hub shared by SSE subscribers.
 
-    Starts the evdev + /dev/maccel reader thread on the first subscriber and
+    Starts the evdev + kernel speed device reader thread on the first subscriber and
     stops it cleanly (closing all descriptors) when the last subscriber leaves.
     """
 
-    def __init__(self, evdev_discover=discover_evdev_mice, maccel_dev=MACCEL_DEV,
+    def __init__(self, evdev_discover=discover_evdev_mice, maccel_dev=AUTO_SPEED_DEV,
                  dpi_provider=_default_kernel_dpi, raw_evdev_available=_raw_evdev_available):
         self._evdev_discover = evdev_discover
-        self._maccel_dev = maccel_dev
+        self._maccel_dev = maccel_dev     # path, None (disabled) or AUTO_SPEED_DEV (detected backend)
+        self._backend = None              # module name whose speed device is open
         self._dpi_provider = dpi_provider
         self._raw_evdev_available = raw_evdev_available
         self._lifecycle = threading.Lock()
@@ -3380,6 +3495,7 @@ class MotionHub:
                 snap["last_speed"] = (last[0] * last[1] / snap["dpi"]
                                       if last is not None else None)
             snap["source"] = self._source
+            snap["backend"] = self._backend if self._source.startswith("maccel") else None
             snap["devices"] = self._device_count
             return snap
 
@@ -3390,12 +3506,22 @@ class MotionHub:
             return self._seq
 
     def _open_maccel_fd(self):
-        if not self._maccel_dev:
+        path, name = self._maccel_dev, None
+        if path == AUTO_SPEED_DEV:
+            b = detect_accel_backend()
+            path, name = accel_speed_device(b), b.get("name")
+        elif path:
+            base = os.path.basename(path)
+            name = base if base in {x["name"] for x in ACCEL_BACKENDS} else None
+        if not path:
             return None
         try:
-            return os.open(self._maccel_dev, os.O_RDONLY | os.O_NONBLOCK)
+            fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
         except OSError:
             return None
+        with self._lock:
+            self._backend = name
+        return fd
 
     def _sync_evdev_fds(self, fds_by_path):
         wanted = set(self._evdev_discover() or [])
@@ -3707,10 +3833,16 @@ class Api(BaseHTTPRequestHandler):
         parsed = urllib.parse.urlsplit(self.path)
         if parsed.path == "/api/desktop":
             return self._send(200, {"desktop": desktop_state()})
+        if parsed.path in ("/api/accel", "/api/maccel"):
+            st = maccel_state()
+            return self._send(200, {"accel": st, "maccel": st})
         if parsed.path == "/api/status":
+            st = maccel_state()
             return self._send(200, {
                 "version": 2,
-                "maccel": maccel_state(),
+                "accel": st,            # detected backend: mouseaccel, or maccel (legacy)
+                "maccel": st,           # same object, kept for older UIs
+                "accel_backend": st.get("backend"),
                 "niri": niri_state(),
                 "desktop": desktop_state(),
                 "system_mice": discover_system_mice(),
@@ -3725,17 +3857,21 @@ class Api(BaseHTTPRequestHandler):
         if not self._origin_ok() or self.headers.get("X-Mouse-Tool") != "1":
             return self._send(403, {"error": "forbidden"})
         parsed = urllib.parse.urlsplit(self.path)
-        if parsed.path not in ("/api/maccel", "/api/niri", "/api/desktop"):
+        if parsed.path not in ("/api/accel", "/api/maccel", "/api/niri", "/api/desktop"):
             return self._send(404, {"error": "not found"})
         try:
             n = min(int(self.headers.get("Content-Length", 0)), 4096)
             body = json.loads(self.rfile.read(n) or b"{}")
             if not isinstance(body, dict):
                 raise ValueError("expected an object")
-            if parsed.path == "/api/maccel":
-                st = maccel_set(body)
+            if parsed.path in ("/api/accel", "/api/maccel"):
+                query = urllib.parse.parse_qs(parsed.query, keep_blank_values=True)
+                expected = query.get("backend", [None])
+                if len(expected) != 1:
+                    raise ValueError("expected one backend")
+                st = maccel_set(body, expected[0])
                 MOTION_HUB.refresh_dpi()
-                self._send(200, {"maccel": st})
+                self._send(200, {"accel": st, "maccel": st})
             elif parsed.path == "/api/desktop":
                 self._send(200, {"desktop": desktop_state(body)})
             else:
@@ -3744,7 +3880,8 @@ class Api(BaseHTTPRequestHandler):
         except PermissionError as e:
             if parsed.path == "/api/desktop":
                 return self._send(409, {"error": str(e), "desktop": desktop_state()})
-            self._send(409, {"error": str(e), "maccel": maccel_state()})
+            st = maccel_state()
+            self._send(409, {"error": str(e), "accel": st, "maccel": st})
         except (ValueError, TypeError) as e:
             self._send(400, {"error": str(e)})
         except OSError as e:
@@ -3833,9 +3970,11 @@ def main():
     tn.add_argument("--spdt", choices=["off", "gx_speed", "gx_safe"])
     tn.set_defaults(fn=tune_cmd)
 
-    m = sub.add_parser("maccel")
-    m.add_argument("--set", nargs="+", metavar="KEY=VAL", help="update maccel parameters, e.g. MODE=natural LIMIT=1.5")
-    m.set_defaults(fn=maccel_cmd)
+    for cmd in ("accel", "maccel"):
+        m = sub.add_parser(cmd, help="kernel acceleration (mouseaccel, or maccel legacy) parameters")
+        m.add_argument("--set", nargs="+", metavar="KEY=VAL",
+                       help="update kernel acceleration parameters, e.g. MODE=natural LIMIT=1.5")
+        m.set_defaults(fn=maccel_cmd)
 
     ra = sub.add_parser("rawaccel", add_help=False,
                         help="offline Raw Accel (Windows) preview/export of maccel curves; never applies settings")
