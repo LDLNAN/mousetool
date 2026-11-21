@@ -665,6 +665,16 @@ input[type=range]:focus-visible::-webkit-slider-thumb { border-color: var(--acce
 }
 .accelnotice code { font-family: var(--mono); font-size: 12px; }
 .accelnotice.bad { background: var(--bad-soft); border-color: var(--bad); }
+.accelbackend {
+  display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px; border-radius: var(--r);
+  border: 1px solid var(--line-strong); background: var(--surface); color: var(--ink);
+  font: 600 11px var(--mono); white-space: nowrap;
+}
+.accelbackend .livedot { width: 6px; height: 6px; border-radius: 50%; background: var(--ok); flex: none; }
+.accelbackend.legacy { border-color: var(--warn); background: var(--warn-soft); }
+.accelbackend.legacy .livedot { background: var(--warn); }
+.accelbackend.none { color: var(--muted); font-weight: 400; }
+.accelbackend.none .livedot { background: var(--faint); }
 .phelp { font: 11px var(--mono); color: var(--faint); margin-top: 2px; }
 
 /* ---------- multi-mouse fleet bar ---------- */
@@ -823,7 +833,7 @@ input[type=range]:focus-visible::-webkit-slider-thumb { border-color: var(--acce
           <span class="note">For mice without onboard DPI read/write (stored locally for Acceleration)</span>
         </div>
         <div class="setting">
-          <div class="label"><b>Mouse DPI</b><p>Enter this mouse's current hardware DPI so <code>maccel</code>'s <em>Use mouse DPI</em> button matches it.</p></div>
+          <div class="label"><b>Mouse DPI</b><p>Enter this mouse's current hardware DPI so the kernel acceleration's (<code>mouseaccel</code> or <code>maccel</code>) <em>Use mouse DPI</em> button matches it.</p></div>
           <div class="control">
             <input type="number" id="genericDpiIn" min="50" max="50000" step="50" value="800" aria-label="Known mouse DPI">
             <button id="genericDpiSave">Save</button>
@@ -1110,7 +1120,8 @@ input[type=range]:focus-visible::-webkit-slider-thumb { border-color: var(--acce
     <div class="panel" data-panel="accel" hidden>
       <section class="group">
         <div class="ghead">
-          <span class="idx">06.1</span><h2>Kernel acceleration (maccel)</h2>
+          <span class="idx">06.1</span><h2>Kernel acceleration</h2>
+          <span class="accelbackend none" id="accelBackend" title="Kernel acceleration module"><i class="livedot"></i><span id="accelBackendName">mouseaccel / maccel</span></span>
           <span class="note">Applies before libinput and games (including raw input)</span>
           <div class="spacer"></div>
           <span class="state" data-for="maccel"></span>
@@ -1179,7 +1190,7 @@ input[type=range]:focus-visible::-webkit-slider-thumb { border-color: var(--acce
           <span class="note" id="desktopNote" role="status"></span>
         </div>
         <div class="setting">
-          <div class="label"><b>Accel profile</b><p>Choose <em>Flat</em> to use your maccel curve without additional desktop acceleration.</p></div>
+          <div class="label"><b>Accel profile</b><p>Choose <em>Flat</em> to use your kernel acceleration curve without additional desktop acceleration.</p></div>
           <div class="control">
             <span class="state" data-for="desktop"></span>
             <div class="seg" id="desktopProfile">
@@ -4847,7 +4858,7 @@ slider("idle", "idle", "Sleep timer", (m) => `${m} min`, (m) => m * 60);
 slider("low", "low", "Low battery warning", (p) => `${p}%`, (p) => Math.max(0x0c, Math.min(0xff, Math.round(p / 100 * 255))));
 
 // ======================================================================
-// acceleration (maccel + desktop pointer settings via local helper on 127.0.0.1:8766)
+// acceleration (mouseaccel, or maccel legacy, + desktop pointer settings via local helper on 127.0.0.1:8766)
 // ======================================================================
 const HELPER = "http://127.0.0.1:8766";
 const MACCEL_DEFAULTS = {
@@ -4884,11 +4895,12 @@ const MODE_PARAMS = {
 const GLOBAL_ACCEL_PARAMS = [
   { k: "SENS_MULT", label: "Sensitivity multiplier", min: 0.05, max: 5, step: 0.02, desc: "Overall post-curve multiplier." },
   { k: "YX_RATIO", label: "Y / X ratio", min: 0.2, max: 3, step: 0.02, desc: "Vertical sensitivity relative to horizontal." },
-  { k: "INPUT_DPI", label: "Normalized DPI", min: 100, max: 35000, step: 50, desc: "Mouse DPI used by maccel to normalize speed to 1000 DPI." },
+  { k: "INPUT_DPI", label: "Normalized DPI", min: 100, max: 35000, step: 50, desc: "Mouse DPI used by the kernel module to normalize speed to 1000 DPI." },
   { k: "ANGLE_ROTATION", label: "Angle rotation (°)", min: -45, max: 45, step: 0.5, desc: "Rotates input movement vector in degrees." },
 ];
 
 let accelLive = null;   // { maccel, desktop } from helper
+let accelDraftBackend = null;
 let accelDraft = null;  // working copy of mode + params
 let accelXMax = 40;
 let accelLoading = false;
@@ -5092,7 +5104,7 @@ function renderAccelLiveOverlay() {
       text = `Approx. window motion · Now ${st.speed.toFixed(1)} · Peak ${st.peak.toFixed(1)} browser units/ms`;
     } else if (st.source === "maccel" && accelMotion.connected) {
       const last = Number.isFinite(st.last_speed) ? (st.last_speed * dpiScale).toFixed(1) + " c/ms" : "—";
-      text = `Last kernel value ${last} · Motion timing unknown`;
+      text = `Last ${ACCEL_MODULES.includes(st.backend) ? st.backend : "kernel"} value ${last} · Motion timing unknown`;
     }
     $("accelLiveReadout").textContent = text;
     return;
@@ -5378,12 +5390,13 @@ function startAccelMotion() {
     accelMotion.connected = true;
     accelMotion.state = data;
     const devs = data.devices || 0;
+    const mod = ACCEL_MODULES.includes(data.backend) ? data.backend : "kernel";
     if (data.source === "maccel+evdev") {
-      setAccelLiveBadge("on", "Live · kernel", `Latest global kernel speed sampled on movement from ${devs} evdev device(s). Short peaks may be missed.`);
+      setAccelLiveBadge("on", `Live · ${mod}`, `Latest global speed from /dev/${mod === "kernel" ? "maccel" : mod}, sampled on movement from ${devs} evdev device(s). Short peaks may be missed.`);
     } else if (data.source === "evdev") {
       setAccelLiveBadge("on", "Live · evdev", `Raw evdev mouse motion (${devs} device${devs === 1 ? "" : "s"})`);
     } else if (data.source === "maccel") {
-      setAccelLiveBadge("", "Last sample", "The kernel provides one global value without a sample timestamp.");
+      setAccelLiveBadge("", "Last sample", `${mod === "kernel" ? "The kernel module" : mod} provides one global value without a sample timestamp.`);
     }
     scheduleAccelOverlay();
   };
@@ -5506,6 +5519,32 @@ function renderDesktop() {
   paintRanges();
 }
 
+// Kernel acceleration backend reported by the helper: mouseaccel (preferred) or maccel (legacy).
+// A helper from before mouseaccel support sends no "backend"; it only ever talks to maccel.
+const ACCEL_MODULES = ["mouseaccel", "maccel"];
+function accelBackendInfo(m) {
+  const b = m?.backend;
+  if (b && (b.name || b.candidate !== undefined || b.installed_backends)) return b;
+  return m?.loaded ? { name: "maccel", label: "maccel (legacy)", legacy: true, loaded: true,
+                       params_path: "/sys/module/maccel/parameters", speed_device: "/dev/maccel", also_loaded: [] }
+                   : { name: null, label: null, loaded: false, candidate: m?.installed ? "maccel" : null, also_loaded: [] };
+}
+function accelModuleCode(name) {
+  const n = ACCEL_MODULES.includes(name) ? name : "mouseaccel";
+  return n === "maccel" ? "<code>maccel</code> (legacy)" : "<code>mouseaccel</code>";
+}
+function renderAccelBackend(m) {
+  const el = $("accelBackend");
+  if (!el) return;
+  const b = m ? accelBackendInfo(m) : null;
+  el.classList.toggle("legacy", !!(b?.loaded && b.legacy));
+  el.classList.toggle("none", !b?.loaded);
+  $("accelBackendName").textContent = !m ? "mouseaccel / maccel" : (b.loaded ? (b.label || b.name) : "not loaded");
+  el.title = !m ? "Kernel acceleration module (helper not reachable)"
+    : b.loaded ? `Module ${b.name}${b.legacy ? " (legacy; mouseaccel replaces it)" : ""}\nParameters: ${b.params_path || "?"}\nSpeed device: ${b.speed_device || "?"}`
+    : "Neither mouseaccel nor maccel is loaded";
+}
+
 async function loadAccel() {
   if (accelLoading) return;
   accelLoading = true;
@@ -5513,7 +5552,7 @@ async function loadAccel() {
     const res = await fetch(`${HELPER}/api/status`, { cache: "no-store" });
     const data = await res.json();
     if (!res.ok) throw new Error("Status unavailable");
-    const keepDraft = accelDirty();
+    const dirty = accelDirty();
     accelLive = data;
     clearTimeout(accelMotion.statusTimer);
     if (Array.isArray(data.system_mice)) {
@@ -5521,20 +5560,35 @@ async function loadAccel() {
       renderFleet();
     }
     $("accelOffline").hidden = true;
-    const m = data.maccel;
-    if (!m?.loaded) {
+    const m = data.accel ?? data.maccel;
+    accelLive.maccel = m;
+    renderAccelBackend(m);
+    const b = accelBackendInfo(m);
+    const keepDraft = dirty && accelDraftBackend === b.name;
+    accelDraftBackend = b.name;
+    if (!m?.loaded || m.parameters_available === false) {
+      accelDraft = null;
+      renderAccelDirty();
       $("accelBody").hidden = true;
       $("accelPerm").hidden = false;
       $("accelPerm").className = "accelnotice bad";
-      $("accelPerm").innerHTML = m?.installed
-        ? `<code>maccel</code> is installed but the kernel module isn't loaded. Run <code>sudo modprobe maccel</code>.`
-        : `<code>maccel</code> kernel module is not installed.`;
+      $("accelPerm").innerHTML = m?.loaded
+        ? `<span>${accelModuleCode(b.name)} is loaded, but its curve parameters could not all be read. Refresh after restoring read access.</span>`
+        : b.candidate
+        ? `<span>${accelModuleCode(b.candidate)} is installed but the kernel module isn't loaded. Run <code>sudo modprobe ${ACCEL_MODULES.includes(b.candidate) ? b.candidate : "mouseaccel"}</code>.</span>`
+        : `<span>No kernel acceleration module is installed. Install <code>mouseaccel</code> (or the legacy <code>maccel</code>).</span>`;
     } else {
       $("accelBody").hidden = false;
-      if (!m.writable) {
+      const also = (b.also_loaded || []).filter((n) => ACCEL_MODULES.includes(n));
+      const group = ACCEL_MODULES.includes(m.group) ? m.group : (b.name || "maccel");
+      if (also.length) {
+        $("accelPerm").hidden = false;
+        $("accelPerm").className = "accelnotice bad";
+        $("accelPerm").innerHTML = `<span>${accelModuleCode(b.name)} and ${also.map(accelModuleCode).join(", ")} are both loaded. mouseaccel passes motion through unchanged while maccel is loaded, so these settings don't apply. Unload maccel with <code>sudo rmmod maccel</code>, then reload mouseaccel.</span>`;
+      } else if (!m.writable) {
         $("accelPerm").hidden = false;
         $("accelPerm").className = "accelnotice";
-        $("accelPerm").innerHTML = `Read-only preview — add yourself to the <code>maccel</code> group to edit: <code>sudo usermod -aG maccel $USER</code> and log out/in.`;
+        $("accelPerm").innerHTML = `<span>Read-only preview — add yourself to the <code>${group}</code> group to edit ${accelModuleCode(b.name)}: <code>sudo usermod -aG ${group} $USER</code> and log out/in.</span>`;
       } else {
         $("accelPerm").hidden = true;
       }
@@ -5547,6 +5601,7 @@ async function loadAccel() {
   } catch {
     $("accelOffline").hidden = false;
     $("accelPerm").hidden = true;
+    renderAccelBackend(null);
     if (accelLive?.maccel) accelLive.maccel.writable = false;
     accelDraft ??= { ...MACCEL_DEFAULTS };
     $("accelBody").hidden = false;
@@ -5586,18 +5641,28 @@ $("accelDefaults").addEventListener("click", () => {
   renderAccelParams(); renderAccelCurve(); renderAccelDirty();
 });
 $("accelApply").addEventListener("click", async () => {
-  if (!accelDraft) return;
+  if (!accelDraftBackend || !accelDraft || !accelLive?.maccel?.writable) return;
+  const backend = accelDraftBackend;
+  const body = JSON.stringify(accelDraft);
   setState("maccel", "saving");
   try {
-    const res = await fetch(`${HELPER}/api/maccel`, {
+    const post = (path) => fetch(`${HELPER}${path}?backend=${encodeURIComponent(backend)}`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-Mouse-Tool": "1" },
-      body: JSON.stringify(accelDraft),
+      body,
     });
+    let res = await post("/api/accel");
+    if (res.status === 404 && backend === "maccel") res = await post("/api/maccel");  // helper from before /api/accel
     const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "Failed to save curve");
-    accelLive.maccel = data.maccel;
-    accelDraft = accelSnapshot(data.maccel);
+    if (!res.ok) {
+      if (res.status === 409) await loadAccel();
+      throw new Error(data.error || "Failed to save curve");
+    }
+    const st = data.accel ?? data.maccel;
+    accelLive.maccel = st;
+    renderAccelBackend(st);
+    accelDraftBackend = accelBackendInfo(st).name;
+    accelDraft = accelSnapshot(st);
     renderAccelParams(); renderAccelCurve(); renderAccelDirty();
     setState("maccel", "saved");
     toast("Acceleration curve saved");

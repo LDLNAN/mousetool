@@ -1,5 +1,5 @@
 [Unit]
-Description=Mouse Tool local helper API (maccel & niri)
+Description=Mouse Tool local helper API (mouseaccel/maccel & desktop pointer)
 After=graphical-session.target
 
 [Service]

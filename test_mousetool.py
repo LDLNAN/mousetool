@@ -364,6 +364,367 @@ class TestMaccelAndNiri(unittest.TestCase):
                 mousetool.niri_set({"accel_speed": 2.0}, cfg)
 
 
+def _make_accel_tree(root, loaded=(), installed=(), speeds=None, mode=0):
+    """Fixture /sys/module, /dev, /usr/src and /var/opt trees under root; returns the patch dict."""
+    paths = {k: os.path.join(root, *v) for k, v in {
+        "SYS_MODULE": ("sys", "module"), "DEV_DIR": ("dev",), "SRC_DIR": ("usr", "src"), "VAR_OPT": ("var", "opt"),
+    }.items()}
+    for d in paths.values():
+        os.makedirs(d, exist_ok=True)
+    for name in loaded:
+        params = os.path.join(paths["SYS_MODULE"], name, "parameters")
+        os.makedirs(params)
+        for param in mousetool.PARAMS:
+            with open(os.path.join(params, param), "w") as f:
+                f.write(str(mousetool.FIX))
+        with open(os.path.join(params, "MODE"), "w") as f:
+            f.write(str(mode))
+        os.makedirs(os.path.join(paths["VAR_OPT"], name, "resets"))
+    for name in installed:
+        os.makedirs(os.path.join(paths["SRC_DIR"], f"{name}-0.1.0"))
+    for name, speed in (speeds or {}).items():
+        with open(os.path.join(paths["DEV_DIR"], name), "wb") as f:
+            f.write(struct.pack(">q", int(speed * mousetool.FIX)))
+    return paths
+
+
+class TestAccelBackend(unittest.TestCase):
+    """mouseaccel / maccel (legacy) detection against fixture sysfs trees."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = self._tmp.name
+        self.addCleanup(self._tmp.cleanup)
+
+    def _patched(self, **tree):
+        paths = _make_accel_tree(self.root, **tree)
+        stack = [mock.patch.object(mousetool, k, v) for k, v in paths.items()]
+        stack += [mock.patch.object(mousetool, "SYS", None), mock.patch.object(mousetool, "RESETS", None)]
+        for p in stack:
+            p.start()
+            self.addCleanup(p.stop)
+        return paths
+
+    def _read(self, *parts):
+        with open(os.path.join(self.root, *parts)) as f:
+            return f.read().strip()
+
+    def test_prefers_mouseaccel_and_reports_paths(self):
+        paths = self._patched(loaded=("mouseaccel",), installed=("mouseaccel", "maccel"))
+        b = mousetool.detect_accel_backend()
+        self.assertEqual((b["name"], b["label"], b["legacy"], b["loaded"]), ("mouseaccel", "mouseaccel", False, True))
+        self.assertEqual(b["params_path"], os.path.join(paths["SYS_MODULE"], "mouseaccel", "parameters"))
+        self.assertEqual(b["speed_device"], os.path.join(paths["DEV_DIR"], "mouseaccel"))
+        self.assertEqual(b["resets_path"], os.path.join(paths["VAR_OPT"], "mouseaccel", "resets"))
+        self.assertEqual(b["group"], "mouseaccel")
+        self.assertEqual(b["also_loaded"], [])
+        self.assertEqual(b["installed_backends"], ["mouseaccel", "maccel"])
+
+    def test_legacy_maccel_when_only_maccel_loaded(self):
+        paths = self._patched(loaded=("maccel",), installed=("maccel",))
+        b = mousetool.detect_accel_backend()
+        self.assertEqual((b["name"], b["label"], b["legacy"]), ("maccel", "maccel (legacy)", True))
+        self.assertEqual(b["params_path"], os.path.join(paths["SYS_MODULE"], "maccel", "parameters"))
+        self.assertEqual(b["speed_device"], os.path.join(paths["DEV_DIR"], "maccel"))
+        self.assertEqual(b["group"], "maccel")
+        st = mousetool.maccel_state()
+        self.assertTrue(st["loaded"])
+        self.assertEqual(st["backend"]["label"], "maccel (legacy)")
+        self.assertEqual(st["group"], "maccel")
+
+    def test_both_loaded_uses_mouseaccel_and_flags_maccel(self):
+        self._patched(loaded=("mouseaccel", "maccel"))
+        b = mousetool.detect_accel_backend()
+        self.assertEqual(b["name"], "mouseaccel")
+        self.assertEqual(b["also_loaded"], ["maccel"])
+        self.assertEqual(mousetool.maccel_state()["backend"]["also_loaded"], ["maccel"])
+
+    def test_neither_loaded(self):
+        self._patched(installed=("mouseaccel",))
+        b = mousetool.detect_accel_backend()
+        self.assertIsNone(b["name"])
+        self.assertFalse(b["loaded"])
+        self.assertIsNone(b["params_path"])
+        self.assertIsNone(b["speed_device"])
+        self.assertEqual(b["candidate"], "mouseaccel")
+        st = mousetool.maccel_state()
+        self.assertEqual((st["loaded"], st["installed"], st["writable"], st["params"]), (False, True, False, {}))
+        self.assertEqual(st["backend"]["candidate"], "mouseaccel")
+        with self.assertRaisesRegex(PermissionError, "mouseaccel.*maccel"):
+            mousetool.maccel_set({"LIMIT": 1.5})
+        with self.assertRaisesRegex(PermissionError, "isn't loaded.*mouseaccel.*maccel"):
+            mousetool.maccel_live_config()
+        self.assertIsNone(mousetool.read_maccel_speed())
+
+    def test_incomplete_parameters_leave_module_loaded_and_prevent_writes(self):
+        from pathlib import Path
+        paths = self._patched(loaded=("mouseaccel",))
+        params = Path(paths["SYS_MODULE"]) / "mouseaccel/parameters"
+        (params / "LIMIT").unlink()
+        for missing_dir in (False, True):
+            if missing_dir:
+                params.rename(params.with_name("unavailable"))
+            state = mousetool.maccel_state()
+            self.assertTrue(state["installed"] and state["loaded"] and state["backend"]["loaded"])
+            self.assertFalse(state["parameters_available"])
+            self.assertFalse(state["writable"])
+            with self.assertRaisesRegex(PermissionError, "parameters could not all be read"):
+                mousetool.maccel_set({"MODE": "natural"})
+        self.assertEqual((params.with_name("unavailable") / "MODE").read_text(), "0")
+
+    def test_backend_bound_write_rejects_stale_legacy_draft(self):
+        from pathlib import Path
+        paths = self._patched(loaded=("maccel",))
+        backend = mousetool.maccel_state()["backend"]["name"]
+        _make_accel_tree(self.root, loaded=("mouseaccel",))
+        params = Path(paths["SYS_MODULE"]) / "mouseaccel/parameters"
+        before = {p: p.read_bytes() for p in params.iterdir()}
+        with self.assertRaisesRegex(PermissionError, "backend changed"):
+            mousetool.maccel_set({"MODE": "natural", "INPUT_DPI": 800, "LIMIT": 3.25}, backend)
+        self.assertEqual(before, {p: p.read_bytes() for p in params.iterdir()})
+        self.assertEqual(list((Path(paths["VAR_OPT"]) / "mouseaccel/resets").iterdir()), [])
+
+    def test_nothing_installed(self):
+        self._patched()
+        b = mousetool.detect_accel_backend()
+        self.assertEqual((b["name"], b["installed"], b["candidate"], b["installed_backends"]), (None, False, None, []))
+        self.assertFalse(mousetool.maccel_state()["installed"])
+
+    def test_legacy_candidate_when_only_maccel_installed(self):
+        self._patched(installed=("maccel",))
+        b = mousetool.detect_accel_backend()
+        self.assertEqual((b["candidate"], b["group"]), ("maccel", "maccel"))
+
+    def test_set_writes_to_detected_module_only(self):
+        for name, other in (("mouseaccel", "maccel"), ("maccel", "mouseaccel")):
+            with self.subTest(backend=name):
+                self.setUp()
+                # The other module's parameter tree exists (stale fixture) but its module isn't loaded.
+                paths = self._patched(loaded=(name,))
+                other_params = os.path.join(self.root, "stale", other)
+                os.makedirs(other_params)
+                st = mousetool.maccel_set({"MODE": "natural", "LIMIT": 1.5})
+                self.assertEqual(st["mode"], "natural")
+                self.assertEqual(st["backend"]["name"], name)
+                self.assertEqual(self._read("sys", "module", name, "parameters", "MODE"), "1")
+                raw = str(int(round(1.5 * mousetool.FIX)))
+                self.assertEqual(self._read("sys", "module", name, "parameters", "LIMIT"), raw)
+                reset = self._read("var", "opt", name, "resets", "set_last_LIMIT_value.sh")
+                self.assertEqual(reset, f"echo {raw} > {paths['SYS_MODULE']}/{name}/parameters/LIMIT;")
+                self.assertFalse(os.path.exists(os.path.join(paths["SYS_MODULE"], other)))
+                self.assertEqual(os.listdir(other_params), [])
+
+    def test_read_only_params_name_the_module_group(self):
+        paths = self._patched(loaded=("mouseaccel",))
+        with mock.patch.object(mousetool.os, "access", return_value=False):
+            with self.assertRaisesRegex(PermissionError, "mouseaccel group"):
+                mousetool.maccel_set({"LIMIT": 1.5})
+        self.assertEqual(self._read("sys", "module", "mouseaccel", "parameters", "LIMIT"), str(mousetool.FIX))
+        del paths
+
+    def test_live_speed_reads_detected_device(self):
+        self._patched(loaded=("mouseaccel",), speeds={"mouseaccel": 12.5, "maccel": 99.0})
+        self.assertEqual(mousetool.read_maccel_speed()[1], 12.5)
+        self.setUp()
+        self._patched(loaded=("maccel",), speeds={"mouseaccel": 12.5, "maccel": 7.25})
+        self.assertEqual(mousetool.read_maccel_speed()[1], 7.25)
+
+    def test_raw_evdev_only_when_both_modules_absent(self):
+        sys_module = os.path.join(self.root, "sys", "module")
+        self.assertFalse(mousetool._raw_evdev_available(sys_module))  # no /sys/module at all
+        os.makedirs(sys_module)
+        self.assertTrue(mousetool._raw_evdev_available(sys_module))
+        for name in ("mouseaccel", "maccel"):
+            os.makedirs(os.path.join(sys_module, name))
+            self.assertFalse(mousetool._raw_evdev_available(sys_module), name)
+            os.rmdir(os.path.join(sys_module, name))
+
+    def test_motion_hub_opens_detected_speed_device(self):
+        for name in ("mouseaccel", "maccel"):
+            with self.subTest(backend=name):
+                self.setUp()
+                self._patched(loaded=(name,), speeds={name: 3.0})
+                hub = mousetool.MotionHub(evdev_discover=lambda: [], dpi_provider=lambda: 1000.0,
+                                          raw_evdev_available=lambda: False)
+                fd = hub._open_maccel_fd()
+                self.assertIsNotNone(fd)
+                try:
+                    self.assertEqual(mousetool._read_maccel_fd(fd)[1], 3.0)
+                finally:
+                    os.close(fd)
+                hub._update_source(False, True, 0)
+                snap = hub.snapshot()
+                self.assertEqual((snap["source"], snap["backend"]), ("maccel", name))
+                hub._update_source(False, False, 0)
+                self.assertIsNone(hub.snapshot()["backend"])
+        self.setUp()
+        self._patched()
+        self.assertIsNone(mousetool.MotionHub(evdev_discover=lambda: [])._open_maccel_fd())
+
+    def test_api_status_and_accel_routes(self):
+        paths = self._patched(loaded=("mouseaccel",))
+        srv = ThreadingHTTPServer(("127.0.0.1", 0), mousetool.Api)
+        t = threading.Thread(target=srv.serve_forever, daemon=True)
+        t.start()
+        try:
+            with mock.patch.dict(os.environ, {"MOUSETOOL_DESKTOP": "xfce"}), \
+                 mock.patch.object(mousetool, "niri_state", return_value={}), \
+                 mock.patch.object(mousetool, "discover_system_mice", return_value=[]), \
+                 mock.patch.object(mousetool.MOTION_HUB, "refresh_dpi"):
+                c = http.client.HTTPConnection("127.0.0.1", srv.server_address[1], timeout=2)
+                c.request("GET", "/api/status", headers={"Origin": "null"})
+                body = json.loads(c.getresponse().read())
+                self.assertEqual(body["accel"], body["maccel"])
+                b = body["accel_backend"]
+                self.assertEqual((b["name"], b["label"], b["legacy"]), ("mouseaccel", "mouseaccel", False))
+                self.assertEqual(b["params_path"], os.path.join(paths["SYS_MODULE"], "mouseaccel", "parameters"))
+                self.assertEqual(b["speed_device"], os.path.join(paths["DEV_DIR"], "mouseaccel"))
+
+                for route, limit in (("/api/accel", 2.0), ("/api/maccel", 3.0)):
+                    c.request("POST", route, body=json.dumps({"LIMIT": limit}),
+                              headers={"Origin": "null", "X-Mouse-Tool": "1"})
+                    r = c.getresponse()
+                    data = json.loads(r.read())
+                    self.assertEqual(r.status, 200, route)
+                    self.assertEqual(data["accel"], data["maccel"])
+                    self.assertEqual(data["accel"]["params"]["LIMIT"], limit)
+                    self.assertEqual(self._read("sys", "module", "mouseaccel", "parameters", "LIMIT"),
+                                     str(int(limit * mousetool.FIX)))
+                for route in ("/api/accel", "/api/maccel"):
+                    c.request("GET", route, headers={"Origin": "null"})
+                    data = json.loads(c.getresponse().read())
+                    self.assertEqual(data["accel"]["backend"]["name"], "mouseaccel")
+
+                os.rename(os.path.join(paths["SYS_MODULE"], "mouseaccel"), os.path.join(paths["SYS_MODULE"], "maccel"))
+                c.request("GET", "/api/status", headers={"Origin": "null"})
+                self.assertEqual(json.loads(c.getresponse().read())["accel_backend"]["label"], "maccel (legacy)")
+
+                os.rename(os.path.join(paths["SYS_MODULE"], "maccel"), os.path.join(self.root, "gone"))
+                c.request("POST", "/api/accel", body="{}", headers={"Origin": "null", "X-Mouse-Tool": "1"})
+                r = c.getresponse()
+                data = json.loads(r.read())
+                self.assertEqual(r.status, 409)
+                self.assertIn("mouseaccel", data["error"])
+                self.assertIn("maccel", data["error"])
+                self.assertFalse(data["accel"]["loaded"])
+                c.close()
+        finally:
+            srv.shutdown()
+            srv.server_close()
+
+    def test_cli_accel_alias(self):
+        for cmd in ("accel", "maccel"):
+            with mock.patch.object(mousetool.sys, "argv", ["mousetool.py", cmd]), \
+                 mock.patch.object(mousetool, "maccel_state", return_value={"backend": {"name": "mouseaccel"}}), \
+                 mock.patch("builtins.print") as out:
+                mousetool.main()
+            self.assertIn('"mouseaccel"', out.call_args[0][0])
+
+
+class TestMouseaccelUdevHelper(unittest.TestCase):
+    """99-mouseaccel.rules helper on a fixture tree: saved values are parsed, never executed."""
+
+    HELPER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "mouseaccel_param_ownership_and_resets")
+
+    def test_rule_and_helper_names(self):
+        with open(os.path.join(os.path.dirname(self.HELPER), "99-mouseaccel.rules")) as f:
+            rules = f.read()
+        self.assertIn('DEVPATH=="/module/mouseaccel"', rules)
+        self.assertIn('RUN+="/usr/lib/udev/mouseaccel_param_ownership_and_resets"', rules)
+        self.assertIn('GROUP="mouseaccel"', rules)
+        with open(self.HELPER) as f:
+            text = f.read()
+        self.assertNotIn("maccel/", text.replace("mouseaccel/", ""))
+
+    def fixture_helper(self, tmp):
+        import grp
+        from pathlib import Path
+        root = Path(tmp)
+        script = Path(self.HELPER).read_text()
+        for setting, value in {
+            "PARAMS_DIR=/sys/module/mouseaccel/parameters": "PARAMS_DIR=" + str(root / "params"),
+            "SPEED_DEV=/dev/mouseaccel": "SPEED_DEV=" + str(root / "no-such-dev"),
+            "STATE_DIR=/var/opt/mouseaccel": "STATE_DIR=" + str(root / "state"),
+            "TRUST_ROOT=/": "TRUST_ROOT=" + tmp,
+            "TRUST_UID=0": f"TRUST_UID={os.getuid()}",
+            "GROUP=mouseaccel": "GROUP=" + grp.getgrgid(os.getgid()).gr_name,
+        }.items():
+            self.assertIn(setting, script)
+            script = script.replace(setting, value)
+        helper = root / "helper.sh"
+        helper.write_text(script)
+        return helper
+
+    def test_unsafe_state_paths_rejected_before_log_or_reset_writes(self):
+        import subprocess
+        from pathlib import Path
+        for unsafe in ("state", "state/resets", "state/logs", "state/logs/udev.log", "writable"):
+            with self.subTest(unsafe=unsafe), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                target = root / "outside"
+                target.mkdir(mode=0o700)
+                (root / "params").mkdir()
+                (root / "params/MODE").write_text("0")
+                if unsafe == "writable":
+                    (root / "state").mkdir()
+                    (root / "state").chmod(0o777)
+                else:
+                    link = root / unsafe
+                    link.parent.mkdir(parents=True, exist_ok=True)
+                    link.symlink_to(target)
+                run = subprocess.run(["sh", self.fixture_helper(tmp)], timeout=5)
+                self.assertNotEqual(run.returncode, 0)
+                self.assertEqual(list(target.iterdir()), [])
+                self.assertEqual(target.stat().st_mode & 0o777, 0o700)
+                self.assertFalse((root / "state/logs/udev.log").is_file())
+
+    def test_resets_are_parsed_not_executed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            params = os.path.join(tmp, "params")
+            state = os.path.join(tmp, "state")
+            resets = os.path.join(state, "resets")
+            os.makedirs(params)
+            os.makedirs(resets)
+            for name in ("LIMIT", "MODE", "ACCEL", "OFFSET", "GAMMA"):
+                with open(os.path.join(params, name), "w") as f:
+                    f.write("0")
+            pwned = os.path.join(tmp, "PWNED")
+            files = {
+                "set_last_LIMIT_value.sh": "echo 6442450944 > /sys/module/mouseaccel/parameters/LIMIT;",
+                "set_last_MODE_value.sh": "echo 1 > /sys/module/mouseaccel/parameters/MODE;\n",
+                "set_last_ACCEL_value.sh": f"touch {pwned}; echo 5 > /sys/module/mouseaccel/parameters/ACCEL;",
+                "set_last_bad-name_value.sh": "echo 9 > x;",
+                "set_last_NOPE_value.sh": "echo 9 > x;",
+            }
+            for fn, body in files.items():
+                with open(os.path.join(resets, fn), "w") as f:
+                    f.write(body)
+            secret = os.path.join(tmp, "secret")
+            with open(secret, "w") as f:
+                f.write("echo 77 > y;")
+            os.symlink(secret, os.path.join(resets, "set_last_OFFSET_value.sh"))
+
+            copy = self.fixture_helper(tmp)
+            import subprocess
+            subprocess.run(["sh", copy], check=True, timeout=10, cwd=tmp)
+
+            def val(name):
+                with open(os.path.join(params, name)) as f:
+                    return f.read()
+            self.assertEqual(val("LIMIT"), "6442450944")
+            self.assertEqual(val("MODE"), "1")
+            self.assertEqual(val("ACCEL"), "0")      # line with a second command is rejected
+            self.assertEqual(val("OFFSET"), "0")     # symlink skipped
+            self.assertFalse(os.path.exists(pwned))
+            self.assertFalse(os.path.exists(os.path.join(params, "NOPE")))
+            with open(os.path.join(state, "logs", "udev.log")) as f:
+                log = f.read()
+            self.assertIn("set LIMIT=6442450944", log)
+            self.assertIn("not a plain file", log)
+            self.assertEqual(os.stat(resets).st_mode & 0o022, 0)
+            self.assertEqual(os.stat(os.path.join(resets, "set_last_GAMMA_value.sh")).st_mode & 0o777, 0o660)
+
+
 class TestLocalApi(unittest.TestCase):
     def test_http_endpoints_and_cors_guards(self):
         srv = ThreadingHTTPServer(("127.0.0.1", 0), mousetool.Api)
