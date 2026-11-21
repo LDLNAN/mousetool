@@ -1,14 +1,42 @@
 # Mouse Tool
 
-A lightweight, universal web and CLI suite for managing **multiple connected mice at once**, kernel-level mouse acceleration (`maccel`), and desktop pointer settings on Linux — without vendor bloatware.
+A lightweight, universal web and CLI suite for managing **multiple connected mice at once**, kernel-level mouse acceleration (through the kernel accel module), and desktop pointer settings on Linux — without vendor bloatware.
+
+## Screenshots
+
+These images come from a synthetic fixture, not from a real device or session: a made-up Pulsar Pro (fake serial) in the browser and a stubbed local helper. Regenerate them with `python3 docs/capture_screenshots.py`, using the browser and font versions recorded in the [capture script](docs/capture_screenshots.py). Select an image to open it at full resolution.
+
+[![Sensitivity tab in the dark theme: DPI stages, polling rate and lift-off distance for a connected mouse, with a second detected mouse in the fleet bar](docs/screenshots/sensitivity-dark.png)](docs/screenshots/sensitivity-dark.png)
+
+*Sensitivity, dark theme: the fleet bar, live status tiles, DPI stages, polling rate and lift-off distance. A second, detected-only mouse sits beside the connected one.*
+
+[![Sensitivity tab in the light theme, showing the same DPI stages, polling rate and lift-off distance](docs/screenshots/sensitivity-light.png)](docs/screenshots/sensitivity-light.png)
+
+*The same view in the light theme. The UI follows the system colour scheme.*
+
+[![Acceleration tab in the dark theme: a Natural curve with a live speed marker and a swipe-peak marker](docs/screenshots/acceleration-dark.png)](docs/screenshots/acceleration-dark.png)
+
+*Acceleration, dark theme: the curve editor with the live speed marker, the swipe-peak marker and the Now and Peak readouts.*
+
+[![Acceleration tab in the light theme, showing the same curve with its live speed and swipe-peak markers](docs/screenshots/acceleration-light.png)](docs/screenshots/acceleration-light.png)
+
+*The same view in the light theme.*
+
+[![Curve parameters followed by the Desktop pointer settings group with the Flat profile selected and the speed at zero](docs/screenshots/desktop-pointer-dark.png)](docs/screenshots/desktop-pointer-dark.png)
+
+*Curve parameters and the **Desktop pointer settings** group (niri in this capture), with the Flat profile selected.*
+
+[![Sensitivity tab scrolled down to polling rate, lift-off distance, the live polling rate meter and the sensor, click and performance tuning switches](docs/screenshots/tuning-light.png)](docs/screenshots/tuning-light.png)
+
+*Sensitivity, scrolled: tracking options and the sensor, click and performance tuning controls. Which controls appear depends on the connected mouse.*
 
 ## Supported Protocols & Hardware
 
 - **Razer (`VID 1532`)** — 90-byte HID feature report protocol (DPI stages, split X/Y, polling up to 8 kHz via HyperPolling dongle, preset & asymmetric LOD, Normal + HyperShift button remaps, power/sleep, wireless battery, pairing).
-- **Endgame Gear 8k (`VID 3367`)** — Full read-modify-write NVRAM & real-time event protocol (`OP1 8k`, `XM2 8k`, `OP1 8k Purple Frost`, `OP1 8k v2`, `XM2 8k v2`): CPI stages (`10`/`50` DPI steps), polling (`1000–8000 Hz`), discrete/glass LOD (`0.7–1.7 mm` / `1–2 mm`), Motion Sync, Angle Snapping, Ripple Control, Slamclick Filter, Motion Jitter Filter, Angle Tuning (`v2`), Force Max Sensor FPS (`v2`), Disable LED on Lift-Off (`v2`), GX Speed/Safe SPDT & multiclick filter, left-handed button swap, and factory reset.
+- **Endgame Gear 8k (`VID 3367`)** — Full read-modify-write NVRAM & real-time event protocol (`OP1 8k`, `XM2 8k`, `OP1 8k Purple Frost`, `OP1 8k v2`, `XM2 8k v2`): CPI stages (`10`/`50` DPI steps), polling (`1000–8000 Hz`), normal LOD (v1 including Purple Frost: 0.7, 1 or 2 mm; v2: 0.7–1.7 mm in 0.1 mm steps), glass LOD (1 or 2 mm on Purple Frost and v2), Motion Sync, Angle Snapping, Ripple Control, Slamclick Filter, Motion Jitter Filter, Angle Tuning (`v2`), Force Max Sensor FPS (`v2`), Disable LED on Lift-Off (`v2`), GX Speed/Safe SPDT & multiclick filter, left-handed button swap, and factory reset.
 - **Endgame Gear `-we` (`VID 3367`)** — CompX Feature `0x08` + Input `0x09` protocol (`OP1we`, `XM2we` wired & wireless, with automatic `0xA1` exclusion so `OP1w 4K v2` is never misclassified): DPI stages, polling (`125–1000 Hz`), LOD, debounce, Motion Sync, Angle Snapping, Ripple Control, sleep timeout, and battery.
 - **Logitech HID++ 2.0 (`VID 046D`)** — Multi-device support for Superlight / G Pro / G502 / MX Series (DPI, polling rate, firmware, serial, and unified/sysfs battery reporting).
-- **Pulsar (`VID 3710`, `25A7`, `3554`)** — Full coverage across all Pulsar hardware generations:
+- **Pulsar (`VID 3710`, `25A7`, `3554`)** — Supported protocol families and their controls are listed below. The PID table identifies known devices.
   - **Pulsar XS-1 (`3710`)** (`X2A v3`, `X3 M`, `XS-1`, `8K Dongle`): DPI, read-only polling readout, LOD, debounce, Motion Sync, Angle Snapping, Ripple Control, firmware, and wireless battery.
   - **Pulsar Pro (`3710:5405`)**: Full multi-stage DPI, `125–8000 Hz` polling, LOD, debounce, Motion Sync, Ripple Control, Angle Snapping, Angle Tuning, Turbo mode, sleep timeout, and battery.
   - **Pulsar Areson (`25A7:FA7B/FA7C`)** (`X2 v2 / X2H / Xlite v3`) & **Pulsar 4K Receiver (`3554:F507–F509`)** & **Pulsar CompX (`3710`)**: 3-tier `10/50/100` DPI encoding, stages, polling (`125–4000/8000 Hz`), LOD, debounce, filters, and battery.
@@ -18,7 +46,7 @@ A lightweight, universal web and CLI suite for managing **multiple connected mic
   - **CORE 2 (`Model O 2 Pro / D 2 Pro 4K/8K`)**: Firmware/battery queries plus write-only DPI stages, `125–8000 Hz` polling, debounce, Motion Sync, backed by persistent local state cache (`~/.cache/mousetool/device_state.json` & `localStorage`).
   - **Classic (`Model O/D/I/O2/D2/I2 Wireless/Wired`, `Series One Pro`, `Forge`, `3794` CORE 2 Classic)**: Descriptor-length (`64B`) and generation (`core2` vs `legacy`) safety-gated writes + wireless battery queries.
   - **Pixart (`093A`)** (`Model O 2 Mini`, `Series 2 Pro`, `Model D 2 Mini`, `Model O 3`, `Model D 3`): `64B` Feature `0x03` config packet for DPI, polling, LOD, and debounce with local cache persistence.
-- **Any Generic HID / USB / Bluetooth Mouse** — Connect any mouse via WebHID (**Any HID…**) or view it passively in the fleet bar via `/sys/class/input/mouse*` with live pointer polling rate measurement, live button/scroll tester, raw HID input report snooper, and local DPI reference storage for `maccel` normalization.
+- **Generic USB and Bluetooth mice** — **Any HID…** can connect interfaces the browser exposes through WebHID. The raw input snooper can read reports from eligible collections. Browsers protect standard mouse collections. The local helper can still list system-detected mice in the fleet bar via `/sys/class/input/mouse*`. The generic controls include pointer-event polling, a button/scroll tester and a local DPI reference.
 
 | Vendor | Supported PIDs |
 | --- | --- |
@@ -27,27 +55,27 @@ A lightweight, universal web and CLI suite for managing **multiple connected mic
 | **Logitech HID++** (`046D`) | G Pro / Superlight / Superlight 2 (`c088`, `c092`, `c094`, `c099`), G305 (`c095`), G502 Hero / Lightspeed / X (`c08b`, `c093`, `c09d`, `c09e`), MX Master 3/3S (`b023`, `b034`), Unifying / Lightspeed / Bolt (`c52b`, `c539`, `c53f`, `c547`, `c548`, `c54d`) |
 | **Pulsar** (`3710`, `25A7`, `3554`) | **XS-1 (`3710`):** `3404`, `3409`, `3410`, `5402`, `5403` · **Pro (`3710`):** `5405` · **Areson (`25A7`):** `fa7b`, `fa7c` · **4K Receiver (`3554`):** `f507`, `f508`, `f509` (plus CompX fallback on `3710`) |
 | **CompX ODM** (`3554`, `373B`) | **Scyrox:** `f515`, `f517`, `f5f7` · **Teevolution:** `f520`, `f522`, `f523`, `f5bb` · **VGN F2:** `fb56`, `fb57` · **Lamzu Atlantis:** `f50d`, `f50f`, `f510` · **ATK / VXE (`3554`/`373B`):** `f58a`, `f58c`, `f58e`, `f58f`, `1085`, `10c9`, `11d9` |
-| **Glorious** (`258A`, `22D4`, `320F`, `3794`, `093A`) | **Sinowealth:** `258a:0033`, `258a:0036`, `3794:a000` · **CORE 2:** `258a:201b`, `258a:201c`, `258a:2035`, `258a:2036` · **Classic:** `258a:2011–2039`, `22d4:1503`, `320f:821a/823a/831a`, `3794:a300/a312` · **Pixart (`093A`):** `821b–832a` |
+| **Glorious** (`258A`, `22D4`, `320F`, `3794`, `093A`) | **Sinowealth:** `258a:0033`, `258a:0036`, `3794:a000` · **CORE 2:** `258a:201b`, `258a:201c`, `258a:2035`, `258a:2036` · **Classic:** **258A:** `2011`, `2012`, `2013`, `2014`, `2015`, `2018`, `2019`, `201a`, `201d`, `2022`, `2023`, `2024`, `2025`, `2027`, `2031`, `2033`, `2034`, `2039`, `22d4:1503`, `320f:821a/823a/831a`, `3794:a300/a312` · **Pixart (`093A`):** `821b`, `821d`, `822a`, `822b`, `822d`, `824a`, `824b`, `824d`, `825a`, `826a`, `826b`, `826d`, `827a`, `832a` |
 
 ## Features
 
 - **Web Interface (`index.html`)**:
-  - **Multi-Mouse Fleet Switcher**: Connect and manage multiple simultaneous WebHID mice (`+ Add mouse` for supported devices or `Any HID…` for generic mice)—even multiple identical VID:PID mice side by side (1-to-1 split-endpoint pairing and instance badges)—while also showing passive system-detected mice from `mousetool.py serve`.
+  - **Multi-Mouse Fleet Switcher**: Connect and manage multiple simultaneous WebHID mice (**Connect mouse** for supported devices or **Any HID…** for eligible generic interfaces)—even multiple identical VID:PID mice side by side (1-to-1 split-endpoint pairing and instance badges)—while also showing passive system-detected mice from `mousetool.py serve`.
   - **Sensitivity & Sensor**: DPI/CPI stages (optional split X/Y), one-off DPI, polling rate selector (`125–8000 Hz`, or read-only badge where hardware-locked such as Pulsar XS-1), Razer preset/async LOD, EGG discrete/glass LOD, Scyrox 5-stop LOD, or Low/Med/High preset LOD.
   - **01.3 Sensor, click & performance tuning**: Capability-driven controls for Click Debounce (`ms`), Motion Sync, Angle Snapping, Ripple Control, Performance/Turbo mode, 20K Scan Mode (Scyrox V8S), Anti-mistouch (ATK F1 Ultimate 2.0), plus Endgame Gear Slamclick, Motion Jitter, Glass Mode, Lift-Off LED disable, Force Max FPS, Angle Tuning, and GX Speed/Safe SPDT.
   - **Live Polling Rate Meter & Input Tester**: Works with every connected mouse (`pointerrawupdate` / `getCoalescedEvents`) alongside onboard Razer Normal + HyperShift remaps and EGG left-handed swap.
   - **Power & Device Info**: Battery/sleep controls for wireless mice, protocol & HID collection diagnostics, cached write-only state notices where hardware offers no getter, EGG factory reset, and a **raw HID input snooper**.
-  - **Acceleration (`maccel` + desktop pointer settings)**: Interactive SVG curve visualizer and parameter editor for `Linear`, `Natural`, `Synchronous`, and `No accel` modes, desktop pointer profile and speed controls, and one-click `Use mouse DPI` synced to the active fleet mouse.
+  - **Acceleration (kernel accel module + desktop pointer settings)**: Interactive SVG curve visualizer and parameter editor for `Linear`, `Natural`, `Synchronous`, and `No accel` modes, with a live speed marker and swipe-peak indicator fed by the helper's `/api/motion` stream (falling back to approximate window-only pointer motion if that stream is unavailable), desktop pointer profile and speed controls for niri, GNOME, Plasma (Wayland), Hyprland and COSMIC (see below), and one-click `Use mouse DPI` synced to the active fleet mouse.
 - **CLI & Local API (`mousetool.py`)**:
   - `list [--json]`: Discover all configurable and passive generic mice connected to the system.
   - `status [-d SEL | --all] [--json]`: Full hardware readout across one or all connected mice (supports index `1`/`2`, `VID:PID`, `/dev/hidrawN`, driver name, or substring).
-  - `battery [-d SEL | --all] [--json]`: Battery percentage and charging state with offline/asleep cache fallback (`~/.cache/mousetool/battery.json`).
-  - `dpi [-d SEL] [X [Y]]`, `stages [-d SEL] ...`, `poll [-d SEL] [HZ]`, `lod [-d SEL] ...`, `power [-d SEL] ...`, `tune [-d SEL] [--debounce MS ...]`: Configure one or more mice directly from the terminal.
+  - `battery [-d SEL | --all] [--json]`: Battery percentage and charging state. Single-device queries can fall back to `~/.cache/mousetool/battery.json` when a mouse is offline or asleep. With `--all`, a failed device read is marked stale.
+  - `dpi [-d SEL] [X [Y]]`, `stages [-d SEL] ...`, `poll [-d SEL] [HZ]`, `lod [-d SEL] ...`, `power [-d SEL] ...`, `tune [-d SEL] [--debounce MS ...]`: Configure one mouse per invocation. Use `-d SEL` to choose the target.
   - `maccel [--set K=V ...]`: Inspect or update `maccel` kernel parameters and reboot-persistent reset scripts.
   - `rawaccel {preview|export|import}`: Offline preview/export of the current `maccel` curve as [Raw Accel](https://github.com/RawAccelOfficial/rawaccel) v1.7.1 settings for Windows (see below). Never applies anything.
-  - `serve [--port N]`: Local HTTP API (`127.0.0.1:8766`) serving `/api/status` (with `system_mice`), `/api/devices`, `/api/maccel`, and `/api/desktop`. The original `/api/niri` write endpoint remains available.
-  - `open`: Launches `index.html` in a WebHID-capable browser (`brave`, `chromium`, or `google-chrome`).
-- **Diagnostics (`probe.py`)**: Read-only diagnostic tool that scans all connected HID mice (`Razer`, `Endgame Gear 8k / -we`, `Logitech HID++`, `Pulsar`, `CompX ODM`, `Glorious`, and generic mice) without altering device state.
+  - `serve [--port N]`: Local HTTP API (`127.0.0.1:8766`) serving `/api/status` (with `system_mice`), `/api/devices`, `/api/maccel`, `/api/desktop`, and the `/api/motion` live-telemetry event stream. The original `/api/niri` write endpoint remains available.
+  - `open`: Launches `index.html` in a WebHID-capable browser (`brave`, `chromium`, or `google-chrome`), falling back to `xdg-open` if none is installed.
+- **Diagnostics (`probe.py`)**: Reads device state by default and scans all connected HID mice (`Razer`, `Endgame Gear 8k / -we`, `Logitech HID++`, `Pulsar`, `CompX ODM`, `Glorious`, and generic mice) by protocol. The opt-in `--roundtrip-stages` check writes the current Razer DPI stages back to the mouse and reads them again.
 
 ## Setup
 
@@ -96,7 +124,7 @@ The helper detects the desktop from its session environment, starting with `XDG_
 
 `GET /api/desktop` and the `desktop` field of `GET /api/status` expose the backend, label, writability, profile, speed and status message. Send `POST /api/desktop` with the existing `X-Mouse-Tool: 1` header and a JSON object such as `{"accel_profile":"flat","accel_speed":0.25}`. A successful response includes the settings read back from that backend.
 
-MT-005 testing used temporary files, mocked command output and upstream documentation for all five desktops. **None of the five backends was exercised on a real desktop session for this change.**
+Verification of these five desktop backends used temporary files, mocked command output and upstream documentation. That verification did not include a real desktop session.
 
 ### CLI Examples
 ```bash
@@ -155,3 +183,4 @@ The curve check samples about 460 speeds from 1e-6 to 1e6 counts/ms, including p
 ```bash
 python3 -m unittest -v test_mousetool.py test_desktop_pointer.py test_rawaccel_export.py
 ```
+The suite requires no third-party Python packages. The JavaScript curve comparison skips when Node.js is unavailable. The Plasma command-line parser check skips when `busctl` is unavailable.
