@@ -98,6 +98,23 @@ The helper detects the desktop from its session environment, starting with `XDG_
 
 MT-005 testing used temporary files, mocked command output and upstream documentation for all five desktops. **None of the five backends was exercised on a real desktop session for this change.**
 
+### Mouse battery in Waybar
+
+The Linux helper reads the default wireless mouse once a minute. `GET /api/battery` and the default battery CLI share that reading. If the mouse goes to sleep, the last known percentage stays visible with a stale class. Before the first good reading, Waybar shows a dash.
+
+Add `custom/mouse-battery` to a Waybar module list and configure the path to your checkout:
+
+```json
+"custom/mouse-battery": {
+  "exec": "/path/to/mousetool/mousetool.py battery --waybar",
+  "return-type": "json",
+  "escape": true,
+  "interval": 60
+}
+```
+
+The helper sends a desktop warning at 20% and a critical warning at 10%. Charging re-arms both warnings. On battery, a warning re-arms after the charge rises five percentage points above its threshold. Use the **Desktop notifications** switch under **Power** or run `./mousetool.py battery --notifications off` to disable warnings.
+
 ### CLI Examples
 ```bash
 # List all connected mice (configurable + generic)
