@@ -5,6 +5,7 @@ Notable user-visible changes to Mouse Tool. Updated with every merge to local `d
 ## Unreleased
 
 ### Changed
+- **README screenshots**: six full-size screenshots of the sensitivity, acceleration, desktop pointer and tuning views, a script that regenerates them, and corrected hardware and command-line notes (MT-004, 11-21, verified 90.2/100, cross-provider reviewer).
 - **Mouse outline and device text**: a redrawn mouse wireframe shape and a cleaner device-name font that fits at narrow widths (MT-008/010, 11-21, verified 93.3/91.4, same-family reviewer).
 
 ### Added
