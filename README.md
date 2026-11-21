@@ -1,6 +1,6 @@
 # Mouse Tool
 
-A lightweight, universal web and CLI suite for managing **multiple connected mice at once**, kernel-level mouse acceleration (through the kernel accel module), and desktop pointer settings on Linux — without vendor bloatware.
+A lightweight, universal web and CLI suite for managing **multiple connected mice at once**, kernel-level mouse acceleration (`mouseaccel`, or the legacy `maccel`), and desktop pointer settings on Linux — without vendor bloatware.
 
 ## Screenshots
 
@@ -65,15 +65,15 @@ These images come from a synthetic fixture, not from a real device or session: a
   - **01.3 Sensor, click & performance tuning**: Capability-driven controls for Click Debounce (`ms`), Motion Sync, Angle Snapping, Ripple Control, Performance/Turbo mode, 20K Scan Mode (Scyrox V8S), Anti-mistouch (ATK F1 Ultimate 2.0), plus Endgame Gear Slamclick, Motion Jitter, Glass Mode, Lift-Off LED disable, Force Max FPS, Angle Tuning, and GX Speed/Safe SPDT.
   - **Live Polling Rate Meter & Input Tester**: Works with every connected mouse (`pointerrawupdate` / `getCoalescedEvents`) alongside onboard Razer Normal + HyperShift remaps and EGG left-handed swap.
   - **Power & Device Info**: Battery/sleep controls for wireless mice, protocol & HID collection diagnostics, cached write-only state notices where hardware offers no getter, EGG factory reset, and a **raw HID input snooper**.
-  - **Acceleration (kernel accel module + desktop pointer settings)**: Interactive SVG curve visualizer and parameter editor for `Linear`, `Natural`, `Synchronous`, and `No accel` modes, with a live speed marker and swipe-peak indicator fed by the helper's `/api/motion` stream (falling back to approximate window-only pointer motion if that stream is unavailable), desktop pointer profile and speed controls for niri, GNOME, Plasma (Wayland), Hyprland and COSMIC (see below), and one-click `Use mouse DPI` synced to the active fleet mouse.
+  - **Acceleration (`mouseaccel` or legacy `maccel`, plus desktop pointer settings)**: Interactive SVG curve visualizer and parameter editor for `Linear`, `Natural`, `Synchronous`, and `No accel` modes, with a live speed marker and swipe-peak indicator fed by the helper's `/api/motion` stream (falling back to approximate window-only pointer motion if that stream is unavailable), desktop pointer profile and speed controls for niri, GNOME, Plasma (Wayland), Hyprland and COSMIC (see below), and one-click `Use mouse DPI` synced to the active fleet mouse.
 - **CLI & Local API (`mousetool.py`)**:
   - `list [--json]`: Discover all configurable and passive generic mice connected to the system.
   - `status [-d SEL | --all] [--json]`: Full hardware readout across one or all connected mice (supports index `1`/`2`, `VID:PID`, `/dev/hidrawN`, driver name, or substring).
   - `battery [-d SEL | --all] [--json]`: Battery percentage and charging state. Single-device queries can fall back to `~/.cache/mousetool/battery.json` when a mouse is offline or asleep. With `--all`, a failed device read is marked stale.
   - `dpi [-d SEL] [X [Y]]`, `stages [-d SEL] ...`, `poll [-d SEL] [HZ]`, `lod [-d SEL] ...`, `power [-d SEL] ...`, `tune [-d SEL] [--debounce MS ...]`: Configure one mouse per invocation. Use `-d SEL` to choose the target.
-  - `maccel [--set K=V ...]`: Inspect or update `maccel` kernel parameters and reboot-persistent reset scripts.
-  - `rawaccel {preview|export|import}`: Offline preview/export of the current `maccel` curve as [Raw Accel](https://github.com/RawAccelOfficial/rawaccel) v1.7.1 settings for Windows (see below). Never applies anything.
-  - `serve [--port N]`: Local HTTP API (`127.0.0.1:8766`) serving `/api/status` (with `system_mice`), `/api/devices`, `/api/maccel`, `/api/desktop`, and the `/api/motion` live-telemetry event stream. The original `/api/niri` write endpoint remains available.
+  - `accel [--set K=V ...]` (alias `maccel`): Inspect or update the kernel acceleration parameters and reboot-persistent reset scripts. Uses `mouseaccel` when it is loaded, otherwise `maccel` (legacy); see [Kernel acceleration module](#kernel-acceleration-module).
+  - `rawaccel {preview|export|import}`: Offline preview/export of the current kernel acceleration curve as [Raw Accel](https://github.com/RawAccelOfficial/rawaccel) v1.7.1 settings for Windows (see below). Never applies anything.
+  - `serve [--port N]`: Local HTTP API (`127.0.0.1:8766`) serving `/api/status` (with `system_mice` and the detected `accel_backend`), `/api/devices`, `/api/accel` (`/api/maccel` is kept as an alias), `/api/desktop`, and the `/api/motion` live-telemetry event stream. The original `/api/niri` write endpoint remains available.
   - `open`: Launches `index.html` in a WebHID-capable browser (`brave`, `chromium`, or `google-chrome`), falling back to `xdg-open` if none is installed.
 - **Diagnostics (`probe.py`)**: Reads device state by default and scans all connected HID mice (`Razer`, `Endgame Gear 8k / -we`, `Logitech HID++`, `Pulsar`, `CompX ODM`, `Glorious`, and generic mice) by protocol. The opt-in `--roundtrip-stages` check writes the current Razer DPI stages back to the mouse and reads them again.
 
@@ -94,11 +94,29 @@ sudo cp 60-mousetool.rules /etc/udev/rules.d/
 sudo udevadm control --reload-rules && sudo udevadm trigger
 ```
 
-### 3. `maccel` write permissions (optional, for Acceleration tab)
-If using [`maccel`](https://www.maccel.org), add your user to the `maccel` group and log out/in:
+### 3. Kernel acceleration write permissions (optional, for Acceleration tab)
+For `mouseaccel`, create its group and install its udev rule and helper, then add yourself to the group and log out/in:
+```bash
+./install.sh --mouseaccel-perms
+sudo usermod -aG mouseaccel "$USER"
+```
+`99-mouseaccel.rules` and `mouseaccel_param_ownership_and_resets` do for `mouseaccel` what the maccel package does for `maccel`. When the module loads, they give the `mouseaccel` group the parameters, `/dev/mouseaccel` and the saved value files under `/var/opt/mouseaccel/resets`, and restore the saved values. The helper only accepts `echo <integer> > …` lines from the reset files and writes the number itself. maccel's helper runs those files with `sh`.
+
+For the legacy [`maccel`](https://www.maccel.org), its package already sets this up. Add yourself to the `maccel` group:
 ```bash
 sudo usermod -aG maccel "$USER"
 ```
+
+### Kernel acceleration module
+`mouseaccel` is a fork of maccel 0.5.9 with per-device timing state and a gap clamp. Its parameter names and value formats are the same as maccel's. mousetool picks the module at each request:
+
+| Loaded | Used | Parameters | Live speed |
+| --- | --- | --- | --- |
+| `mouseaccel` | `mouseaccel` | `/sys/module/mouseaccel/parameters` | `/dev/mouseaccel` |
+| only `maccel` | `maccel (legacy)` | `/sys/module/maccel/parameters` | `/dev/maccel` |
+| neither | none: the tab shows the "not installed" or "not loaded" state | | |
+
+The Acceleration tab shows the module in use next to the heading. mouseaccel refuses to load while maccel is loaded. If maccel is loaded after mouseaccel, mouseaccel passes motion through unchanged and the tab warns that its settings don't apply. `GAP_MIN_MS` and `GAP_MAX_MS`, which only mouseaccel has, are not shown or edited yet. In the motion stream, `source` keeps its old values (`maccel`, `maccel+evdev`) for any kernel speed device, and `backend` names the module.
 
 ## Usage
 
@@ -110,7 +128,7 @@ Launch from your app menu (**Mouse Tool**), or run:
 
 ### Desktop pointer settings
 
-Open **Acceleration → Desktop pointer settings** to change the acceleration profile or pointer speed. Choose **Flat** to avoid stacking desktop acceleration on a maccel curve. The controls work independently of the kernel module. Each desktop accepts speed directly on the **−1 to 1** scale. The slider moves in increments of 0.05. Existing native profiles such as GNOME’s `default` appear by name until you choose Flat or Adaptive.
+Open **Acceleration → Desktop pointer settings** to change the acceleration profile or pointer speed. Choose **Flat** to avoid stacking desktop acceleration on a kernel (mouseaccel or maccel) curve. The controls work independently of the kernel module. Each desktop accepts speed directly on the **−1 to 1** scale. The slider moves in increments of 0.05. Existing native profiles such as GNOME’s `default` appear by name until you choose Flat or Adaptive.
 
 | Desktop | Where the two settings go | Scope and fixture coverage |
 | --- | --- | --- |
@@ -144,9 +162,9 @@ Verification of these five desktop backends used temporary files, mocked command
 # Battery JSON (for status bars such as Noctalia)
 ./mousetool.py battery --json
 
-# Inspect or update maccel parameters
-./mousetool.py maccel
-./mousetool.py maccel --set MODE=natural LIMIT=1.5 DECAY_RATE=0.1
+# Inspect or update kernel acceleration parameters (mouseaccel, or maccel legacy)
+./mousetool.py accel
+./mousetool.py accel --set MODE=natural LIMIT=1.5 DECAY_RATE=0.1
 ```
 
 ### Raw Accel export (Windows, offline)
@@ -166,7 +184,7 @@ Anything that can't be carried exactly is listed under **Lossy** rather than dro
 The curve check samples about 460 speeds from 1e-6 to 1e6 counts/ms, including points just around each formula's branch points (offset, cap, sync speed and clamp edges). It compares Raw Accel's formula on the exported settings with both the Studio preview curve and maccel 0.5.9's formula, plus a motion pipeline check, at a relative tolerance of 1e-6. Raw Accel and maccel use the same formulas. The Studio preview has two synchronous-only shortcuts: it floors speeds below 1e-6 and returns exactly 1× within 1e-9 counts/ms of `SYNC_SPEED`. With steep settings, or a very small `SYNC_SPEED`, this can put the preview more than 1e-6 away from both. The check then reports **NOT EQUIVALENT** and names the shortcut. Natural mode with a steep `LIMIT` or a tiny `DECAY_RATE` cancels badly at very low speeds. Studio (JavaScript) and Raw Accel (C++) compute the same expression there with different `exp()` implementations, so they can disagree. Where a 2-ulp `exp()` difference would move the result past the tolerance, the check reports **NOT VERIFIED** instead of claiming equivalence. The versioned export embeds the full report; `--settings-only` only prints its result line, and `--no-check` skips it.
 
 ```bash
-# Show the mapping and curve check for the loaded maccel settings (read-only)
+# Show the mapping and curve check for the loaded module's settings (mouseaccel or maccel; read-only)
 ./mousetool.py rawaccel preview --live
 
 # Versioned export (schema_version 1): source parameters, mapping report, curve check, Raw Accel settings
