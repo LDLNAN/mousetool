@@ -302,7 +302,7 @@ function createAccelController({ $, getActiveDpi, isAccelTabActive, setState, to
     const draftDpi = accelDraft.INPUT_DPI > 0 ? accelDraft.INPUT_DPI : streamDpi;
     const dpiScale = streamDpi / draftDpi;
     if (isPtr || st.source === "maccel" || !accelMotion.connected) {
-      for (const id of ["accelSwipeGroup", "accelPeakGroup", "accelLiveGroup"]) {
+      for (const id of ["accelSwipeGroup", "accelSwipeGroupY", "accelPeakGroup", "accelLiveGroup"]) {
         _svgShow($(id), false);
       }
       let text = "Awaiting motion source";
@@ -332,32 +332,40 @@ function createAccelController({ $, getActiveDpi, isAccelTabActive, setState, to
 
     // Swipe band + highlighted curve segment
     const swipeGrp = $("accelSwipeGroup");
+    const swipeGrpY = $("accelSwipeGroupY");
     if (swipeGrp) {
       if (hasPeak) {
         const lo = Math.min(accelXMax, Math.max(0, Math.min(swipeMin, peak)));
         const hi = Math.min(accelXMax, Math.max(lo, Math.max(swipeMax, peak)));
         const x1 = g.px(lo), x2 = g.px(hi);
+        const bandW = Math.max(2, x2 - x1);
         const band = $("accelSwipeBand");
         band.setAttribute("x", x1.toFixed(1));
-        band.setAttribute("width", Math.max(2, x2 - x1).toFixed(1));
+        band.setAttribute("width", bandW.toFixed(1));
+        const clipY = $("accelSwipeClipYRect");
+        if (clipY) {
+          clipY.setAttribute("x", x1.toFixed(1));
+          clipY.setAttribute("width", bandW.toFixed(1));
+        }
 
         const steps = 36;
-        const dX = [], dY = [];
+        const dX = [];
         for (let i = 0; i <= steps; i++) {
           const xv = Math.max(0.05, lo + (i / steps) * (hi - lo));
-          const [sx, sy] = maccelEval(xv, accelDraft);
+          const [sx] = maccelEval(xv, accelDraft);
           const cmd = i ? "L" : "M";
           dX.push(`${cmd}${g.px(xv).toFixed(1)},${clampY(g.py(sx)).toFixed(1)}`);
-          if (g.hasY) dY.push(`${cmd}${g.px(xv).toFixed(1)},${clampY(g.py(sy)).toFixed(1)}`);
         }
         $("accelSwipeTrail").setAttribute("d", dX.join(" "));
-        const trailY = $("accelSwipeTrailY");
-        if (g.hasY) trailY.setAttribute("d", dY.join(" "));
-        _svgShow(trailY, g.hasY);
         swipeGrp.style.opacity = fade.toFixed(2);
         _svgShow(swipeGrp, true);
+        if (swipeGrpY) {
+          swipeGrpY.style.opacity = fade.toFixed(2);
+          _svgShow(swipeGrpY, g.hasY);
+        }
       } else {
         _svgShow(swipeGrp, false);
+        _svgShow(swipeGrpY, false);
       }
     }
 
@@ -500,14 +508,17 @@ function createAccelController({ $, getActiveDpi, isAccelTabActive, setState, to
     if ($("accelCurveMeta")) $("accelCurveMeta").classList.toggle("has-y", hasY);
     const pathY = hasY ? pts.map(([x, , sy], i) => `${i ? "L" : "M"}${px(x).toFixed(1)},${py(sy).toFixed(1)}`).join(" ") : "";
 
+    g += `<defs><clipPath id="accelSwipeClipY"><rect id="accelSwipeClipYRect" x="${L}" y="${T - 4}" width="0" height="${PH + 8}"/></clipPath></defs>`;
     g += `<path class="area-x" d="${areaX}"/>`;
     g += `<g id="accelSwipeGroup" style="display:none">`;
     g += `<rect class="swipe-band" id="accelSwipeBand" x="${L}" y="${T}" width="0" height="${PH}"/>`;
-    g += `<path class="swipe-trail-y" id="accelSwipeTrailY" d="" style="display:none"/>`;
     g += `<path class="swipe-trail" id="accelSwipeTrail" d=""/>`;
     g += `</g>`;
-    if (hasY) g += `<path class="line-y" d="${pathY}"/>`;
-    g += `<path class="line-x" d="${pathX}"/>`;
+    if (hasY) {
+      g += `<path class="line-y" id="accelLineY" d="${pathY}"/>`;
+      g += `<g id="accelSwipeGroupY" style="display:none"><path class="swipe-trail-y" id="accelSwipeTrailY" d="${pathY}" clip-path="url(#accelSwipeClipY)"/></g>`;
+    }
+    g += `<path class="line-x" id="accelLineX" d="${pathX}"/>`;
     g += `<g id="accelPeakGroup" style="display:none">`;
     g += `<line class="peak-line" id="accelPeakLine" x1="0" y1="${T}" x2="0" y2="${H - B}"/>`;
     g += `<polygon class="peak-dot-y" id="accelPeakDotY" points="0,0" style="display:none"/>`;
