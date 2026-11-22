@@ -29,7 +29,9 @@ import {
   makePulsarXs1Api,
 } from "./drivers/pulsar.js";
 import { makeRazerApi } from "./drivers/razer.js";
+import { createDpiTrackController } from "./dpi_track.js";
 import { createPollingMeter } from "./polling_meter.js";
+import { createTierModalController } from "./tier_modal.js";
 import {
   getSupportedFilters,
   loadRegistry,
@@ -204,6 +206,11 @@ const accelCtrl = createAccelController({
   onSystemMice: (mice) => { systemMice = mice; renderFleet(); },
 });
 
+const tierModalCtrl = createTierModalController({
+  $,
+  getSession: cur,
+});
+
 // ======================================================================
 // rendering
 // ======================================================================
@@ -223,10 +230,9 @@ function render(key) {
       if (key === "sinoAll") {
         buildPollButtons();
         $("stagesGroup").hidden = !s.caps.stages;
-        $("dpiNowRow").hidden = !s.caps.dpi;
       }
       if (key === "compxAll") {
-        $("stagesHint").textContent = `Click a stage to select it · up to ${s.caps.maxStages} · ${s.caps.dpiMin}–${s.caps.dpiMax.toLocaleString()}`;
+        $("stagesHint").textContent = `Click a stage or drag markers on the scale · up to ${s.caps.maxStages} · ${s.caps.dpiMin}–${s.caps.dpiMax.toLocaleString()}`;
       }
     }
     return;
@@ -487,6 +493,7 @@ const stagesDirty = () => {
 function renderStagesFromDevice() {
   const s = cur();
   if (!s) return;
+  if (dpiTrackCtrl.isInteracting()) return;
   if (s.stagesEdit && s.S.stages && same(s.stagesEdit, s.S.stages)) s.stagesEdit = null;
   renderPips();
   const typing = $("stages").contains(document.activeElement) && document.activeElement.tagName === "INPUT";
@@ -496,19 +503,61 @@ function renderStagesFromDevice() {
   } else { markDirty(); renderTrack(); }
 }
 
-const logPos = (v) => {
-  const mn = dpiMin(), mx = dpiMax();
-  return (Math.log(Math.max(mn, Math.min(mx, v))) - Math.log(mn)) / Math.max(0.01, Math.log(mx) - Math.log(mn)) * 100;
-};
+const dpiTrackCtrl = createDpiTrackController({
+  trackEl: $("track"),
+  getConfig: () => {
+    const s = cur();
+    if (!s || !s.caps?.stages) return null;
+    return {
+      min: dpiMin(s),
+      max: dpiMax(s),
+      step: s.caps.dpiStepLo ?? 50,
+      stepHi: s.caps.dpiStepHi ?? s.caps.dpiStepLo ?? 50,
+      canWrite: !!(s.writeEnabled && s.caps.stages),
+      clampFn: s.driver === "egg" ? (v) => eggClampCpi(s.info, v) : null,
+    };
+  },
+  getStages: curStages,
+  getLiveDpi: () => activeS().dpi,
+  onPreviewDpi: (stageIdx, nextDpi) => {
+    const e = edit();
+    const st = e.list[stageIdx];
+    if (!st) return;
+    const split = $("splitXY").checked;
+    st.x = nextDpi;
+    if (!split) st.y = nextDpi;
+    const card = $("stages").querySelectorAll(".stagecard")[stageIdx];
+    if (card) {
+      const inpX = card.querySelector('input[data-k="x"]');
+      if (inpX) inpX.value = String(nextDpi);
+      if (!split) {
+        const inpY = card.querySelector('input[data-k="y"]');
+        if (inpY) inpY.value = String(nextDpi);
+      }
+    }
+    markDirty();
+  },
+  onSelectStage: (stageIdx) => {
+    if (curStages().active === stageIdx + 1) return;
+    edit().active = stageIdx + 1;
+    renderStages();
+  },
+  onCommitStages: () => {
+    commitStagesEdit();
+  },
+  onRevertDrag: (stageIdx, startX, startY) => {
+    const s = cur();
+    if (s?.stagesEdit?.list?.[stageIdx]) {
+      s.stagesEdit.list[stageIdx].x = startX;
+      s.stagesEdit.list[stageIdx].y = startY;
+      if (s.S.stages && same(s.stagesEdit, s.S.stages)) s.stagesEdit = null;
+    }
+    renderStages();
+  },
+});
+
 function renderTrack() {
-  const st = curStages(), mn = dpiMin(), max = dpiMax();
-  const ticks = [mn, 400, 800, 1600, 3200, 6400, 12800, max].filter((t, i, a) => t >= mn && t <= max && a.indexOf(t) === i);
-  let h = '<div class="rail"></div>';
-  h += ticks.map((t, i) => `<span class="tl" style="left:${logPos(t)}%"></span><span class="tick${[400, 1600, 6400, 12800].includes(t) ? " minor" : ""}${i === 0 ? " first" : i === ticks.length - 1 ? " last" : ""}" style="left:${logPos(t)}%">${t >= 1000 ? t / 1000 + "k" : t}</span>`).join("");
-  const dpi = activeS().dpi;
-  if (dpi) h += `<span class="live" style="left:${logPos(dpi[0])}%" title="Current: ${dpi[0]}"></span>`;
-  st.list.forEach((s, i) => { h += `<span class="mark${st.active === i + 1 ? " active" : ""}" style="left:${logPos(clampDpi(s.x) ?? mn)}%" title="Stage ${i + 1}: ${s.x}">${i + 1}</span>`; });
-  $("track").innerHTML = h;
+  dpiTrackCtrl.render();
 }
 
 function renderStages() {
@@ -516,7 +565,6 @@ function renderStages() {
   if (!sess || !sess.caps.stages) { $("stages").innerHTML = ""; markDirty(); return; }
   const st = curStages();
   const split = $("splitXY").checked;
-  $("dpiNowY").hidden = !split;
   const mn = dpiMin(), max = dpiMax(), step = sess.caps.dpiStepLo ?? 50;
   const wrap = $("stages");
   wrap.innerHTML = "";
@@ -699,7 +747,6 @@ function renderButtons() {
   $("eggHandedWrap").hidden = !s?.caps?.eggHanded;
   $("btnResetAll").hidden = !hasBtns;
   $("btnUnavailable").hidden = hasBtns;
-  $("btnFootnote").hidden = !hasBtns;
   $("btnGroupTitle").textContent = hasBtns ? "Button mapping" : "Live input tester";
   $("btnGroupNote").textContent = hasBtns ? "Saved on your mouse — works everywhere" : "Test clicks, side buttons, and scrolling on any mouse";
   if (!hasBtns) {
@@ -774,9 +821,6 @@ $("btnLayer").addEventListener("click", async (e) => {
   if (layer === s.btnLayer) return;
   s.btnLayer = layer;
   for (const x of $("btnLayer").children) x.classList.toggle("sel", +x.dataset.layer === layer);
-  $("btnFootnote").textContent = layer === 0
-    ? "Primary click stays locked so you can't lock yourself out. Every change is saved to the mouse."
-    : "Active while holding a button set to HyperShift. Left click can be remapped here.";
   await loadButtons(s);
 });
 
@@ -1051,7 +1095,9 @@ function applySessionChrome() {
   $("connText").textContent = s.asleep ? "Mouse asleep — move it" : `${s.shortName} · ${s.link}`;
   $("tierBadge").hidden = false;
   $("tierBadge").className = `tierbadge tier-${tier}`;
+  $("tierBadge").setAttribute("aria-label", `${tLabel} — click to see what support tiers mean`);
   $("tierBadgeText").textContent = tLabel;
+  tierModalCtrl.sync();
 
   $("model").textContent = s.name;
   $("protoName").textContent = s.protoLabel;
@@ -1095,15 +1141,12 @@ function applySessionChrome() {
   $("stagesGroup").hidden = !s.caps.stages;
   $("readonlyDpiGroup").hidden = !isReadonlyDpi;
   $("genericDpiGroup").hidden = !s.caps.genericDpi;
-  $("dpiNowRow").hidden = !(s.caps.dpi && s.writeEnabled);
   $("splitXYWrap").hidden = !s.caps.splitXY;
   if (!s.caps.splitXY) $("splitXY").checked = false;
   $("stagesNote").textContent = s.driver === "egg"
     ? "Underside button cycles up to 4 stages"
     : "Your mouse's DPI button cycles through these";
-  $("stagesHint").textContent = `Click a stage to select it · up to ${s.caps.maxStages} · ${s.caps.dpiMin}–${s.caps.dpiMax.toLocaleString()}`;
-  $("dpiNow").min = s.caps.dpiMin; $("dpiNow").max = s.caps.dpiMax; $("dpiNow").step = s.caps.dpiStepLo;
-  $("dpiNowY").min = s.caps.dpiMin; $("dpiNowY").max = s.caps.dpiMax; $("dpiNowY").step = s.caps.dpiStepLo;
+  $("stagesHint").textContent = `Click a stage or drag markers on the scale · up to ${s.caps.maxStages} · ${s.caps.dpiMin}–${s.caps.dpiMax.toLocaleString()}`;
   if (isReadonlyDpi) {
     $("roDpiNote").textContent = `Live sensor readout (${s.caps.dpiMin}–${s.caps.dpiMax.toLocaleString()} DPI) — editing is locked for safety`;
   }
@@ -1356,7 +1399,7 @@ function showConnected(on, helperOnly = false, tab = "accel") {
   $("empty").hidden = showApp;
   $("refresh").hidden = !on;
   setTabAccess(on);
-  if (!on) { $("conn").className = "pill"; $("tierBadge").hidden = true; renderSyncLabel(); }
+  if (!on) { $("conn").className = "pill"; $("tierBadge").hidden = true; renderSyncLabel(); tierModalCtrl.sync(); }
   if (helperOnly && !on) showTab(tab);
   paintRanges();
   accelCtrl.syncAccelMotion();
@@ -1703,28 +1746,13 @@ $("genericDpiSave").addEventListener("click", () => {
   toast(`DPI reference saved: ${v}`);
 });
 
-// one-off dpi
-$("dpiNowSet").addEventListener("click", async () => {
-  const s = cur(); if (!s || !s.caps.dpi) return;
-  const x = clampDpi($("dpiNow").value, s); if (x == null) { $("dpiNow").focus(); return; }
-  const split = $("splitXY").checked;
-  const y = split ? (clampDpi($("dpiNowY").value, s) ?? x) : x;
-  $("dpiNow").value = x;
-  if (split) $("dpiNowY").value = y;
-  if (await commit("dpi", { sess: s, label: "DPI", want: [x, y], write: () => s.api.setDpi(x, y), read: s.api.getDpi })) {
-    toast(x === y ? `DPI set to ${x}` : `DPI set to ${x} × ${y}`);
-  }
-});
-$("dpiNow").addEventListener("keydown", (e) => { if (e.key === "Enter") $("dpiNowSet").click(); });
-$("dpiNowY").addEventListener("keydown", (e) => { if (e.key === "Enter") $("dpiNowSet").click(); });
-
 // stages
 $("splitXY").addEventListener("change", () => {
   if (!$("splitXY").checked) { const e = edit(); e.list.forEach((s) => (s.y = s.x)); }
   renderStages();
 });
 $("revertStages").addEventListener("click", () => { const s = cur(); if (s) { s.stagesEdit = null; renderStages(); } });
-$("applyStages").addEventListener("click", async () => {
+async function commitStagesEdit() {
   const s = cur(); if (!s) return;
   const e = edit();
   const want = { active: e.active, list: e.list.map((st) => ({ x: clampDpi(st.x, s) ?? 800, y: clampDpi(st.y, s) ?? 800 })) };
@@ -1732,7 +1760,8 @@ $("applyStages").addEventListener("click", async () => {
   const ok = await commit("stages", { sess: s, label: "DPI stages", want, write: () => s.api.setStages(want.active, want.list), read: s.api.getStages });
   if (ok) { s.stagesEdit = null; if (cur()?.id === s.id) { renderStages(); toast("DPI stages saved"); } }
   s.api.getDpi?.().then((d) => { if (d) { s.S.dpi = d; if (cur()?.id === s.id) renderDpi(); } renderFleet(); }).catch(() => {});
-});
+}
+$("applyStages").addEventListener("click", commitStagesEdit);
 
 // sliders: commit on release, ignore background updates while dragging
 function slider(id, key, label, fmt, toDevice) {

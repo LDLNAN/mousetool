@@ -14,7 +14,7 @@
       <h1>mousetool</h1>
     </div>
     <span class="pill" id="conn"><i class="dot"></i><span id="connText">Not connected</span></span>
-    <span class="tierbadge" id="tierBadge" hidden><i class="tdot"></i><span id="tierBadgeText"></span></span>
+    <button type="button" class="tierbadge" id="tierBadge" hidden aria-haspopup="dialog" aria-controls="tierModal" aria-expanded="false" title="Click to see what support tiers mean"><i class="tdot" aria-hidden="true"></i><span id="tierBadgeText"></span><svg class="tier-info-ic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="8" r="6.25"/><path d="M8 7.25v3.5"/><circle cx="8" cy="4.85" r="0.65" fill="currentColor" stroke="none"/></svg></button>
     <div class="spacer"></div>
     <span class="sync" id="sync"></span>
     <button class="icon ghost" id="refresh" title="Refresh settings from your mouse" aria-label="Refresh" hidden>
@@ -73,12 +73,12 @@
     </section>
 
     <div class="tabsbar"><nav class="tabs" role="tablist">
-      <button class="tab" role="tab" data-tab="perf" aria-selected="true">Sensitivity</button>
-      <button class="tab" role="tab" data-tab="buttons">Buttons</button>
-      <button class="tab" role="tab" data-tab="power" id="powerTab">Power</button>
-      <button class="tab" role="tab" data-tab="dongle" id="dongleTab">Dongle</button>
-      <button class="tab" role="tab" data-tab="device">Device</button>
-      <button class="tab" role="tab" data-tab="accel">Acceleration</button>
+      <button class="tab" role="tab" data-tab="perf" data-label="Sensitivity" aria-selected="true">Sensitivity</button>
+      <button class="tab" role="tab" data-tab="buttons" data-label="Buttons">Buttons</button>
+      <button class="tab" role="tab" data-tab="power" data-label="Power" id="powerTab">Power</button>
+      <button class="tab" role="tab" data-tab="dongle" data-label="Dongle" id="dongleTab">Dongle</button>
+      <button class="tab" role="tab" data-tab="device" data-label="Device">Device</button>
+      <button class="tab" role="tab" data-tab="accel" data-label="Acceleration">Acceleration</button>
     </nav></div>
 
     <!-- ===== sensitivity ===== -->
@@ -92,10 +92,10 @@
           <div class="spacer"></div>
           <label class="switch" id="splitXYWrap"><input type="checkbox" id="splitXY"> Separate X / Y</label>
         </div>
-        <div class="track" id="track" aria-hidden="true"></div>
+        <div class="track" id="track" role="group" aria-label="DPI stages scale"></div>
         <div class="stagegrid" id="stages"></div>
         <div class="stagefoot">
-          <span class="hint" id="stagesHint">Click a stage to select it · up to 5 · 100–30,000</span>
+          <span class="hint" id="stagesHint">Click a stage or drag markers on the scale · up to 5 · 100–30,000</span>
           <div class="spacer"></div>
           <span class="state" data-for="stages"></span>
           <span class="dirty" id="stagesDirty" hidden>Unsaved</span>
@@ -155,18 +155,9 @@
             <button class="primary" id="lodApply">Apply</button>
           </div>
         </div>
-        <div class="setting" id="dpiNowRow">
-          <div class="label"><b>Quick DPI</b><p>Try a DPI right now without changing your saved stages.</p></div>
-          <div class="control">
-            <span class="state" data-for="dpi"></span>
-            <input type="number" id="dpiNow" min="100" max="35000" step="50" placeholder="DPI" aria-label="One-off DPI">
-            <input type="number" id="dpiNowY" min="100" max="35000" step="50" placeholder="Y DPI" aria-label="One-off Y DPI" hidden>
-            <button id="dpiNowSet">Set</button>
-          </div>
-        </div>
         <div class="setting" id="hzMeterRow">
           <div class="label"><b>Live polling rate meter</b><p>Move your mouse in circles inside the box to check its real update rate.</p></div>
-          <div class="control" style="width:100%; max-width:440px;">
+          <div class="control hzcontrol">
             <div class="hzbox" id="hzBox" tabindex="0">
               <div class="hzval" id="hzVal">–<small>Hz</small></div>
               <div class="hzstats" id="hzStats">Move cursor here · Peak: – Hz</div>
@@ -315,7 +306,6 @@
             <div class="tester" id="tester" tabindex="0">Click buttons or scroll here to test · <b id="testOut">–</b></div>
           </div>
         </div>
-        <div class="footnote" id="btnFootnote">Primary click stays locked so you can't lock yourself out. Every change is saved to the mouse.</div>
       </section>
     </div>
 
@@ -396,7 +386,7 @@
         <dl class="kv">
           <dt>Model</dt><dd id="model">–</dd>
           <dt>Connection</dt><dd id="link">–</dd>
-          <dt>Support</dt><dd id="supportTier">–</dd>
+          <dt>Support</dt><dd class="kv-tier"><span id="supportTier">–</span><button type="button" class="tier-info-btn" id="supportTierInfo" aria-haspopup="dialog" aria-controls="tierModal" aria-expanded="false" aria-label="About support tiers" title="Click to see what support tiers mean"><svg class="tier-info-ic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="8" r="6.25"/><path d="M8 7.25v3.5"/><circle cx="8" cy="4.85" r="0.65" fill="currentColor" stroke="none"/></svg></button></dd>
           <dt>Firmware</dt><dd id="fw">–</dd>
         </dl>
         <details class="tech-details" id="deviceTechDetails">
@@ -542,6 +532,56 @@
     </div>
 
     <div class="foot" id="appFoot">Changes save directly to your mouse and stay in sync automatically.</div>
+  </div>
+</div>
+<div class="modal-backdrop" id="tierModal" role="dialog" aria-modal="true" aria-labelledby="tierModalTitle" aria-describedby="tierModalIntro" hidden>
+  <div class="modal-card">
+    <div class="modal-head">
+      <h2 id="tierModalTitle">Mouse support tiers</h2>
+      <div class="spacer"></div>
+      <button type="button" class="ghost modal-close" id="tierModalClose" aria-label="Close support tiers dialog">×</button>
+    </div>
+    <div class="modal-body">
+      <p class="modal-intro" id="tierModalIntro">Mouse Tool assigns each mouse a support tier based on how thoroughly its hardware protocol has been verified, so unverified devices are never sent unsafe commands.</p>
+      <div class="tier-modal-active" id="tierModalActive" hidden>
+        <div class="tier-active-top">
+          <span class="tier-active-label">Connected mouse</span>
+          <strong class="tier-active-name" id="tierModalActiveName">–</strong>
+          <span class="tier-pill tier-0" id="tierModalActiveTier"><i class="tdot" aria-hidden="true"></i><span id="tierModalActiveTierText">Tier 0 · Pointer only</span></span>
+        </div>
+        <p class="tier-active-note" id="tierModalActiveNote"></p>
+      </div>
+      <div class="tier-list">
+        <article class="tier-card" data-tier="2">
+          <div class="tier-card-head">
+            <span class="tier-pill tier-2"><i class="tdot" aria-hidden="true"></i>Tier 2 · Verified</span>
+            <span class="tier-card-sub">Full control</span>
+            <span class="tier-current-tag" hidden>Current</span>
+          </div>
+          <p class="tier-card-desc">Full control over DPI stages, polling rate, button mapping, power/sleep, and sensor or lighting tuning where supported — backed by a verified device profile.</p>
+        </article>
+        <article class="tier-card" data-tier="1">
+          <div class="tier-card-head">
+            <span class="tier-pill tier-1"><i class="tdot" aria-hidden="true"></i>Tier 1 · Read-only</span>
+            <span class="tier-card-sub">Safe live readouts</span>
+            <span class="tier-current-tag" hidden>Current</span>
+          </div>
+          <p class="tier-card-desc">Safe live readouts like current DPI and firmware while keeping all device writes disabled until this model is hardware-verified.</p>
+        </article>
+        <article class="tier-card" data-tier="0">
+          <div class="tier-card-head">
+            <span class="tier-pill tier-0"><i class="tdot" aria-hidden="true"></i>Tier 0 · Pointer only</span>
+            <span class="tier-card-sub">Standard mouse mode</span>
+            <span class="tier-current-tag" hidden>Current</span>
+          </div>
+          <p class="tier-card-desc">Zero device-specific commands are sent. You can still set a local DPI reference, measure live polling rate, test buttons, and use mouse acceleration &amp; desktop pointer settings.</p>
+        </article>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <span class="modal-foot-note">Safety first: writes are only enabled on verified Tier 2 profiles.</span>
+      <button type="button" id="tierModalDone">Close</button>
+    </div>
   </div>
 </div>
 <div id="toast" role="status"></div>

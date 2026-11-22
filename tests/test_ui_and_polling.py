@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Unit and regression tests for MT-018, MT-019, MT-020, MT-022, and MT-023."""
+"""Unit and regression tests for MT-018, MT-019, MT-020, MT-022, MT-023, and MT-024."""
 import json
 import re
 import shutil
@@ -254,6 +254,463 @@ class TestMT018_020_022_023StaticContracts(unittest.TestCase):
         self.assertIn('id="accelPeakDotY"', accel_js)
         self.assertIn('<polygon class="peak-dot-y"', accel_js)
         self.assertIn('accelLegendBase', accel_js)
+
+
+class TestMT024UxPolishAndTierModal(unittest.TestCase):
+    def test_quick_dpi_and_redundant_button_footer_removed_while_cli_driver_intact(self):
+        html = (WEB_DIR / "index.html").read_text(encoding="utf-8")
+        app_js = (WEB_DIR / "app.js").read_text(encoding="utf-8")
+        razer_js = (WEB_DIR / "drivers" / "razer.js").read_text(encoding="utf-8")
+
+        # Deliverable 1: Quick DPI UI row & dead handlers removed
+        for removed in ("dpiNowRow", "dpiNowSet", "dpiNowY", "dpiNow", "Quick DPI", "One-off DPI"):
+            self.assertNotIn(removed, html)
+            self.assertNotIn(removed, app_js)
+        # Underlying driver setDpi stays intact
+        self.assertIn("setDpi", razer_js)
+
+        # Deliverable 5: Redundant Buttons card footer removed
+        self.assertNotIn("btnFootnote", html)
+        self.assertNotIn("btnFootnote", app_js)
+        self.assertNotIn("Primary click stays locked so you can't lock yourself out", html)
+        self.assertNotIn("Primary click stays locked so you can't lock yourself out", app_js)
+
+        # Deliverable 4: #track is accessible (not aria-hidden)
+        track_tag = re.search(r'<div[^>]*id="track"[^>]*>', html)
+        self.assertIsNotNone(track_tag)
+        self.assertNotIn('aria-hidden="true"', track_tag.group(0))
+
+        # Deliverable 6: Live polling rate meter locked to fixed width & height with tabular-nums
+        css = (WEB_DIR / "styles.css").read_text(encoding="utf-8")
+        self.assertIn('class="control hzcontrol"', html)
+        self.assertRegex(css, r"\.hzcontrol\s*\{[^}]*width:\s*440px;[^}]*max-width:\s*100%")
+        self.assertRegex(css, r"\.hzbox\s*\{[^}]*height:\s*58px")
+        self.assertRegex(css, r"\.hzstats\s*\{[^}]*font-variant-numeric:\s*tabular-nums")
+
+        # Deliverable 7: Nav tabs reserve bold width via data-label + ::after so switching never shifts tabs
+        for tab_label in ("Sensitivity", "Buttons", "Power", "Dongle", "Device", "Acceleration"):
+            self.assertIn(f'data-label="{tab_label}"', html)
+        self.assertRegex(css, r"\.tab::after\s*\{[^}]*content:\s*attr\(data-label\);[^}]*font-weight:\s*600;[^}]*height:\s*0")
+
+    def test_accel_y_swipe_trail_uses_phase_locked_clip_path(self):
+        css = (WEB_DIR / "styles.css").read_text(encoding="utf-8")
+        accel_js = (WEB_DIR / "accel_graph.js").read_text(encoding="utf-8")
+
+        # Both base Y line and swipe Y trail share identical 5 3 dasharray; trail is opaque & >= base width
+        line_y_m = re.search(r"\.curvesvg\s+\.line-y\s*\{([^}]+)\}", css)
+        trail_y_m = re.search(r"\.curvesvg\s+\.swipe-trail-y\s*\{([^}]+)\}", css)
+        self.assertIsNotNone(line_y_m)
+        self.assertIsNotNone(trail_y_m)
+        self.assertIn("stroke-dasharray: 5 3", line_y_m.group(1))
+        self.assertIn("stroke-dasharray: 5 3", trail_y_m.group(1))
+        self.assertIn("opacity: 1", trail_y_m.group(1))
+        base_w = float(re.search(r"stroke-width:\s*([0-9.]+)", line_y_m.group(1)).group(1))
+        trail_w = float(re.search(r"stroke-width:\s*([0-9.]+)", trail_y_m.group(1)).group(1))
+        self.assertGreaterEqual(trail_w, base_w)
+
+        # Structural & z-order checks in accel_graph.js
+        self.assertIn('clipPath id="accelSwipeClipY"', accel_js)
+        self.assertIn('clip-path="url(#accelSwipeClipY)"', accel_js)
+        line_y_pos = accel_js.index('id="accelLineY"')
+        trail_y_pos = accel_js.index('id="accelSwipeTrailY"')
+        line_x_pos = accel_js.index('id="accelLineX"')
+        self.assertLess(line_y_pos, trail_y_pos, "swipe-trail-y must render above line-y")
+        self.assertLess(trail_y_pos, line_x_pos, "line-x must stay above Y layers")
+
+        # Exact same full-length pathY used on both accelLineY and accelSwipeTrailY
+        self.assertIn('<path class="line-y" id="accelLineY" d="${pathY}"/>', accel_js)
+        self.assertIn('<path class="swipe-trail-y" id="accelSwipeTrailY" d="${pathY}" clip-path="url(#accelSwipeClipY)"/>', accel_js)
+
+    def test_tier_badge_button_and_modal_behavior_and_wcag_aa(self):
+        html = (WEB_DIR / "index.html").read_text(encoding="utf-8")
+        css = (WEB_DIR / "styles.css").read_text(encoding="utf-8")
+
+        # Deliverable 3: interactive button + dialog semantics + Device tab info trigger
+        self.assertRegex(html, r'<button[^>]*id="tierBadge"[^>]*aria-haspopup="dialog"[^>]*aria-controls="tierModal"')
+        self.assertRegex(html, r'<button[^>]*id="supportTierInfo"[^>]*aria-haspopup="dialog"[^>]*aria-controls="tierModal"')
+        self.assertRegex(html, r'<div[^>]*id="tierModal"[^>]*role="dialog"[^>]*aria-modal="true"')
+        for tier in ("2", "1", "0"):
+            self.assertIn(f'data-tier="{tier}"', html)
+
+        # Behavioral test of createTierModalController across Tier 2, Tier 1, Tier 0 & disconnected
+        script = """
+        import { createTierModalController } from "./web/tier_modal.js";
+
+        function makeEl(id, extra = {}) {
+          const listeners = {};
+          const attrs = {};
+          const classes = new Set();
+          return {
+            id,
+            hidden: false,
+            textContent: "",
+            className: "",
+            dataset: {},
+            focused: false,
+            isConnected: true,
+            classList: {
+              toggle(c, on) { if (on) classes.add(c); else classes.delete(c); },
+              contains(c) { return classes.has(c); },
+            },
+            setAttribute(k, v) { attrs[k] = String(v); },
+            getAttribute(k) { return attrs[k] ?? null; },
+            removeAttribute(k) { delete attrs[k]; },
+            addEventListener(type, fn) { (listeners[type] ||= []).push(fn); },
+            dispatch(type, ev = {}) {
+              for (const fn of listeners[type] || []) fn({ target: this, preventDefault() {}, stopPropagation() {}, ...ev });
+            },
+            focus() { this.focused = true; doc.activeElement = this; },
+            ...extra,
+          };
+        }
+
+        const cards = [2, 1, 0].map((t) => {
+          const tag = makeEl(`tag-${t}`);
+          tag.hidden = true;
+          const card = makeEl(`card-${t}`, {
+            dataset: { tier: String(t) },
+            querySelector(sel) { return sel === ".tier-current-tag" ? tag : null; },
+            _tag: tag,
+          });
+          return card;
+        });
+
+        const els = {
+          tierBadge: makeEl("tierBadge"),
+          supportTierInfo: makeEl("supportTierInfo"),
+          tierModalClose: makeEl("tierModalClose"),
+          tierModalDone: makeEl("tierModalDone"),
+          tierModalActive: makeEl("tierModalActive"),
+          tierModalActiveName: makeEl("tierModalActiveName"),
+          tierModalActiveTier: makeEl("tierModalActiveTier"),
+          tierModalActiveTierText: makeEl("tierModalActiveTierText"),
+          tierModalActiveNote: makeEl("tierModalActiveNote"),
+        };
+        const modal = makeEl("tierModal", {
+          hidden: true,
+          querySelectorAll(sel) {
+            if (sel === ".tier-card[data-tier]") return cards;
+            return [els.tierModalClose, els.tierModalDone];
+          },
+        });
+        els.tierModal = modal;
+
+        const docListeners = {};
+        const doc = {
+          activeElement: null,
+          addEventListener(type, fn) { (docListeners[type] ||= []).push(fn); },
+          dispatch(type, ev = {}) {
+            for (const fn of docListeners[type] || []) fn({ preventDefault() {}, stopPropagation() {}, ...ev });
+          },
+        };
+
+        let session = { name: "Razer Viper V2 Pro", tier: 2, tierLabel: "Tier 2 · Verified" };
+        const ctrl = createTierModalController({ $: (id) => els[id] ?? null, getSession: () => session, doc });
+
+        const snap = () => ({
+          open: ctrl.isOpen(),
+          expanded: els.tierBadge.getAttribute("aria-expanded"),
+          activeHidden: els.tierModalActive.hidden,
+          activeName: els.tierModalActiveName.textContent,
+          activeTierText: els.tierModalActiveTierText.textContent,
+          currentTiers: cards.filter((c) => c.classList.contains("is-current")).map((c) => Number(c.dataset.tier)),
+          visibleTags: cards.filter((c) => !c._tag.hidden).map((c) => Number(c.dataset.tier)),
+          ariaCurrents: cards.filter((c) => c.getAttribute("aria-current") === "true").map((c) => Number(c.dataset.tier)),
+          focusedId: doc.activeElement?.id ?? null,
+        });
+
+        // Open via badge click (Tier 2)
+        els.tierBadge.dispatch("click");
+        const onTier2 = snap();
+
+        // Close via Escape -> restores focus to #tierBadge
+        doc.dispatch("keydown", { key: "Escape" });
+        const afterEsc = snap();
+
+        // Switch to Tier 1 and open via Device tab info button
+        session = { name: "Razer Viper Mini", tier: 1, tierLabel: "Tier 1 · Read-only" };
+        els.supportTierInfo.dispatch("click");
+        const onTier1 = snap();
+
+        // Close via backdrop click -> restores focus to #supportTierInfo
+        modal.dispatch("click", { target: modal });
+        const afterBackdrop = snap();
+
+        // Switch to Tier 0 and open, then live-sync disconnect
+        session = { name: "Standard USB Mouse", tier: 0, tierLabel: "Tier 0 · Pointer only" };
+        els.tierBadge.dispatch("click");
+        const onTier0 = snap();
+
+        session = null;
+        ctrl.sync();
+        const onDisconnected = snap();
+
+        // Close via Done button
+        els.tierModalDone.dispatch("click");
+        const afterDone = snap();
+
+        console.log(JSON.stringify({ onTier2, afterEsc, onTier1, afterBackdrop, onTier0, onDisconnected, afterDone }));
+        """
+        out = json.loads(_run_node_esm(script))
+        self.assertTrue(out["onTier2"]["open"])
+        self.assertEqual(out["onTier2"]["expanded"], "true")
+        self.assertFalse(out["onTier2"]["activeHidden"])
+        self.assertEqual(out["onTier2"]["activeName"], "Razer Viper V2 Pro")
+        self.assertEqual(out["onTier2"]["currentTiers"], [2])
+        self.assertEqual(out["onTier2"]["visibleTags"], [2])
+        self.assertEqual(out["onTier2"]["ariaCurrents"], [2])
+        self.assertEqual(out["onTier2"]["focusedId"], "tierModalClose")
+
+        self.assertFalse(out["afterEsc"]["open"])
+        self.assertEqual(out["afterEsc"]["expanded"], "false")
+        self.assertEqual(out["afterEsc"]["focusedId"], "tierBadge")
+
+        self.assertTrue(out["onTier1"]["open"])
+        self.assertEqual(out["onTier1"]["currentTiers"], [1])
+        self.assertEqual(out["onTier1"]["visibleTags"], [1])
+        self.assertEqual(out["onTier1"]["activeTierText"], "Tier 1 · Read-only")
+
+        self.assertFalse(out["afterBackdrop"]["open"])
+        self.assertEqual(out["afterBackdrop"]["focusedId"], "supportTierInfo")
+
+        self.assertEqual(out["onTier0"]["currentTiers"], [0])
+        self.assertEqual(out["onTier0"]["visibleTags"], [0])
+
+        self.assertTrue(out["onDisconnected"]["activeHidden"])
+        self.assertEqual(out["onDisconnected"]["currentTiers"], [])
+        self.assertEqual(out["onDisconnected"]["visibleTags"], [])
+
+        self.assertFalse(out["afterDone"]["open"])
+
+        # WCAG AA (>= 4.5:1) contrast verification for light & dark themes on modal surfaces & tier badges
+        def srgb(c8):
+            c = c8 / 255.0
+            return c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
+
+        def lum(rgb):
+            return 0.2126 * srgb(rgb[0]) + 0.7152 * srgb(rgb[1]) + 0.0722 * srgb(rgb[2])
+
+        def ratio(fg, bg):
+            l1, l2 = lum(fg), lum(bg)
+            return (max(l1, l2) + 0.05) / (min(l1, l2) + 0.05)
+
+        def parse_hex(h):
+            h = h.lstrip("#")
+            return tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))
+
+        def blend(rgba, bg):
+            r, g, b, a = rgba
+            return (round(r * a + bg[0] * (1 - a)), round(g * a + bg[1] * (1 - a)), round(b * a + bg[2] * (1 - a)))
+
+        def extract_vars(block):
+            vals = {}
+            for m in re.finditer(r"--([a-z0-9-]+):\s*(#[0-9a-fA-F]{6})", block):
+                vals[m.group(1)] = parse_hex(m.group(2))
+            for m in re.finditer(r"--([a-z0-9-]+):\s*rgba\(\s*(\d+),\s*(\d+),\s*(\d+),\s*([0-9.]+)\)", block):
+                vals[m.group(1)] = (int(m.group(2)), int(m.group(3)), int(m.group(4)), float(m.group(5)))
+            return vals
+
+        light_vars = extract_vars(re.search(r":root\s*\{([^}]+)\}", css).group(1))
+        dark_vars = extract_vars(re.search(r':root\[data-theme="dark"\]\s*\{([^}]+)\}', css).group(1))
+
+        for theme_name, v in (("light", light_vars), ("dark", dark_vars)):
+            surf = v["surface"]
+            surf2 = v["surface-2"]
+            inset = v["inset"]
+            ok_bg = blend(v["ok-soft"], surf)
+            warn_bg = blend(v["warn-soft"], surf)
+            checks = [
+                ("tier-0 badge ink-2 on surface-2", v["ink-2"], surf2),
+                ("tier-1 badge warn-ink on warn-soft", v["warn-ink"], warn_bg),
+                ("tier-2 badge ok-ink on ok-soft", v["ok-ink"], ok_bg),
+                ("modal desc ink-2 on inset", v["ink-2"], inset),
+                ("modal desc ink-2 on active tier-2", v["ink-2"], ok_bg),
+                ("modal desc ink-2 on active tier-1", v["ink-2"], warn_bg),
+                ("modal desc ink-2 on active tier-0", v["ink-2"], surf2),
+                ("tier-2 current tag ok-ink on surface", v["ok-ink"], surf),
+                ("tier-1 current tag warn-ink on surface", v["warn-ink"], surf),
+                ("tier-0 current tag ink on surface", v["ink"], surf),
+            ]
+            for label, fg, bg in checks:
+                cr = ratio(fg, bg)
+                self.assertGreaterEqual(cr, 4.5, f"{theme_name} {label} contrast {cr:.2f} < 4.5")
+
+    def test_dpi_track_drag_snap_clamp_commit_once_and_keyboard(self):
+        script = """
+        import { dpiToLogPct, logPctToDpi, snapDpiValue, createDpiTrackController } from "./web/dpi_track.js";
+
+        // Math round-trip & snapping checks
+        const cfg = { min: 100, max: 30000, step: 50, stepHi: 50, canWrite: true };
+        const rt800 = logPctToDpi(dpiToLogPct(800, 100, 30000), cfg);
+        const rt1600 = logPctToDpi(dpiToLogPct(1600, 100, 30000), cfg);
+        const clampLo = logPctToDpi(-25, cfg);
+        const clampHi = logPctToDpi(140, cfg);
+        const snap100 = snapDpiValue(1240, { min: 100, max: 16000, step: 100 });
+
+        // Interactive pointer-capture drag + click + cancel + keyboard test
+        const listeners = {};
+        const trackClasses = new Set();
+        const markClasses = new Set();
+        const markAttrs = {};
+        let capturedId = null;
+        let releasedId = null;
+        const mark = {
+          dataset: { stageIdx: "1", dpi: "800" },
+          style: { left: "36%" },
+          title: "",
+          classList: {
+            add(c) { markClasses.add(c); },
+            remove(c) { markClasses.delete(c); },
+            contains(c) { return markClasses.has(c); },
+          },
+          setAttribute(k, v) { markAttrs[k] = String(v); },
+          closest(sel) { return sel === ".mark[data-stage-idx]" ? mark : null; },
+          setPointerCapture(id) { capturedId = id; },
+          releasePointerCapture(id) { releasedId = id; },
+          focus() {},
+        };
+        const trackEl = {
+          innerHTML: "",
+          classList: {
+            add(c) { trackClasses.add(c); },
+            remove(c) { trackClasses.delete(c); },
+            contains(c) { return trackClasses.has(c); },
+          },
+          getBoundingClientRect() { return { left: 100, width: 500 }; },
+          addEventListener(type, fn) { (listeners[type] ||= []).push(fn); },
+          dispatch(type, ev) {
+            for (const fn of listeners[type] || []) fn({ target: mark, preventDefault() {}, ...ev });
+          },
+        };
+
+        const stages = { active: 1, list: [{ x: 400, y: 400 }, { x: 800, y: 800 }, { x: 1600, y: 1600 }] };
+        const previews = [];
+        const selects = [];
+        const reverts = [];
+        let commits = 0;
+
+        const ctrl = createDpiTrackController({
+          trackEl,
+          getConfig: () => cfg,
+          getStages: () => stages,
+          getLiveDpi: () => [800, 800],
+          onPreviewDpi: (idx, dpi) => {
+            stages.list[idx].x = dpi;
+            stages.list[idx].y = dpi;
+            previews.push([idx, dpi]);
+          },
+          onSelectStage: (idx) => {
+            stages.active = idx + 1;
+            selects.push(idx);
+          },
+          onCommitStages: () => { commits++; },
+          onRevertDrag: (idx, sx, sy) => {
+            stages.list[idx].x = sx;
+            stages.list[idx].y = sy;
+            reverts.push([idx, sx, sy]);
+          },
+        });
+
+        // 1. Plain click (<4px) selects stage 2 without dragging or committing
+        const startX = 100 + (dpiToLogPct(800, 100, 30000) / 100) * 500;
+        trackEl.dispatch("pointerdown", { pointerId: 1, button: 0, clientX: startX });
+        trackEl.dispatch("pointermove", { pointerId: 1, clientX: startX + 2 });
+        trackEl.dispatch("pointerup", { pointerId: 1, clientX: startX + 2 });
+        const afterClick = {
+          active: stages.active,
+          selects: [...selects],
+          commits,
+          previewsLen: previews.length,
+        };
+
+        // 2. Drag stage 2 to 3200 DPI across multiple moves -> 0 commits mid-drag, 1 commit on release
+        const target3200X = 100 + (dpiToLogPct(3200, 100, 30000) / 100) * 500;
+        trackEl.dispatch("pointerdown", { pointerId: 2, button: 0, clientX: startX });
+        trackEl.dispatch("pointermove", { pointerId: 2, clientX: (startX + target3200X) / 2 });
+        const midDrag = {
+          dragging: ctrl.isDragging(),
+          commitsDuringDrag: commits,
+          markHasDragging: markClasses.has("dragging"),
+          trackHasDragging: trackClasses.has("is-dragging"),
+          capturedId,
+        };
+        trackEl.dispatch("pointermove", { pointerId: 2, clientX: target3200X });
+        trackEl.dispatch("pointerup", { pointerId: 2, clientX: target3200X });
+        const afterDrag = {
+          dragging: ctrl.isDragging(),
+          stage2Dpi: stages.list[1].x,
+          stage2Y: stages.list[1].y,
+          commits,
+          releasedId,
+          ariaNow: markAttrs["aria-valuenow"],
+          previewsCount: previews.length,
+        };
+
+        // 3. Drag past right bound clamps to 30000, then cancel reverts cleanly without committing
+        const commitsBeforeCancel = commits;
+        trackEl.dispatch("pointerdown", { pointerId: 3, button: 0, clientX: target3200X });
+        trackEl.dispatch("pointermove", { pointerId: 3, clientX: 9999 });
+        const clampedMax = stages.list[1].x;
+        trackEl.dispatch("pointercancel", { pointerId: 3, clientX: 9999 });
+        const afterCancel = {
+          stage2Dpi: stages.list[1].x,
+          commitsDelta: commits - commitsBeforeCancel,
+          revertsCount: reverts.length,
+        };
+
+        // 4. Keyboard slider nudging (+50, Shift +250, Home -> 100) commits once on keyup
+        const commitsBeforeKbd = commits;
+        trackEl.dispatch("keydown", { key: "ArrowRight", shiftKey: false });
+        const kbd1 = stages.list[1].x;
+        trackEl.dispatch("keydown", { key: "ArrowRight", shiftKey: true });
+        const kbd2 = stages.list[1].x;
+        trackEl.dispatch("keyup", { key: "ArrowRight" });
+        const kbdCommitsAfterUp = commits - commitsBeforeKbd;
+        trackEl.dispatch("keydown", { key: "Home", shiftKey: false });
+        const kbdHome = stages.list[1].x;
+        trackEl.dispatch("keyup", { key: "Home" });
+
+        console.log(JSON.stringify({
+          rt800, rt1600, clampLo, clampHi, snap100,
+          afterClick, midDrag, afterDrag, clampedMax, afterCancel,
+          kbd1, kbd2, kbdCommitsAfterUp, kbdHome,
+        }));
+        """
+        out = json.loads(_run_node_esm(script))
+        self.assertEqual(out["rt800"], 800)
+        self.assertEqual(out["rt1600"], 1600)
+        self.assertEqual(out["clampLo"], 100)
+        self.assertEqual(out["clampHi"], 30000)
+        self.assertEqual(out["snap100"], 1200)
+
+        self.assertEqual(out["afterClick"]["active"], 2)
+        self.assertEqual(out["afterClick"]["selects"], [1])
+        self.assertEqual(out["afterClick"]["commits"], 0)
+        self.assertEqual(out["afterClick"]["previewsLen"], 0)
+
+        self.assertTrue(out["midDrag"]["dragging"])
+        self.assertEqual(out["midDrag"]["commitsDuringDrag"], 0)
+        self.assertTrue(out["midDrag"]["markHasDragging"])
+        self.assertTrue(out["midDrag"]["trackHasDragging"])
+        self.assertEqual(out["midDrag"]["capturedId"], 2)
+
+        self.assertFalse(out["afterDrag"]["dragging"])
+        self.assertEqual(out["afterDrag"]["stage2Dpi"], 3200)
+        self.assertEqual(out["afterDrag"]["stage2Y"], 3200)
+        self.assertEqual(out["afterDrag"]["commits"], 1)
+        self.assertEqual(out["afterDrag"]["releasedId"], 2)
+        self.assertEqual(out["afterDrag"]["ariaNow"], "3200")
+        self.assertGreaterEqual(out["afterDrag"]["previewsCount"], 2)
+
+        self.assertEqual(out["clampedMax"], 30000)
+        self.assertEqual(out["afterCancel"]["stage2Dpi"], 3200)
+        self.assertEqual(out["afterCancel"]["commitsDelta"], 0)
+        self.assertEqual(out["afterCancel"]["revertsCount"], 1)
+
+        self.assertEqual(out["kbd1"], 3250)
+        self.assertEqual(out["kbd2"], 3500)
+        self.assertEqual(out["kbdCommitsAfterUp"], 1)
+        self.assertEqual(out["kbdHome"], 100)
 
 
 if __name__ == "__main__":
