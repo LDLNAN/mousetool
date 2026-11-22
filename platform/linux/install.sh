@@ -24,13 +24,14 @@ chmod +x "$DIR/mousetool.py" "$DIR/tools/probe.py" "$LINUX_DIR/mouseaccel_param_
 
 mkdir -p "$APP_DIR" "$SYS_USER_DIR"
 
-sed "s|@INSTALL_DIR@|$DIR|g" "$LINUX_DIR/mousetool.desktop" > "$APP_DIR/mousetool.desktop"
-sed "s|@INSTALL_DIR@|$DIR|g" "$LINUX_DIR/mousetool.service" > "$SYS_USER_DIR/mousetool.service"
+ESCAPED_DIR="$(printf '%s\n' "$DIR" | sed 's/[&/\|]/\\&/g')"
+sed "s|@INSTALL_DIR@|$ESCAPED_DIR|g" "$LINUX_DIR/mousetool.desktop" > "$APP_DIR/mousetool.desktop"
+sed "s|@INSTALL_DIR@|$ESCAPED_DIR|g" "$LINUX_DIR/mousetool.service" > "$SYS_USER_DIR/mousetool.service"
 
 echo "Installed desktop entry -> $APP_DIR/mousetool.desktop"
 echo "Installed systemd user unit -> $SYS_USER_DIR/mousetool.service"
 
-if command -v systemctl >/dev/null 2>&1; then
+if [[ "${MOUSETOOL_NO_SYSTEMCTL:-0}" != 1 ]] && command -v systemctl >/dev/null 2>&1; then
     systemctl --user daemon-reload
     systemctl --user enable --now mousetool.service
     echo "Enabled and started mousetool.service (127.0.0.1:8766)"
