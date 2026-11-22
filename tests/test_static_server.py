@@ -19,6 +19,7 @@ EXPECTED_ASSETS = [
     ("/styles.css", "text/css; charset=utf-8"),
     ("/app.js", "text/javascript; charset=utf-8"),
     ("/accel_graph.js", "text/javascript; charset=utf-8"),
+    ("/accel_lut.js", "text/javascript; charset=utf-8"),
     ("/helper_client.js", "text/javascript; charset=utf-8"),
     ("/dpi_track.js", "text/javascript; charset=utf-8"),
     ("/polling_meter.js", "text/javascript; charset=utf-8"),

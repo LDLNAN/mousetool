@@ -1,5 +1,26 @@
 // Acceleration curve math, SVG curve visualizer, live swipe telemetry & desktop pointer UI
 import {
+  LUT_DRAG_DX_MIN,
+  LUT_DX_MIN,
+  LUT_MAX_POINTS,
+  LUT_MIN_POINTS,
+  LUT_PRESETS,
+  LUT_STARTER_POINTS,
+  LUT_X_MAX,
+  LUT_X_MIN,
+  LUT_Y_MAX,
+  LUT_Y_MIN,
+  addMidpointLutPoint,
+  cloneLutPoints,
+  getLutPreset,
+  insertLutPoint,
+  lutPointsEqual,
+  matchingLutPresetId,
+  moveLutPoint,
+  normalizeLutPoints,
+  removeLutPoint,
+} from "./accel_lut.js";
+import {
   fetchHelperStatus,
   openHelperMotionStream,
   postHelperAccel,
@@ -17,6 +38,7 @@ const MODE_DESCS = {
   linear: "Speed rises steadily as you move faster, up to your optional cap.",
   natural: "Smooth curve that ramps up gently and levels off near your limit.",
   synchronous: "S-shaped curve that feels slower for fine aim and faster for big swipes.",
+  lookup: "Draw your own curve directly on the graph with draggable control points.",
   no_accel: "No speed boost — constant sensitivity at every hand speed.",
 };
 const MODE_PARAMS = {
@@ -36,6 +58,7 @@ const MODE_PARAMS = {
     { k: "GAMMA", label: "Gamma", min: 0.05, max: 10, step: 0.05, desc: "How sharply sensitivity changes around Sync speed." },
     { k: "SMOOTH", label: "Smooth", min: 0, max: 1, step: 0.02, desc: "Softens the bend near the slowest and fastest speeds." },
   ],
+  lookup: [],
   no_accel: [],
 };
 const GLOBAL_ACCEL_PARAMS = [
@@ -193,12 +216,31 @@ function maccelEval(x, cfg) {
       const exp = sign * Math.pow(Math.tanh(Math.pow(ls, sharp)), 1 / sharp);
       s = Math.exp(exp * logM);
     }
+  } else if (m === "lookup") {
+    const pts = cfg.LUT_POINTS;
+    if (Array.isArray(pts) && pts.length >= 2) {
+      if (x <= pts[0][0]) {
+        s = pts[0][1];
+      } else if (x >= pts[pts.length - 1][0]) {
+        s = pts[pts.length - 1][1];
+      } else {
+        let lo = 0, hi = pts.length - 1;
+        while (hi - lo > 1) {
+          const mid = (lo + hi) >> 1;
+          if (pts[mid][0] <= x) lo = mid;
+          else hi = mid;
+        }
+        const [x0, y0] = pts[lo], [x1, y1] = pts[lo + 1];
+        s = y0 + ((x - x0) * (y1 - y0)) / (x1 - x0);
+      }
+    }
   }
   const sx = s * (cfg.SENS_MULT ?? 1);
   return [sx, sx * (cfg.YX_RATIO ?? 1)];
 }
 
 function accelSnapshot(m) {
+  const loadedLut = normalizeLutPoints(m?.lut_points);
   return {
     MODE: m?.mode || "linear",
     ...Object.fromEntries(
@@ -206,6 +248,7 @@ function accelSnapshot(m) {
         .filter((k) => k !== "MODE")
         .map((k) => [k, +(m?.params?.[k] ?? MACCEL_DEFAULTS[k]).toFixed(6)])
     ),
+    LUT_POINTS: loadedLut ? cloneLutPoints(loadedLut) : cloneLutPoints(LUT_STARTER_POINTS),
   };
 }
 
@@ -230,6 +273,8 @@ function createAccelController({ $, getActiveDpi, isAccelTabActive, setState, to
   let accelXMax = 40;
   let accelLoading = false;
   let desktopSaving = false;
+  let selectedLutIdx = 2;
+  let lutDrag = null;
 
   const accelMotion = {
     es: null,
@@ -250,18 +295,91 @@ function createAccelController({ $, getActiveDpi, isAccelTabActive, setState, to
     if (el) el.style.display = on ? "" : "none";
   }
 
+  function _fmtX(v) {
+    const n = Number(v);
+    if (!Number.isFinite(n)) return "0";
+    return n.toFixed(2).replace(/\.?0+$/, "") || "0";
+  }
+
+  function _fmtY(v) {
+    const n = Number(v);
+    if (!Number.isFinite(n)) return "1.00";
+    return Math.abs(n * 100 - Math.round(n * 100)) > 1e-3 ? n.toFixed(3).replace(/0+$/, "") : n.toFixed(2);
+  }
+
+  function isLutMode() {
+    return accelDraft?.MODE === "lookup";
+  }
+
+  function ensureDraftLutPoints() {
+    if (!accelDraft) return LUT_STARTER_POINTS.map(([x, y]) => [x, y]);
+    if (!Array.isArray(accelDraft.LUT_POINTS) || accelDraft.LUT_POINTS.length < LUT_MIN_POINTS) {
+      accelDraft.LUT_POINTS = cloneLutPoints(LUT_STARTER_POINTS);
+    }
+    selectedLutIdx = Math.max(0, Math.min(selectedLutIdx, accelDraft.LUT_POINTS.length - 1));
+    return accelDraft.LUT_POINTS;
+  }
+
+  function canApplyCurrentMode() {
+    const m = accelLive?.maccel;
+    if (!m?.loaded || !m?.writable || !accelDraft) return false;
+    if (accelDraft.MODE === "lookup") {
+      return !!(m.lut_supported && m.lut_writable !== false);
+    }
+    return true;
+  }
+
+  function renderLutNotice() {
+    const el = $("accelLutNotice");
+    if (!el) return;
+    if (!isLutMode()) {
+      el.hidden = true;
+      el.innerHTML = "";
+      return;
+    }
+    const m = accelLive?.maccel;
+    if (m?.loaded && m?.lut_supported && m?.lut_writable !== false) {
+      el.hidden = true;
+      el.innerHTML = "";
+      return;
+    }
+    const b = m ? accelBackendInfo(m) : null;
+    let msg;
+    if (!m?.loaded) {
+      msg = "Preview active — start Mouse Tool's helper with the updated mouseaccel driver (or Raw Accel on Windows) to save Custom curves.";
+    } else if (m.lut_supported && m.lut_writable === false) {
+      const grp = ACCEL_MODULES.includes(m.group) ? m.group : "mouseaccel";
+      msg = `Preview active — no write access to LUT_POINTS. Add your user to the ${grp} group and log back in to save Custom curves.`;
+    } else if (b?.legacy || b?.name === "maccel") {
+      msg = "Preview active — maccel (legacy) does not support Custom curves. Update to the mouseaccel driver (or use Raw Accel on Windows) to save.";
+    } else {
+      msg = "Preview active — the loaded mouseaccel driver does not expose LUT_POINTS yet. Update and reload mouseaccel (or use Raw Accel on Windows) to save.";
+    }
+    el.innerHTML = `<span><strong>Custom curve preview</strong> · ${escHtml(msg)}</span>`;
+    el.hidden = false;
+  }
+
   function accelDirty() {
     if (!accelLive?.maccel?.loaded || !accelDraft) return false;
     const orig = accelSnapshot(accelLive.maccel);
-    return Object.keys(orig).some((k) => k === "MODE" ? orig[k] !== accelDraft[k] : Math.abs(orig[k] - accelDraft[k]) > 1e-5);
+    const scalarChanged = Object.keys(MACCEL_DEFAULTS).some((k) =>
+      k === "MODE" ? orig[k] !== accelDraft[k] : Math.abs(orig[k] - accelDraft[k]) > 1e-5
+    );
+    if (scalarChanged) return true;
+    if (orig.MODE === "lookup" || accelDraft.MODE === "lookup") {
+      return !lutPointsEqual(orig.LUT_POINTS, ensureDraftLutPoints());
+    }
+    return false;
   }
 
   function renderAccelDirty() {
     const d = accelDirty();
-    const canWrite = !!accelLive?.maccel?.writable;
+    const canWrite = canApplyCurrentMode();
     $("accelDirty").hidden = !d;
     $("accelRevert").hidden = !d;
     $("accelApply").hidden = !d || !canWrite;
+    $("accelApply").disabled = !canWrite;
+    renderLutNotice();
   }
 
   function setAccelLiveBadge(mode, text, title) {
@@ -349,9 +467,19 @@ function createAccelController({ $, getActiveDpi, isAccelTabActive, setState, to
         }
 
         const steps = 36;
-        const dX = [];
+        const sampleXs = [];
         for (let i = 0; i <= steps; i++) {
-          const xv = Math.max(0.05, lo + (i / steps) * (hi - lo));
+          sampleXs.push(Math.max(0.05, lo + (i / steps) * (hi - lo)));
+        }
+        if (isLutMode()) {
+          for (const [kx] of ensureDraftLutPoints()) {
+            if (kx > lo && kx < hi) sampleXs.push(kx);
+          }
+          sampleXs.sort((a, b) => a - b);
+        }
+        const dX = [];
+        for (let i = 0; i < sampleXs.length; i++) {
+          const xv = sampleXs[i];
           const [sx] = maccelEval(xv, accelDraft);
           const cmd = i ? "L" : "M";
           dX.push(`${cmd}${g.px(xv).toFixed(1)},${clampY(g.py(sx)).toFixed(1)}`);
@@ -464,26 +592,134 @@ function createAccelController({ $, getActiveDpi, isAccelTabActive, setState, to
     }
   }
 
-  function renderAccelCurve() {
-    if (!accelDraft) return;
-    const svg = $("accelSvg");
-    const W = 640, H = 240, L = 46, R = 16, T = 16, B = 28;
-    const PW = W - L - R, PH = H - T - B;
-    const N = 160;
+  function _curvePaths(g, pts) {
+    const pathX = pts.map(([x, sx], i) => `${i ? "L" : "M"}${g.px(x).toFixed(1)},${g.py(sx).toFixed(1)}`).join(" ");
+    const areaX = `${pathX} L${g.px(accelXMax).toFixed(1)},${g.py(g.yMin).toFixed(1)} L${g.L},${g.py(g.yMin).toFixed(1)} Z`;
+    const pathY = g.hasY ? pts.map(([x, , sy], i) => `${i ? "L" : "M"}${g.px(x).toFixed(1)},${g.py(sy).toFixed(1)}`).join(" ") : "";
+    return { pathX, areaX, pathY };
+  }
+
+  function _sampleCurvePoints() {
     const pts = [];
-    let yMax = 2.0, yMin = 0.5;
+    if (isLutMode()) {
+      const lut = ensureDraftLutPoints();
+      const xs = [0, accelXMax];
+      for (const [kx] of lut) {
+        if (kx > 0 && kx < accelXMax) xs.push(kx);
+      }
+      xs.sort((a, b) => a - b);
+      for (let i = 0; i < xs.length; i++) {
+        if (i > 0 && Math.abs(xs[i] - xs[i - 1]) < 1e-9) continue;
+        const x = xs[i];
+        const [sx, sy] = maccelEval(x, accelDraft);
+        pts.push([x, sx, sy]);
+      }
+      return pts;
+    }
+    const N = 160;
     for (let i = 0; i <= N; i++) {
       const x = Math.max(0.05, (i / N) * accelXMax);
       const [sx, sy] = maccelEval(x, accelDraft);
       pts.push([x, sx, sy]);
-      yMax = Math.max(yMax, sx, sy);
-      yMin = Math.min(yMin, sx, sy);
     }
-    yMax = Math.ceil((yMax * 1.1) * 4) / 4;
-    yMin = Math.max(0, Math.floor((yMin * 0.9) * 4) / 4);
-    if (yMax - yMin < 0.5) yMax = yMin + 0.5;
+    return pts;
+  }
+
+  function _placeLutBadge(badge, cx, cy, xVal, yVal, g) {
+    if (!badge) return;
+    const rect = badge.querySelector("rect");
+    const txt = badge.querySelector("text");
+    if (!rect || !txt) return;
+    const label = `${_fmtX(xVal)} c/ms · ${_fmtY(yVal)}×`;
+    txt.textContent = label;
+    const w = Math.max(82, label.length * 6.3 + 14);
+    const h = 20;
+    const rx = Math.max(g.L + 4, Math.min(g.W - g.R - w - 4, cx - w / 2));
+    const aboveY = cy - h - 11;
+    const ry = aboveY >= g.T + 2 ? aboveY : Math.min(g.H - g.B - h - 2, cy + 12);
+    rect.setAttribute("x", rx.toFixed(1));
+    rect.setAttribute("y", ry.toFixed(1));
+    rect.setAttribute("width", w.toFixed(1));
+    rect.setAttribute("height", String(h));
+    txt.setAttribute("x", (rx + w / 2).toFixed(1));
+    txt.setAttribute("y", (ry + 13.5).toFixed(1));
+    _svgShow(badge, true);
+  }
+
+  function _updateLutDragVisuals() {
+    const svg = $("accelSvg");
+    const g = lutDrag?.geom || svg?._geom;
+    if (!g || !accelDraft || !isLutMode()) return;
+    const lut = ensureDraftLutPoints();
+    const sensMult = accelDraft.SENS_MULT ?? 1;
+    const pts = _sampleCurvePoints();
+    const { pathX, areaX, pathY } = _curvePaths(g, pts);
+    const lineX = $("accelLineX");
+    if (lineX) lineX.setAttribute("d", pathX);
+    const areaEl = svg.querySelector(".area-x");
+    if (areaEl) areaEl.setAttribute("d", areaX);
+    if (g.hasY) {
+      const lineY = $("accelLineY");
+      if (lineY) lineY.setAttribute("d", pathY);
+      const trailY = $("accelSwipeTrailY");
+      if (trailY) trailY.setAttribute("d", pathY);
+    }
+    const idx = lutDrag ? lutDrag.idx : selectedLutIdx;
+    const pt = lut[idx];
+    if (pt) {
+      const [xv, yv] = pt;
+      const cx = g.px(Math.max(0, Math.min(accelXMax, xv)));
+      const cy = Math.max(g.T, Math.min(g.H - g.B, g.py(yv * sensMult)));
+      const nodeG = svg.querySelector(`.lut-pt[data-lut-idx="${idx}"]`);
+      if (nodeG) {
+        for (const c of nodeG.querySelectorAll("circle")) {
+          c.setAttribute("cx", cx.toFixed(1));
+          c.setAttribute("cy", cy.toFixed(1));
+        }
+        nodeG.setAttribute("aria-label", `Point ${idx + 1}: ${_fmtX(xv)} c/ms, ${_fmtY(yv)}×`);
+        nodeG.setAttribute("aria-valuenow", String(yv));
+        nodeG.setAttribute("aria-valuetext", `${_fmtX(xv)} counts/ms, ${_fmtY(yv)}×`);
+      }
+      const guide = $("accelLutGuide");
+      if (guide) {
+        guide.setAttribute("x1", cx.toFixed(1));
+        guide.setAttribute("x2", cx.toFixed(1));
+        guide.setAttribute("y1", cy.toFixed(1));
+        _svgShow(guide, xv <= accelXMax);
+      }
+      _placeLutBadge($("accelLutBadge"), cx, cy, xv, yv, g);
+      const [effX, effY] = maccelEval(xv, accelDraft);
+      const effNote = Math.abs(sensMult - 1) > 1e-4 ? ` (eff ${effX.toFixed(2)}×)` : "";
+      const yNote = Math.abs(effX - effY) > 1e-4 ? ` (Y: ${effY.toFixed(2)}×)` : "";
+      $("accelProbe").textContent = `Pt ${idx + 1}: ${_fmtX(xv)} c/ms → ${_fmtY(yv)}×${effNote}${yNote}`;
+    }
+    renderAccelLiveOverlay();
+  }
+
+  function renderAccelCurve() {
+    if (!accelDraft) return;
+    const svg = $("accelSvg");
+    const isLut = isLutMode();
+    const W = 640, H = 240, L = 46, R = 16, T = 16, B = 28;
+    const PW = W - L - R, PH = H - T - B;
+    const pts = _sampleCurvePoints();
+    let yMax = 2.0, yMin = 0.5;
+    if (lutDrag?.geom) {
+      yMin = lutDrag.geom.yMin;
+      yMax = lutDrag.geom.yMax;
+    } else {
+      for (const [, sx, sy] of pts) {
+        yMax = Math.max(yMax, sx, sy);
+        yMin = Math.min(yMin, sx, sy);
+      }
+      yMax = Math.ceil((yMax * (isLut ? 1.15 : 1.1)) * 4) / 4;
+      yMin = Math.max(0, Math.floor((yMin * 0.9) * 4) / 4);
+      if (yMax - yMin < 0.5) yMax = yMin + 0.5;
+    }
     const px = (x) => L + (x / accelXMax) * PW;
     const py = (y) => T + (1 - (y - yMin) / (yMax - yMin)) * PH;
+    const hasY = Math.abs((accelDraft.YX_RATIO ?? 1) - 1) > 1e-4;
+    const geom = { W, H, L, R, T, B, PW, PH, yMin, yMax, hasY, px, py };
 
     let g = "";
     for (let i = 0; i <= 4; i++) {
@@ -500,13 +736,10 @@ function createAccelController({ $, getActiveDpi, isAccelTabActive, setState, to
     if (hasBase) {
       g += `<line class="base" x1="${L}" y1="${py(1).toFixed(1)}" x2="${W - R}" y2="${py(1).toFixed(1)}"/>`;
     }
-    const pathX = pts.map(([x, sx], i) => `${i ? "L" : "M"}${px(x).toFixed(1)},${py(sx).toFixed(1)}`).join(" ");
-    const areaX = `${pathX} L${px(accelXMax).toFixed(1)},${py(yMin).toFixed(1)} L${L},${py(yMin).toFixed(1)} Z`;
-    const hasY = Math.abs((accelDraft.YX_RATIO ?? 1) - 1) > 1e-4;
+    const { pathX, areaX, pathY } = _curvePaths(geom, pts);
     $("accelLegendY").hidden = !hasY;
     if ($("accelLegendBase")) $("accelLegendBase").hidden = !hasBase;
     if ($("accelCurveMeta")) $("accelCurveMeta").classList.toggle("has-y", hasY);
-    const pathY = hasY ? pts.map(([x, , sy], i) => `${i ? "L" : "M"}${px(x).toFixed(1)},${py(sy).toFixed(1)}`).join(" ") : "";
 
     g += `<defs><clipPath id="accelSwipeClipY"><rect id="accelSwipeClipYRect" x="${L}" y="${T - 4}" width="0" height="${PH + 8}"/></clipPath></defs>`;
     g += `<path class="area-x" d="${areaX}"/>`;
@@ -534,8 +767,56 @@ function createAccelController({ $, getActiveDpi, isAccelTabActive, setState, to
     g += `</g>`;
     g += `<line class="cross" id="accelCross" x1="0" y1="${T}" x2="0" y2="${H - B}" style="display:none"/>`;
     g += `<circle class="dot-x" id="accelDot" cx="0" cy="0" r="4" style="display:none"/>`;
+
+    if (isLut) {
+      const lut = ensureDraftLutPoints();
+      const sensMult = accelDraft.SENS_MULT ?? 1;
+      const selPt = lut[selectedLutIdx];
+      const selVisible = selPt && selPt[0] >= 0 && selPt[0] <= accelXMax;
+      const selCx = selVisible ? px(selPt[0]) : 0;
+      const selCy = selVisible ? Math.max(T, Math.min(H - B, py(selPt[1] * sensMult))) : 0;
+      g += `<g id="accelLutGroup">`;
+      g += `<line class="lut-guide" id="accelLutGuide" x1="${selCx.toFixed(1)}" y1="${selCy.toFixed(1)}" x2="${selCx.toFixed(1)}" y2="${H - B}"${selVisible ? "" : ' style="display:none"'}/>`;
+      for (let i = 0; i < lut.length; i++) {
+        const [xv, yv] = lut[i];
+        if (xv < 0 || xv > accelXMax) continue;
+        const cx = px(xv);
+        const cy = Math.max(T, Math.min(H - B, py(yv * sensMult)));
+        const isSel = i === selectedLutIdx;
+        const isDrag = lutDrag?.idx === i;
+        const cls = `lut-pt${isSel ? " sel" : ""}${isDrag ? " dragging" : ""}`;
+        const label = `Point ${i + 1}: ${_fmtX(xv)} c/ms, ${_fmtY(yv)}×`;
+        g += `<g class="${cls}" data-lut-idx="${i}" tabindex="0" role="slider" `
+          + `aria-label="${escHtml(label)}" aria-valuemin="${LUT_Y_MIN}" aria-valuemax="${LUT_Y_MAX}" `
+          + `aria-valuenow="${yv}" aria-valuetext="${escHtml(`${_fmtX(xv)} counts/ms, ${_fmtY(yv)}×`)}">`
+          + `<circle class="lut-hit" cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="13"/>`
+          + `<circle class="lut-ring" cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="9.5"/>`
+          + `<circle class="lut-node" cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="${isSel ? 6 : 5}"/>`
+          + `</g>`;
+      }
+      g += `<g class="lut-badge" id="accelLutBadge" style="display:none"><rect class="lut-badge-bg" rx="3" x="0" y="0" width="90" height="20"/><text class="lut-badge-txt" x="0" y="0" text-anchor="middle"></text></g>`;
+      g += `</g>`;
+    }
+
     svg.innerHTML = g;
-    svg._geom = { W, H, L, R, T, B, PW, PH, yMin, yMax, hasY, px, py };
+    svg.classList.toggle("is-lut", isLut);
+    svg.classList.toggle("is-dragging", !!lutDrag);
+    svg._geom = geom;
+    if (isLut) {
+      const lut = ensureDraftLutPoints();
+      const selPt = lut[selectedLutIdx];
+      if (selPt && selPt[0] >= 0 && selPt[0] <= accelXMax) {
+        const sensMult = accelDraft.SENS_MULT ?? 1;
+        const cx = px(selPt[0]);
+        const cy = Math.max(T, Math.min(H - B, py(selPt[1] * sensMult)));
+        _placeLutBadge($("accelLutBadge"), cx, cy, selPt[0], selPt[1], geom);
+      }
+      if (!lutDrag && $("accelProbe")) {
+        $("accelProbe").textContent = "Click graph to add points · drag handles to shape";
+      }
+    } else if ($("accelProbe") && $("accelProbe").textContent.startsWith("Click graph")) {
+      $("accelProbe").textContent = "Hover curve to inspect speed → multiplier";
+    }
     renderAccelLiveOverlay();
   }
 
@@ -719,6 +1000,52 @@ function createAccelController({ $, getActiveDpi, isAccelTabActive, setState, to
     if (mdpi) b.textContent = `Use mouse DPI (${mdpi})`;
   }
 
+  function _syncLutNumericInputs() {
+    if (!isLutMode() || !accelDraft) return;
+    const lut = ensureDraftLutPoints();
+    const pt = lut[selectedLutIdx];
+    const countEl = $("lutPointCount");
+    if (countEl) countEl.textContent = `${lut.length} / ${LUT_MAX_POINTS}`;
+    const offEl = $("lutOffAxisTag");
+    if (offEl) {
+      const offCount = lut.filter(([x]) => x > accelXMax).length;
+      offEl.hidden = offCount === 0;
+      if (offCount > 0) offEl.textContent = `${offCount} > ${accelXMax} c/ms`;
+    }
+    const selEl = $("lutSelLabel");
+    if (selEl) selEl.textContent = `Pt ${selectedLutIdx + 1}`;
+    const xIn = $("lutPtX");
+    const yIn = $("lutPtY");
+    if (pt && xIn && yIn) {
+      if (document.activeElement !== xIn) xIn.value = _fmtX(pt[0]);
+      if (document.activeElement !== yIn) yIn.value = _fmtY(pt[1]);
+    }
+    const addBtn = $("lutAddPt");
+    if (addBtn) addBtn.disabled = lut.length >= LUT_MAX_POINTS;
+    const delBtn = $("lutDelPt");
+    if (delBtn) delBtn.disabled = lut.length <= LUT_MIN_POINTS;
+    const presetRow = $("lutPresets");
+    if (presetRow) {
+      const activePreset = matchingLutPresetId(lut);
+      for (const b of presetRow.querySelectorAll("button[data-preset]")) {
+        b.classList.toggle("sel", b.dataset.preset === activePreset);
+      }
+    }
+  }
+
+  function _autoFitLutXMax() {
+    if (!isLutMode()) return;
+    const lut = ensureDraftLutPoints();
+    const maxPtX = lut[lut.length - 1]?.[0] ?? 0;
+    if (maxPtX > accelXMax) {
+      const nextMax = maxPtX <= 40 ? 40 : 80;
+      if (nextMax !== accelXMax) {
+        accelXMax = nextMax;
+        for (const x of $("accelXMax").children) x.classList.toggle("sel", +x.dataset.x === accelXMax);
+      }
+    }
+  }
+
   function renderAccelParams() {
     if (!accelDraft) return;
     const mode = accelDraft.MODE || "linear";
@@ -728,6 +1055,125 @@ function createAccelController({ $, getActiveDpi, isAccelTabActive, setState, to
     const list = [...(MODE_PARAMS[mode] ?? []), ...GLOBAL_ACCEL_PARAMS];
     const wrap = $("accelParams");
     wrap.innerHTML = "";
+    renderLutNotice();
+
+    if (mode === "lookup") {
+      const lut = ensureDraftLutPoints();
+      const pt = lut[selectedLutIdx] ?? lut[0];
+      const ptRow = document.createElement("div");
+      ptRow.className = "setting";
+      ptRow.id = "lutPointRow";
+      ptRow.innerHTML = `
+        <div class="label">
+          <b>Control points<span class="lut-count" id="lutPointCount">${lut.length} / ${LUT_MAX_POINTS}</span> <span class="lut-offaxis" id="lutOffAxisTag" hidden></span></b>
+          <p>Click graph to add points · drag to shape · right-click or Delete to remove</p>
+        </div>
+        <div class="control">
+          <span class="lut-sel-tag" id="lutSelLabel">Pt ${selectedLutIdx + 1}</span>
+          <label class="lut-field"><span>Speed</span><input type="number" id="lutPtX" min="${LUT_X_MIN}" max="${LUT_X_MAX}" step="0.1" value="${_fmtX(pt[0])}" aria-label="Selected point speed (counts/ms)"><span class="lut-unit">c/ms</span></label>
+          <label class="lut-field"><span>Mult</span><input type="number" id="lutPtY" min="${LUT_Y_MIN}" max="${LUT_Y_MAX}" step="0.02" value="${_fmtY(pt[1])}" aria-label="Selected point sensitivity multiplier"><span class="lut-unit">×</span></label>
+          <button type="button" id="lutAddPt" title="Insert a new control point">+ Add</button>
+          <button type="button" class="ghost danger" id="lutDelPt" title="Remove selected point (Delete)">Remove</button>
+        </div>`;
+      wrap.appendChild(ptRow);
+
+      const presetRow = document.createElement("div");
+      presetRow.className = "setting";
+      presetRow.id = "lutPresetRow";
+      const activePreset = matchingLutPresetId(lut);
+      const presetBtns = LUT_PRESETS.map(
+        (p) => `<button type="button" data-preset="${p.id}" class="${p.id === activePreset ? "sel" : ""}">${escHtml(p.label)}</button>`
+      ).join("");
+      presetRow.innerHTML = `
+        <div class="label">
+          <b>Curve presets</b>
+          <p>Start from a shape and sculpt it directly on the graph.</p>
+        </div>
+        <div class="control">
+          <div class="lut-presets" id="lutPresets">
+            ${presetBtns}
+            <button type="button" class="ghost" id="lutResetCurve">Reset</button>
+          </div>
+        </div>`;
+      wrap.appendChild(presetRow);
+
+      const xIn = $("lutPtX");
+      const yIn = $("lutPtY");
+      const applyNumeric = () => {
+        const vx = parseFloat(xIn.value);
+        const vy = parseFloat(yIn.value);
+        if (!Number.isFinite(vx) && !Number.isFinite(vy)) return;
+        const curPt = ensureDraftLutPoints()[selectedLutIdx];
+        if (!curPt) return;
+        accelDraft.LUT_POINTS = moveLutPoint(
+          accelDraft.LUT_POINTS,
+          selectedLutIdx,
+          Number.isFinite(vx) ? vx : curPt[0],
+          Number.isFinite(vy) ? vy : curPt[1],
+          { snap: false, minGap: LUT_DX_MIN, maxX: LUT_X_MAX }
+        );
+        _autoFitLutXMax();
+        renderAccelCurve();
+        _syncLutNumericInputs();
+        renderAccelDirty();
+      };
+      xIn.addEventListener("input", applyNumeric);
+      yIn.addEventListener("input", applyNumeric);
+      xIn.addEventListener("change", () => _syncLutNumericInputs());
+      yIn.addEventListener("change", () => _syncLutNumericInputs());
+      xIn.addEventListener("keydown", (e) => { if (e.key === "Enter" && accelDirty() && canApplyCurrentMode()) $("accelApply").click(); });
+      yIn.addEventListener("keydown", (e) => { if (e.key === "Enter" && accelDirty() && canApplyCurrentMode()) $("accelApply").click(); });
+
+      $("lutAddPt").addEventListener("click", () => {
+        const res = addMidpointLutPoint(ensureDraftLutPoints(), selectedLutIdx, accelXMax);
+        if (!res.added) {
+          toast(res.reason === "max" ? `Maximum ${LUT_MAX_POINTS} control points reached` : "No room for another point here", true);
+          return;
+        }
+        accelDraft.LUT_POINTS = res.points;
+        selectedLutIdx = res.index;
+        renderAccelCurve();
+        _syncLutNumericInputs();
+        renderAccelDirty();
+      });
+
+      $("lutDelPt").addEventListener("click", () => {
+        const res = removeLutPoint(ensureDraftLutPoints(), selectedLutIdx);
+        if (!res.removed) {
+          toast(`Custom curve needs at least ${LUT_MIN_POINTS} points`);
+          return;
+        }
+        accelDraft.LUT_POINTS = res.points;
+        selectedLutIdx = res.index;
+        renderAccelCurve();
+        _syncLutNumericInputs();
+        renderAccelDirty();
+      });
+
+      $("lutPresets").addEventListener("click", (e) => {
+        const btn = e.target.closest("button[data-preset]");
+        if (!btn) return;
+        const pts = getLutPreset(btn.dataset.preset);
+        if (!pts) return;
+        accelDraft.LUT_POINTS = pts;
+        selectedLutIdx = Math.min(2, pts.length - 1);
+        _autoFitLutXMax();
+        renderAccelCurve();
+        _syncLutNumericInputs();
+        renderAccelDirty();
+      });
+
+      $("lutResetCurve").addEventListener("click", () => {
+        accelDraft.LUT_POINTS = cloneLutPoints(LUT_STARTER_POINTS);
+        selectedLutIdx = Math.min(2, accelDraft.LUT_POINTS.length - 1);
+        renderAccelCurve();
+        _syncLutNumericInputs();
+        renderAccelDirty();
+      });
+
+      _syncLutNumericInputs();
+    }
+
     for (const p of list) {
       const val = accelDraft[p.k] ?? MACCEL_DEFAULTS[p.k];
       const row = document.createElement("div");
@@ -752,7 +1198,7 @@ function createAccelController({ $, getActiveDpi, isAccelTabActive, setState, to
       };
       rng.addEventListener("input", () => { const v = parseFloat(rng.value); num.value = v; setVal(v); });
       num.addEventListener("input", () => { const v = parseFloat(num.value); if (Number.isFinite(v)) setVal(v); });
-      num.addEventListener("keydown", (e) => { if (e.key === "Enter" && accelDirty() && !ro) $("accelApply").click(); });
+      num.addEventListener("keydown", (e) => { if (e.key === "Enter" && accelDirty() && canApplyCurrentMode()) $("accelApply").click(); });
       wrap.appendChild(row);
     }
     const sb = $("accelUseMouseDpi");
@@ -921,7 +1367,11 @@ function createAccelController({ $, getActiveDpi, isAccelTabActive, setState, to
       } else {
         $("accelBody").hidden = false;
         $("accelPerm").hidden = true;
-        if (!keepDraft) accelDraft = accelSnapshot(m);
+        if (!keepDraft) {
+          accelDraft = accelSnapshot(m);
+          selectedLutIdx = Math.min(2, ensureDraftLutPoints().length - 1);
+          _autoFitLutXMax();
+        }
         renderAccelParams();
         renderAccelCurve();
         renderAccelDirty();
@@ -945,7 +1395,7 @@ function createAccelController({ $, getActiveDpi, isAccelTabActive, setState, to
         renderAccelBackend(null);
       }
       if (accelLive?.maccel) accelLive.maccel.writable = false;
-      accelDraft ??= { ...MACCEL_DEFAULTS };
+      accelDraft ??= { ...MACCEL_DEFAULTS, LUT_POINTS: cloneLutPoints(LUT_STARTER_POINTS) };
       $("accelBody").hidden = false;
       renderAccelParams();
       renderAccelCurve();
@@ -981,6 +1431,38 @@ function createAccelController({ $, getActiveDpi, isAccelTabActive, setState, to
     }
   }
 
+  function _svgPointerToCurve(e, g) {
+    const svg = $("accelSvg");
+    const rect = svg.getBoundingClientRect();
+    const sx = rect.width > 0 ? ((e.clientX - rect.left) / rect.width) * g.W : g.L;
+    const sy = rect.height > 0 ? ((e.clientY - rect.top) / rect.height) * g.H : g.T;
+    const rawX = ((sx - g.L) / g.PW) * accelXMax;
+    const plotY = g.yMin + (1 - (sy - g.T) / g.PH) * (g.yMax - g.yMin);
+    const sensMult = Math.max(0.01, accelDraft?.SENS_MULT ?? 1);
+    const rawY = plotY / sensMult;
+    const inPlot = sx >= g.L - 6 && sx <= g.W - g.R + 6 && sy >= g.T - 6 && sy <= g.H - g.B + 6;
+    return { sx, sy, rawX, rawY, inPlot };
+  }
+
+  function _finishLutDrag(pointerId, commit) {
+    if (!lutDrag) return;
+    const finished = lutDrag;
+    lutDrag = null;
+    const svg = $("accelSvg");
+    try { svg.releasePointerCapture?.(pointerId); } catch {}
+    svg.classList.remove("is-dragging");
+    if (!commit) {
+      accelDraft.LUT_POINTS = finished.startPoints;
+      selectedLutIdx = Math.min(finished.idx, accelDraft.LUT_POINTS.length - 1);
+    }
+    renderAccelCurve();
+    _syncLutNumericInputs();
+    renderAccelDirty();
+    if (finished.focusAfter) {
+      svg.querySelector(`.lut-pt[data-lut-idx="${selectedLutIdx}"]`)?.focus?.({ preventScroll: true });
+    }
+  }
+
   // Wire event listeners for acceleration & desktop pointer panels
   document.addEventListener("visibilitychange", () => {
     if (shouldStreamMotion() && !$("accelOffline").hidden) loadAccel();
@@ -988,11 +1470,177 @@ function createAccelController({ $, getActiveDpi, isAccelTabActive, setState, to
   });
   window.addEventListener("pagehide", () => stopAccelMotion());
 
+  $("accelSvg").addEventListener("pointerdown", (e) => {
+    if (!isLutMode() || !accelDraft) return;
+    const svg = $("accelSvg");
+    const g = svg._geom;
+    if (!g) return;
+    const ptEl = e.target?.closest?.(".lut-pt[data-lut-idx]");
+    if (ptEl) {
+      if (typeof e.button === "number" && e.button !== 0) return;
+      const idx = Number(ptEl.dataset.lutIdx);
+      const lut = ensureDraftLutPoints();
+      if (!Number.isInteger(idx) || idx < 0 || idx >= lut.length) return;
+      e.preventDefault();
+      selectedLutIdx = idx;
+      lutDrag = {
+        idx,
+        pointerId: e.pointerId,
+        geom: { ...g },
+        startPoints: cloneLutPoints(lut),
+        moved: false,
+        focusAfter: true,
+      };
+      renderAccelCurve();
+      _syncLutNumericInputs();
+      svg.querySelector(`.lut-pt[data-lut-idx="${idx}"]`)?.focus?.({ preventScroll: true });
+      try { svg.setPointerCapture?.(e.pointerId); } catch {}
+      svg.classList.add("is-dragging");
+      _svgShow($("accelCross"), false);
+      _svgShow($("accelDot"), false);
+      return;
+    }
+
+    if (typeof e.button === "number" && e.button !== 0) return;
+    const { rawX, rawY, inPlot } = _svgPointerToCurve(e, g);
+    if (!inPlot) return;
+    e.preventDefault();
+    const prevPoints = cloneLutPoints(ensureDraftLutPoints());
+    const res = insertLutPoint(prevPoints, rawX, rawY, {
+      shiftKey: e.shiftKey,
+      maxX: accelXMax,
+      minGap: LUT_DRAG_DX_MIN,
+    });
+    if (!res.added) {
+      if (res.reason === "max") toast(`Maximum ${LUT_MAX_POINTS} control points reached`, true);
+      else if (res.index >= 0) {
+        selectedLutIdx = res.index;
+        renderAccelCurve();
+        _syncLutNumericInputs();
+      }
+      return;
+    }
+    accelDraft.LUT_POINTS = res.points;
+    selectedLutIdx = res.index;
+    lutDrag = {
+      idx: res.index,
+      pointerId: e.pointerId,
+      geom: { ...g },
+      startPoints: prevPoints,
+      moved: true,
+      focusAfter: true,
+    };
+    renderAccelCurve();
+    _syncLutNumericInputs();
+    renderAccelDirty();
+    svg.querySelector(`.lut-pt[data-lut-idx="${res.index}"]`)?.focus?.({ preventScroll: true });
+    try { svg.setPointerCapture?.(e.pointerId); } catch {}
+    svg.classList.add("is-dragging");
+    _svgShow($("accelCross"), false);
+    _svgShow($("accelDot"), false);
+  });
+
+  $("accelSvg").addEventListener("pointermove", (e) => {
+    if (!lutDrag || e.pointerId !== lutDrag.pointerId) return;
+    const { rawX, rawY } = _svgPointerToCurve(e, lutDrag.geom);
+    lutDrag.moved = true;
+    accelDraft.LUT_POINTS = moveLutPoint(accelDraft.LUT_POINTS, lutDrag.idx, rawX, rawY, {
+      shiftKey: e.shiftKey,
+      maxX: accelXMax,
+      minGap: LUT_DRAG_DX_MIN,
+    });
+    _updateLutDragVisuals();
+    _syncLutNumericInputs();
+    renderAccelDirty();
+  });
+
+  $("accelSvg").addEventListener("pointerup", (e) => {
+    if (!lutDrag || e.pointerId !== lutDrag.pointerId) return;
+    _finishLutDrag(e.pointerId, true);
+  });
+
+  $("accelSvg").addEventListener("pointercancel", (e) => {
+    if (!lutDrag || e.pointerId !== lutDrag.pointerId) return;
+    _finishLutDrag(e.pointerId, false);
+  });
+
+  $("accelSvg").addEventListener("contextmenu", (e) => {
+    if (!isLutMode() || !accelDraft) return;
+    const ptEl = e.target?.closest?.(".lut-pt[data-lut-idx]");
+    if (!ptEl) return;
+    e.preventDefault();
+    const idx = Number(ptEl.dataset.lutIdx);
+    const res = removeLutPoint(ensureDraftLutPoints(), idx);
+    if (!res.removed) {
+      toast(`Custom curve needs at least ${LUT_MIN_POINTS} points`);
+      return;
+    }
+    accelDraft.LUT_POINTS = res.points;
+    selectedLutIdx = res.index;
+    renderAccelCurve();
+    _syncLutNumericInputs();
+    renderAccelDirty();
+  });
+
+  $("accelSvg").addEventListener("keydown", (e) => {
+    if (!isLutMode() || !accelDraft) return;
+    const ptEl = e.target?.closest?.(".lut-pt[data-lut-idx]");
+    if (!ptEl) return;
+    const idx = Number(ptEl.dataset.lutIdx);
+    const lut = ensureDraftLutPoints();
+    if (!Number.isInteger(idx) || idx < 0 || idx >= lut.length) return;
+    selectedLutIdx = idx;
+
+    if (e.key === "Delete" || e.key === "Backspace") {
+      e.preventDefault();
+      const res = removeLutPoint(lut, idx);
+      if (!res.removed) {
+        toast(`Custom curve needs at least ${LUT_MIN_POINTS} points`);
+        return;
+      }
+      accelDraft.LUT_POINTS = res.points;
+      selectedLutIdx = res.index;
+      renderAccelCurve();
+      _syncLutNumericInputs();
+      renderAccelDirty();
+      $("accelSvg").querySelector(`.lut-pt[data-lut-idx="${selectedLutIdx}"]`)?.focus?.({ preventScroll: true });
+      return;
+    }
+
+    const stepX = e.shiftKey ? 0.05 : 0.5;
+    const stepY = e.shiftKey ? 0.01 : 0.05;
+    let [nx, ny] = lut[idx];
+    if (e.key === "ArrowLeft") nx -= stepX;
+    else if (e.key === "ArrowRight") nx += stepX;
+    else if (e.key === "ArrowUp") ny += stepY;
+    else if (e.key === "ArrowDown") ny -= stepY;
+    else if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      renderAccelCurve();
+      _syncLutNumericInputs();
+      return;
+    } else {
+      return;
+    }
+
+    e.preventDefault();
+    accelDraft.LUT_POINTS = moveLutPoint(lut, idx, nx, ny, {
+      snap: false,
+      minGap: LUT_DX_MIN,
+      maxX: Math.max(accelXMax, lut[lut.length - 1][0]),
+    });
+    renderAccelCurve();
+    _syncLutNumericInputs();
+    renderAccelDirty();
+    $("accelSvg").querySelector(`.lut-pt[data-lut-idx="${idx}"]`)?.focus?.({ preventScroll: true });
+  });
+
   $("accelSvg").addEventListener("mousemove", (e) => {
+    if (lutDrag) return;
     const g = $("accelSvg")._geom; if (!g || !accelDraft) return;
     const rect = $("accelSvg").getBoundingClientRect();
     const sx = ((e.clientX - rect.left) / rect.width) * g.W;
-    const xv = Math.max(0.05, Math.min(accelXMax, ((sx - g.L) / g.PW) * accelXMax));
+    const xv = Math.max(isLutMode() ? 0 : 0.05, Math.min(accelXMax, ((sx - g.L) / g.PW) * accelXMax));
     const [vx, vy] = maccelEval(xv, accelDraft);
     const cx = g.px(xv), cy = g.py(vx);
     const cross = $("accelCross"), dot = $("accelDot");
@@ -1003,16 +1651,26 @@ function createAccelController({ $, getActiveDpi, isAccelTabActive, setState, to
     $("accelProbe").textContent = `${xv.toFixed(1)} counts/ms → ${vx.toFixed(3)}×` + (Math.abs(vx - vy) > 1e-4 ? ` (Y: ${vy.toFixed(3)}×)` : "");
   });
   $("accelSvg").addEventListener("mouseleave", () => {
+    if (lutDrag) return;
     _svgShow($("accelCross"), false);
     _svgShow($("accelDot"), false);
-    $("accelProbe").textContent = "Hover curve to inspect speed → multiplier";
+    $("accelProbe").textContent = isLutMode()
+      ? "Click graph to add points · drag handles to shape"
+      : "Hover curve to inspect speed → multiplier";
   });
 
   $("accelRefresh").addEventListener("click", () => { accelDraft = null; loadAccel(false); });
   $("accelRetry").addEventListener("click", () => loadAccel(true));
   $("accelMode").addEventListener("click", (e) => {
-    const b = e.target.closest("button"); if (!b || !accelDraft || !accelLive?.maccel?.writable) return;
-    accelDraft.MODE = b.dataset.mode;
+    const b = e.target.closest("button");
+    if (!b || !accelDraft) return;
+    const nextMode = b.dataset.mode;
+    if (!accelLive?.maccel?.writable && nextMode !== "lookup" && accelDraft.MODE !== "lookup") return;
+    accelDraft.MODE = nextMode;
+    if (nextMode === "lookup") {
+      ensureDraftLutPoints();
+      _autoFitLutXMax();
+    }
     renderAccelParams(); renderAccelCurve(); renderAccelDirty();
   });
   $("accelXMax").addEventListener("click", (e) => {
@@ -1020,10 +1678,12 @@ function createAccelController({ $, getActiveDpi, isAccelTabActive, setState, to
     accelXMax = +b.dataset.x;
     for (const x of $("accelXMax").children) x.classList.toggle("sel", +x.dataset.x === accelXMax);
     renderAccelCurve();
+    _syncLutNumericInputs();
   });
   $("accelRevert").addEventListener("click", () => {
     if (!accelLive?.maccel) return;
     accelDraft = accelSnapshot(accelLive.maccel);
+    selectedLutIdx = Math.min(2, ensureDraftLutPoints().length - 1);
     renderAccelParams(); renderAccelCurve(); renderAccelDirty();
   });
   $("windowsReset").addEventListener("click", async () => {
@@ -1036,17 +1696,24 @@ function createAccelController({ $, getActiveDpi, isAccelTabActive, setState, to
     await loadAccel();
   });
   $("accelDefaults").addEventListener("click", () => {
-    if (!accelLive?.maccel?.writable) return;
-    accelDraft = { ...MACCEL_DEFAULTS };
+    if (!accelLive?.maccel?.writable && !isLutMode()) return;
+    accelDraft = { ...MACCEL_DEFAULTS, LUT_POINTS: cloneLutPoints(LUT_STARTER_POINTS) };
     if (accelDraftBackend === "rawaccel") Object.assign(accelDraft, { MODE: "no_accel", ACCEL: 0.005 });
+    selectedLutIdx = Math.min(2, accelDraft.LUT_POINTS.length - 1);
     renderAccelParams(); renderAccelCurve(); renderAccelDirty();
   });
   $("accelApply").addEventListener("click", async () => {
-    if (!accelDraftBackend || !accelDraft || !accelLive?.maccel?.writable) return;
+    if (!accelDraftBackend || !accelDraft || !canApplyCurrentMode()) return;
     const backend = accelDraftBackend;
+    const payload = Object.fromEntries(
+      Object.keys(MACCEL_DEFAULTS).map((k) => [k, accelDraft[k]])
+    );
+    if (accelDraft.MODE === "lookup") {
+      payload.LUT_POINTS = cloneLutPoints(ensureDraftLutPoints());
+    }
     setState("maccel", "saving");
     try {
-      const { res, data } = await postHelperAccel(backend, accelDraft);
+      const { res, data } = await postHelperAccel(backend, payload);
       if (!res.ok) {
         if (res.status === 409) await loadAccel();
         throw new Error(data.error || "Failed to save curve");
@@ -1056,6 +1723,7 @@ function createAccelController({ $, getActiveDpi, isAccelTabActive, setState, to
       renderAccelBackend(st);
       accelDraftBackend = accelBackendInfo(st).name;
       accelDraft = accelSnapshot(st);
+      selectedLutIdx = Math.min(selectedLutIdx, ensureDraftLutPoints().length - 1);
       renderAccelParams(); renderAccelCurve(); renderAccelDirty();
       setState("maccel", "saved");
       toast("Acceleration curve saved");

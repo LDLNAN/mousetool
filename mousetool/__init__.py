@@ -209,6 +209,8 @@ _LAZY_EXPORTS = {
     "FIX": ".accel.linux",
     "MODES": ".accel.linux",
     "PARAMS": ".accel.linux",
+    "parse_lut_points_sysfs": ".accel.linux",
+    "encode_lut_points_sysfs": ".accel.linux",
     "_backend_info": ".accel.linux",
     "detect_accel_backend": ".accel.linux",
     "_params_dir": ".accel.linux",

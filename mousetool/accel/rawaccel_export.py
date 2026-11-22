@@ -62,13 +62,23 @@ MAX_JSON_DEPTH = 32         # exports nest 7 levels deep
 
 # Mirrors mousetool.py MODES / PARAMS (kept here so this module has no Linux-only
 # imports); test_rawaccel_export.py fails if the two ever drift apart.
-MODES = ["linear", "natural", "synchronous", "no_accel"]
+MODES = ["linear", "natural", "synchronous", "no_accel", "lookup"]
 PARAMS = {
     "SENS_MULT": (0.01, 50), "YX_RATIO": (0.01, 50), "INPUT_DPI": (50, 50000), "ANGLE_ROTATION": (-180, 180),
     "ACCEL": (0, 50), "OFFSET": (0, 1000), "OUTPUT_CAP": (0, 100),
     "DECAY_RATE": (0.0001, 100), "LIMIT": (1, 100),
     "GAMMA": (0.0001, 100), "SMOOTH": (0, 1), "MOTIVITY": (1.0001, 100), "SYNC_SPEED": (0.0001, 1000),
 }
+# Custom lookup-table (MODE="lookup") shared bounds with mouseaccel (MA-003) and Raw Accel Sensitivity LUT.
+LUT_MIN_POINTS = 2
+LUT_MAX_POINTS = 64
+LUT_X_MIN = 0.0
+LUT_X_MAX = 1000.0
+LUT_DX_MIN = 0.001
+LUT_Y_MIN = 0.05
+LUT_Y_MAX = 10.0
+LUT_DEFAULT_POINTS = ((0.0, 1.0), (10.0, 1.0))
+
 # Mirrors index.html MACCEL_DEFAULTS.
 DEFAULTS = {
     "MODE": "linear", "SENS_MULT": 1.0, "YX_RATIO": 1.0, "INPUT_DPI": 1000.0, "ANGLE_ROTATION": 0.0,
@@ -82,6 +92,7 @@ MODE_PARAMS = {
     "natural": ("DECAY_RATE", "OFFSET", "LIMIT"),
     "synchronous": ("GAMMA", "SMOOTH", "MOTIVITY", "SYNC_SPEED"),
     "no_accel": (),
+    "lookup": (),
 }
 NORMALIZED_DPI = 1000.0  # rawaccel-base.hpp NORMALIZED_DPI and maccel accel.h NORMALIZED_DPI
 
@@ -191,19 +202,109 @@ def _short(v, limit=60):
 
 # ----------------------------------------------------------------------------- maccel side
 
-def normalize_maccel(cfg):
-    """Validate a complete maccel config {"MODE": str, <13 params>: number}.
+def default_lut_points():
+    """Return a fresh copy of the default flat 1.0x custom lookup-table curve."""
+    return [list(p) for p in LUT_DEFAULT_POINTS]
 
-    Returns a new dict with float values. Raises RawAccelExportError listing
-    every missing, unknown, non-numeric, non-finite or out-of-range entry.
+
+def validate_lut_points(points, label="LUT_POINTS"):
+    """Validate and normalize a list of [x, y] lookup-table control points.
+
+    Shared contract with mouseaccel (MA-003) and Raw Accel v1.7.1 Sensitivity LUT:
+      - 2..64 [x, y] pairs
+      - 0 <= x <= 1000, strictly increasing with x[i+1] - x[i] >= 0.001
+      - 0.05 <= y <= 10.0
+    """
+    if not isinstance(points, (list, tuple)):
+        raise RawAccelExportError(f"{label} must be an array of [x, y] control points (got {_short(points)})")
+    n = len(points)
+    if not LUT_MIN_POINTS <= n <= LUT_MAX_POINTS:
+        raise RawAccelExportError(
+            f"{label} must contain between {LUT_MIN_POINTS} and {LUT_MAX_POINTS} points (got {n})"
+        )
+    errors = []
+    out = []
+    prev_x = None
+    for i, item in enumerate(points):
+        if not isinstance(item, (list, tuple)) or len(item) != 2:
+            errors.append(f"{label}[{i}] must be a [x, y] pair (got {_short(item)})")
+            continue
+        rx, ry = item
+        if not _is_number(rx) or not _is_number(ry):
+            errors.append(f"{label}[{i}] coordinates must be finite numbers (got {_short(item)})")
+            continue
+        x, y = float(rx), float(ry)
+        if not LUT_X_MIN <= x <= LUT_X_MAX:
+            errors.append(f"{label}[{i}].x must be between {LUT_X_MIN:g} and {LUT_X_MAX:g} (got {_short(rx)})")
+        if not LUT_Y_MIN <= y <= LUT_Y_MAX:
+            errors.append(f"{label}[{i}].y must be between {LUT_Y_MIN:g} and {LUT_Y_MAX:g} (got {_short(ry)})")
+        if prev_x is not None:
+            dx = x - prev_x
+            if dx <= 0:
+                errors.append(f"{label}[{i}].x ({x:g}) must be strictly greater than {label}[{i - 1}].x ({prev_x:g})")
+            elif dx < LUT_DX_MIN - 1e-12:
+                errors.append(
+                    f"{label}[{i}].x - {label}[{i - 1}].x ({dx:g}) must be at least {LUT_DX_MIN:g}"
+                )
+        prev_x = x
+        out.append([x, y])
+    if errors:
+        raise RawAccelExportError(errors)
+    return out
+
+
+def eval_lut_sens(x, points):
+    """Exact piecewise-linear Sensitivity LUT evaluation matching mouseaccel & Raw Accel v1.7.1."""
+    if x <= points[0][0]:
+        return points[0][1]
+    if x >= points[-1][0]:
+        return points[-1][1]
+    lo, hi = 0, len(points) - 1
+    while hi - lo > 1:
+        mid = (lo + hi) // 2
+        if points[mid][0] <= x:
+            lo = mid
+        else:
+            hi = mid
+    x0, y0 = points[lo]
+    x1, y1 = points[lo + 1]
+    return y0 + (x - x0) * (y1 - y0) / (x1 - x0)
+
+
+def parse_lut_points_arg(raw):
+    """Parse CLI LUT_POINTS value from JSON ('[[0,1],[10,1.5]]') or semicolon pairs ('0,1;10,1.5')."""
+    text = raw.strip()
+    if text.startswith("["):
+        return validate_lut_points(loads(text))
+    pairs = []
+    for token in text.split(";"):
+        parts = token.split(",")
+        if len(parts) != 2:
+            raise RawAccelExportError(f"LUT_POINTS entry must be x,y (got {_short(token)})")
+        try:
+            pairs.append([float(parts[0].strip()), float(parts[1].strip())])
+        except ValueError:
+            raise RawAccelExportError(f"LUT_POINTS entry must contain numbers (got {_short(token)})") from None
+    return validate_lut_points(pairs)
+
+
+def normalize_maccel(cfg):
+    """Validate a complete maccel config {"MODE": str, <13 params>: number, optional LUT_POINTS}.
+
+    Returns a new dict with float values (and normalized LUT_POINTS list when present).
+    Raises RawAccelExportError listing every missing, unknown, non-numeric, non-finite
+    or out-of-range entry.
     """
     if not isinstance(cfg, dict):
         raise RawAccelExportError("maccel config must be a JSON object")
     errors = []
-    unknown = sorted(str(k) for k in set(cfg) - set(PARAMS) - {"MODE"})
+    unknown = sorted(str(k) for k in set(cfg) - set(PARAMS) - {"MODE", "LUT_POINTS"})
     if unknown:
         errors.append(f"unknown maccel parameter(s): {', '.join(_short(k, 40) for k in unknown[:10])}")
-    missing = [k for k in ["MODE", *PARAMS] if k not in cfg]
+    required = ["MODE", *PARAMS]
+    if cfg.get("MODE") == "lookup":
+        required.append("LUT_POINTS")
+    missing = [k for k in required if k not in cfg]
     if missing:
         errors.append(f"missing maccel parameter(s): {', '.join(missing)}")
     out = {}
@@ -222,6 +323,11 @@ def normalize_maccel(cfg):
             errors.append(f"{k} must be between {lo} and {hi} (got {_short(v)})")
         else:
             out[k] = float(v)
+    if "LUT_POINTS" in cfg:
+        try:
+            out["LUT_POINTS"] = validate_lut_points(cfg["LUT_POINTS"])
+        except RawAccelExportError as exc:
+            errors.extend(exc.errors)
     if errors:
         raise RawAccelExportError(errors)
     return out
@@ -232,7 +338,11 @@ def with_defaults(partial):
     if not isinstance(partial, dict):
         raise RawAccelExportError("maccel config must be a JSON object")
     defaulted = [k for k in DEFAULTS if k not in partial]
-    return {**DEFAULTS, **partial}, defaulted
+    merged = {**DEFAULTS, **partial}
+    if merged.get("MODE") == "lookup" and "LUT_POINTS" not in partial:
+        merged["LUT_POINTS"] = default_lut_points()
+        defaulted.append("LUT_POINTS")
+    return merged, defaulted
 
 
 def app_sens(x, cfg, studio_rules=True):
@@ -286,6 +396,10 @@ def app_sens(x, cfg, studio_rules=True):
             sign = 1.0 if ld > 0 else -1.0
             ls = gc * abs(ld)
             s = math.exp(sign * math.pow(math.tanh(math.pow(ls, sharp)), 1 / sharp) * log_m)
+    elif m == "lookup":
+        pts = cfg.get("LUT_POINTS")
+        if pts and len(pts) >= LUT_MIN_POINTS:
+            s = eval_lut_sens(x, pts)
     sx = s * cfg["SENS_MULT"]
     return sx, sx * cfg["YX_RATIO"]
 
@@ -389,6 +503,15 @@ def rawaccel_sens(x, args):
         if ld > 0:
             return math.exp(math.pow(math.tanh(math.pow(gc * ld, sharp)), 1 / sharp) * log_m)
         return math.exp(-math.pow(math.tanh(math.pow(-gc * ld, sharp)), 1 / sharp) * log_m)
+    if mode == "lut" and not gain:
+        data = args["data"]
+        if not isinstance(data, list) or len(data) < 4 or len(data) % 2 != 0:
+            raise RawAccelExportError("Raw Accel lookup mode requires an even data array with at least 2 points")
+        pts = [(float(data[i]), float(data[i + 1])) for i in range(0, len(data), 2)]
+        for i in range(1, len(pts)):
+            if pts[i][0] <= pts[i - 1][0]:
+                raise RawAccelExportError("Raw Accel lookup data x values must be strictly increasing")
+        return eval_lut_sens(x, pts)
     raise RawAccelExportError(f"Raw Accel mode {mode!r} (gain={gain}, cap mode={args.get(K_CAP_MODE)!r}) is not ported")
 
 
@@ -499,8 +622,23 @@ def validate_settings(settings):
 
     def accel_values(a, where):
         mode, cap_mode, cap = a["mode"], a[K_CAP_MODE], a[K_CAP]
-        if mode == "lut" and len(a["data"]) < 4:
-            errs.append(f"{where}: lookup mode requires at least 2 points")
+        if mode == "lut":
+            data = a["data"]
+            if len(data) < 4:
+                errs.append(f"{where}: lookup mode requires at least 2 points")
+            elif len(data) % 2 != 0:
+                errs.append(f"{where}: lookup mode data must contain x, y pairs")
+            else:
+                prev_x = None
+                for idx in range(0, len(data), 2):
+                    px, py = data[idx], data[idx + 1]
+                    if px < 0 or py <= 0:
+                        errs.append(f"{where}: lookup point ({px:g}, {py:g}) out of range")
+                        break
+                    if prev_x is not None and px <= prev_x:
+                        errs.append(f"{where}: lookup x values must be strictly increasing")
+                        break
+                    prev_x = px
         if a["inputOffset"] < 0 or a["outputOffset"] < 0:
             errs.append(f"{where}: offset can not be negative")
         jump_or_io = mode == "jump" or (mode in ("classic", "power") and cap_mode == "in_out")
@@ -699,6 +837,15 @@ def maccel_to_rawaccel(cfg):
         rawaccel_mode, gain = "synchronous", False
         formula = "activation_framework<LEGACY> (accel-synchronous.hpp) = maccel 0.5.9 accel/synchronous.h"
         notes.append("synchronous -> Raw Accel Synchronous with Gain off (maccel's synchronous is the sensitivity form).")
+    elif mode == "lookup":
+        pts = cfg["LUT_POINTS"]
+        rawaccel_mode, gain = "lut", False
+        formula = "accel_lut<LEGACY> (accel-lookup.hpp, Sensitivity mode) = mouseaccel accel/lookup.h"
+        ax["data"] = [v for pt in pts for v in pt]
+        notes.append(
+            f"lookup -> Raw Accel LookUpTable with Gain off (Sensitivity mode, {len(pts)} control points, "
+            f"flat clamping outside [{pts[0][0]:g}, {pts[-1][0]:g}] counts/ms)."
+        )
     else:
         notes.append("no_accel -> Raw Accel No Acceleration (output DPI, Y/X ratio and rotation still apply).")
     if flat_reason:
@@ -851,10 +998,12 @@ def rawaccel_to_maccel(settings, profile_name=None):
     if errors:
         raise RawAccelExportError(errors)
 
-    mode = {"classic": "linear", "natural": "natural", "synchronous": "synchronous", "noaccel": "no_accel"}.get(ra_mode)
+    mode = {"classic": "linear", "natural": "natural", "synchronous": "synchronous",
+            "noaccel": "no_accel", "lut": "lookup"}.get(ra_mode)
+    lut_points = None
     if mode is None:
         errors.append(f"unsupported: Raw Accel mode {_short(ra_mode)} has no maccel equivalent "
-                      "(supported: classic, natural, synchronous, noaccel)")
+                      "(supported: classic, natural, synchronous, lut, noaccel)")
     elif mode == "linear":
         if vals["exponentClassic"] != 2:
             errors.append(f"unsupported: classic exponent {vals['exponentClassic']} (maccel linear is exponent 2)")
@@ -866,11 +1015,26 @@ def rawaccel_to_maccel(settings, profile_name=None):
         errors.append("unsupported: natural with Gain off (maccel natural is the gain form)")
     elif mode == "synchronous" and gain:
         errors.append("unsupported: synchronous with Gain on (maccel synchronous is the sensitivity form)")
+    elif mode == "lookup":
+        if gain:
+            errors.append("unsupported: lut with Gain on (Velocity mode); Custom curves require Sensitivity mode (Gain off)")
+        else:
+            raw_data = ax.get("data")
+            if not isinstance(raw_data, list) or len(raw_data) % 2 != 0:
+                errors.append(f"unsupported: lut data must contain x, y pairs (got {_short(raw_data)})")
+            else:
+                pairs = [[raw_data[i], raw_data[i + 1]] for i in range(0, len(raw_data), 2)]
+                try:
+                    lut_points = validate_lut_points(pairs, label="argsX.data")
+                except RawAccelExportError as exc:
+                    errors.extend(exc.errors)
     if errors:
         raise RawAccelExportError(errors)
 
     cfg = {"MODE": mode, "SENS_MULT": out_dpi / NORMALIZED_DPI, "YX_RATIO": yx, "ANGLE_ROTATION": rot,
            "INPUT_DPI": dpi if dpi > 0 else NORMALIZED_DPI, "OUTPUT_CAP": cap["y"]}
+    if lut_points is not None:
+        cfg["LUT_POINTS"] = lut_points
     if dpi <= 0:
         notes.append("device DPI 0 (no normalization) is equivalent to maccel INPUT_DPI 1000")
     for p, f in ARGS_FIELD.items():
@@ -939,6 +1103,15 @@ def edge_speeds(cfg):
         if edge < 700:
             around(sync * math.exp(edge))
             around(sync * math.exp(-edge))
+    if mode == "lookup":
+        lut = cfg["LUT_POINTS"]
+        for i, (kx, _) in enumerate(lut):
+            around(kx)
+            if i + 1 < len(lut):
+                pts.append(0.5 * (kx + lut[i + 1][0]))
+        if lut[0][0] > SPEED_MIN:
+            pts.append(0.5 * (SPEED_MIN + lut[0][0]))
+        pts.extend((lut[-1][0] + 1.0, lut[-1][0] * 1.5))
     return sorted(x for x in set(pts) if SPEED_MIN <= x <= SPEED_MAX)
 
 
@@ -1336,7 +1509,10 @@ def import_document(data, profile_name=None):
     if "params" in obj and "mode" in obj:  # mousetool.py maccel_state() / GET /api/maccel
         if not isinstance(obj["params"], dict):
             raise RawAccelExportError("maccel state 'params' must be an object")
-        cfg = normalize_maccel({"MODE": obj["mode"], **obj["params"]})
+        merged = {"MODE": obj["mode"], **obj["params"]}
+        if obj.get("lut_points") is not None:
+            merged["LUT_POINTS"] = obj["lut_points"]
+        cfg = normalize_maccel(merged)
         return cfg, {"source": "maccel-state", "lossy": [], "notes": []}
     merged, defaulted = with_defaults(obj)
     cfg = normalize_maccel(merged)
@@ -1347,7 +1523,7 @@ def import_document(data, profile_name=None):
 # ----------------------------------------------------------------------------- CLI
 
 def parse_set(items):
-    """Parse KEY=VAL overrides (MODE stays a string, others become floats)."""
+    """Parse KEY=VAL overrides (MODE stays a string, LUT_POINTS parses pairs, others become floats)."""
     out = {}
     for item in items or []:
         if "=" not in item:
@@ -1356,6 +1532,9 @@ def parse_set(items):
         k = k.upper()
         if k == "MODE":
             out[k] = v
+            continue
+        if k == "LUT_POINTS":
+            out[k] = parse_lut_points_arg(v)
             continue
         try:
             out[k] = float(v)
@@ -1371,6 +1550,9 @@ def format_preview(cfg, settings, mapping, check):
     for r in mapping["params"]:
         lines.append(f"  {r['param']:<{w}}  {r['value']:<10g} -> {r['field']} = {r['rawaccel_value']:g}  "
                      f"[{r['status']}]" + (f"  {r['note']}" if r.get("note") else ""))
+    if cfg.get("MODE") == "lookup" and "LUT_POINTS" in cfg:
+        pts = cfg["LUT_POINTS"]
+        lines.append(f"  {'LUT_POINTS':<{w}}  {len(pts)} pts      -> argsX.data ({len(pts) * 2} floats)  [exact]")
     if mapping["lossy"]:
         lines += ["", "Lossy:"] + [f"  - {s}" for s in mapping["lossy"]]
     lines += ["", "Unsupported (not exported):"] + [f"  - {s}" for s in mapping["unsupported"]]
@@ -1444,7 +1626,11 @@ def resolve_config(args, live_loader=None):
         cfg = dict(DEFAULTS)
         notes.append("no --input/--live given: parameters not set with --set use the app defaults")
     over = parse_set(args.set)
-    return normalize_maccel({**cfg, **over}), notes
+    merged = {**cfg, **over}
+    if merged.get("MODE") == "lookup" and "LUT_POINTS" not in merged:
+        merged["LUT_POINTS"] = default_lut_points()
+        notes.append("MODE=lookup without LUT_POINTS: used default flat 1.0x table")
+    return normalize_maccel(merged), notes
 
 
 def main(argv=None, live_loader=None, stdout=None, prog="rawaccel_export.py"):
