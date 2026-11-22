@@ -30,7 +30,6 @@ Supported protocols:
 import argparse
 import contextlib
 import hashlib
-import fcntl
 import glob
 import http.client
 import json
@@ -48,6 +47,10 @@ import threading
 import time
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+
+if sys.platform != "win32":
+    import fcntl
 
 import desktop_pointer
 from desktop_pointer import NIRI_CONFIG, desktop_state, niri_set, niri_state
@@ -4443,6 +4446,20 @@ def _api_battery_state():
 
 def serve(args):
     global BATTERY_WATCHER
+    if sys.platform == "win32":
+        from windows_accel import WindowsRoutes, WindowsAccel
+
+        class WindowsApi(WindowsRoutes, Api):
+            pass
+
+        with ThreadingHTTPServer(("127.0.0.1", args.port), WindowsApi) as srv:
+            srv.acceleration = WindowsAccel(Path(os.environ["LOCALAPPDATA"]) / "mousetool/state")
+            url = f"http://127.0.0.1:{srv.server_port}/"
+            print(f"mousetool listening on {url}", flush=True)
+            if not args.no_browser:
+                os.startfile("microsoft-edge:" + url)
+            srv.serve_forever()
+        return
     srv = ThreadingHTTPServer(("127.0.0.1", args.port), Api)
     owner = None
     if not getattr(args, "no_battery_watch", False):
@@ -4561,6 +4578,7 @@ def main():
     s = sub.add_parser("serve"); s.add_argument("--port", type=int, default=SERVICE_PORT)
     s.add_argument("--no-battery-watch", action="store_true",
                    help="don't poll the mouse battery or send low-battery notifications")
+    s.add_argument("--no-browser", action="store_true", help="skip opening Edge on Windows")
     s.set_defaults(fn=serve)
     o = sub.add_parser("open"); o.set_defaults(fn=open_ui)
 
