@@ -85,8 +85,41 @@ function paintLog() {
   el.textContent = logLines.join("\n");
   if (atBottom) el.scrollTop = el.scrollHeight;
 }
-$("logCopy").addEventListener("click", () => navigator.clipboard?.writeText(logLines.join("\n")).then(() => toast("Log copied")));
+$("logCopy").addEventListener("click", () => copyText(logLines.join("\n")).then(() => toast("Log copied")));
 $("logClear").addEventListener("click", () => { logLines.length = 0; paintLog(); });
+$("protocolLogDetails")?.addEventListener("toggle", () => { if ($("protocolLogDetails").open) paintLog(); });
+
+async function copyText(text) {
+  if (navigator.clipboard?.writeText) {
+    try { await navigator.clipboard.writeText(text); return true; } catch {}
+  }
+  const ta = document.createElement("textarea");
+  ta.value = text;
+  ta.style.cssText = "position:fixed;left:-9999px;top:0;opacity:0";
+  document.body.appendChild(ta);
+  ta.select();
+  let ok = false;
+  try { ok = document.execCommand("copy"); } catch {}
+  ta.remove();
+  return ok;
+}
+
+document.addEventListener("click", (e) => {
+  const btn = e.target.closest(".setup-copy[data-copy]");
+  if (!btn) return;
+  const cmd = btn.dataset.copy || "";
+  copyText(cmd).then((ok) => {
+    const prev = btn.dataset.label || btn.textContent || "Copy";
+    btn.dataset.label = prev;
+    clearTimeout(btn._copyT);
+    btn.textContent = ok ? "Copied" : "Copy failed";
+    btn.classList.toggle("copied", ok);
+    btn._copyT = setTimeout(() => {
+      btn.textContent = prev;
+      btn.classList.remove("copied");
+    }, 1800);
+  });
+});
 
 let toastT;
 function toast(msg, err = false) {
@@ -193,7 +226,7 @@ function render(key) {
         $("dpiNowRow").hidden = !s.caps.dpi;
       }
       if (key === "compxAll") {
-        $("stagesHint").textContent = `Click a stage to make it active · up to ${s.caps.maxStages} · ${s.caps.dpiMin}–${s.caps.dpiMax.toLocaleString()}`;
+        $("stagesHint").textContent = `Click a stage to select it · up to ${s.caps.maxStages} · ${s.caps.dpiMin}–${s.caps.dpiMax.toLocaleString()}`;
       }
     }
     return;
@@ -238,14 +271,12 @@ function buildPollButtons() {
   const ro = !!s?.caps?.pollReadonly;
   $("poll").innerHTML = pollRates.map((hz) => `<button data-hz="${hz}"${ro ? " disabled" : ""}>${fmtHz(hz)}</button>`).join("");
   $("pollHint").textContent = ro
-    ? "Current hardware polling rate (read-only over USB HID; change with the mouse's physical button)."
+    ? "Set using the physical button on your mouse."
     : s?.driver === "egg"
-    ? "High-speed USB polling (1k–8k Hz) stored on the mouse."
+    ? "Higher values feel smoother (1k–8k Hz)."
     : s?.caps?.hyper
-    ? "How often the mouse reports its position (Hz). Above 1k costs battery and some CPU; 2k–4k is the sweet spot."
-    : s?.driver === "hidpp"
-    ? "USB / wireless report rate via Logitech HID++."
-    : "How often the mouse reports its position (Hz).";
+    ? "Higher values feel smoother. Above 1k uses more battery; 2k–4k is a good balance."
+    : "How often the mouse updates your PC.";
 }
 function renderPoll() {
   const hz = activeS().poll;
@@ -261,9 +292,9 @@ function renderBattery() {
   const pct = activeS().battery, ch = activeS().charging;
   if (!s?.caps?.wireless && pct == null) {
     $("hBatt").innerHTML = s?.tier === 0 ? "N/A" : "Wired";
-    $("hBattS").textContent = s?.tier === 0 ? "Pointer only" : "";
+    $("hBattS").textContent = s?.tier === 0 ? "Standard" : "";
     $("hBattCells").innerHTML = "";
-    $("chargeVal").textContent = s?.tier === 0 ? "No vendor telemetry (Tier 0)" : "USB powered (no battery)";
+    $("chargeVal").textContent = s?.tier === 0 ? "No battery data reported" : "USB powered (no battery)";
     return;
   }
   if (pct != null) {
@@ -318,8 +349,8 @@ function renderLod() {
     $("lodEgg").hidden = false;
     const opts = (s.info.lodGlass && activeS().egg?.glassMode) ? EGG_GLASS_LOD : s.info.lodOptions;
     $("lodDesc").textContent = s.info.lodGlass && activeS().egg?.glassMode
-      ? "Sensor Glass Mode is enabled — Lift-off distance uses Glass Mode options."
-      : "Sensor lift-off height stored on the mouse.";
+      ? "Glass Mode is on — choose a glass-pad lift-off height."
+      : "How high you can lift the mouse before tracking pauses.";
     $("lodEgg").innerHTML = opts.map((lbl, idx) =>
       `<button data-egg-lod="${idx}" class="${lod.index === idx ? "sel" : ""}">${lbl}</button>`
     ).join("");
@@ -328,8 +359,8 @@ function renderLod() {
   $("lodEgg").hidden = true;
   $("lodMode").hidden = !s.caps.lodAsync;
   $("lodDesc").textContent = s.caps.lodAsync
-    ? "How high you can lift the mouse before it stops tracking. Asymmetric sets lift-off and landing separately (step 1–26, higher = taller distance, Lift-off > Landing)."
-    : "How high you can lift the mouse before tracking stops.";
+    ? "How high you can lift the mouse before tracking pauses. Asymmetric lets you set lift and landing heights separately."
+    : "How high you can lift the mouse before tracking pauses.";
   const mode = (s.caps.lodAsync && s.lodDraft) ? "async" : lod.mode;
   for (const b of $("lodMode").children) b.classList.toggle("sel", b.dataset.mode === mode);
   $("lodLevel").hidden = mode !== "preset";
@@ -670,7 +701,7 @@ function renderButtons() {
   $("btnUnavailable").hidden = hasBtns;
   $("btnFootnote").hidden = !hasBtns;
   $("btnGroupTitle").textContent = hasBtns ? "Button mapping" : "Live input tester";
-  $("btnGroupNote").textContent = hasBtns ? "Stored on the mouse, works without this page" : "Test buttons, scroll, and keys on any connected mouse";
+  $("btnGroupNote").textContent = hasBtns ? "Saved on your mouse — works everywhere" : "Test clicks, side buttons, and scrolling on any mouse";
   if (!hasBtns) {
     wrap.innerHTML = "";
     for (const hs of document.querySelectorAll(".mousefig .hs")) {
@@ -744,8 +775,8 @@ $("btnLayer").addEventListener("click", async (e) => {
   s.btnLayer = layer;
   for (const x of $("btnLayer").children) x.classList.toggle("sel", +x.dataset.layer === layer);
   $("btnFootnote").textContent = layer === 0
-    ? "Primary click is locked so you can't lose clicking. Every change is read back, so the list always shows what the mouse actually has."
-    : "HyperShift layer is active while holding a button mapped to HyperShift. Left click can be remapped here.";
+    ? "Primary click stays locked so you can't lock yourself out. Every change is saved to the mouse."
+    : "Active while holding a button set to HyperShift. Left click can be remapped here.";
   await loadButtons(s);
 });
 
@@ -866,7 +897,7 @@ $("btnResetAll").addEventListener("click", async () => {
     e.stopPropagation();
     meter.resetStats();
     val.innerHTML = `–<small>Hz</small>`;
-    stats.textContent = "Move pointer continuously inside this pad · Peak: – Hz";
+    stats.textContent = "Move cursor here · Peak: – Hz";
   });
 })();
 
@@ -1024,14 +1055,23 @@ function applySessionChrome() {
 
   $("model").textContent = s.name;
   $("protoName").textContent = s.protoLabel;
-  const evNote = tier === 0
-    ? "Zero vendor HID commands sent"
+  const plainTier = tier === 0
+    ? "Standard mouse (Tier 0)"
     : tier === 1
-    ? "Reviewed read-only getters only (writes blocked at dispatch)"
+    ? "Read-only (Tier 1)"
+    : "Full control (Tier 2)";
+  const evNote = tier === 0
+    ? "No vendor HID commands sent"
+    : tier === 1
+    ? "Reviewed read-only getters only; writes blocked at dispatch"
     : s.evidenceStatus === "hardware_verified"
-    ? "Hardware-verified operations"
+    ? "Hardware-verified profile"
     : "Legacy documented profile (migrated from baseline)";
-  $("supportTier").textContent = `${tLabel} — ${evNote}`;
+  $("supportTier").textContent = plainTier;
+  if ($("techProvenance")) {
+    const rawNote = s.caps.statusNote ? ` · ${s.caps.statusNote}` : "";
+    $("techProvenance").textContent = `${tLabel} — ${evNote}${rawNote}`;
+  }
   $("link").textContent = s.link;
   $("usbid").textContent = `${hex4(s.vid)}:${hex4(s.pid)}`;
   $("fw").textContent = s.fw ?? "–";
@@ -1039,9 +1079,14 @@ function applySessionChrome() {
   $("hidCols").textContent = s.collectionsText;
   $("factoryResetBtn").hidden = !s.caps.factoryReset || !s.writeEnabled;
 
-  $("statusNote").hidden = !s.caps.statusNote;
+  const friendlyNotice = tier === 0
+    ? "Standard mouse mode — Mouse Tool won't change onboard settings on this mouse. You can still test polling rate, buttons, and acceleration."
+    : tier === 1
+    ? `Read-only mode — viewing live DPI and firmware for ${s.name}. Changes stay locked for safety.`
+    : (s.caps.statusNote || "");
+  $("statusNote").hidden = !friendlyNotice;
   $("statusNote").className = "accelnotice" + (tier === 0 ? " tier-0" : tier === 1 ? " tier-1" : "");
-  $("statusNote").textContent = s.caps.statusNote || "";
+  $("statusNote").textContent = friendlyNotice;
 
   $("hLink").textContent = s.link;
   $("hLinkS").textContent = s.fw && s.fw !== "–" ? `${s.name} · ${s.fw}` : s.name;
@@ -1054,13 +1099,13 @@ function applySessionChrome() {
   $("splitXYWrap").hidden = !s.caps.splitXY;
   if (!s.caps.splitXY) $("splitXY").checked = false;
   $("stagesNote").textContent = s.driver === "egg"
-    ? "Cycle stages (up to 4) with the underside CPI button — live changes appear instantly"
-    : "The DPI button on the mouse cycles through these";
-  $("stagesHint").textContent = `Click a stage to make it active · up to ${s.caps.maxStages} · ${s.caps.dpiMin}–${s.caps.dpiMax.toLocaleString()}`;
+    ? "Underside button cycles up to 4 stages"
+    : "Your mouse's DPI button cycles through these";
+  $("stagesHint").textContent = `Click a stage to select it · up to ${s.caps.maxStages} · ${s.caps.dpiMin}–${s.caps.dpiMax.toLocaleString()}`;
   $("dpiNow").min = s.caps.dpiMin; $("dpiNow").max = s.caps.dpiMax; $("dpiNow").step = s.caps.dpiStepLo;
   $("dpiNowY").min = s.caps.dpiMin; $("dpiNowY").max = s.caps.dpiMax; $("dpiNowY").step = s.caps.dpiStepLo;
   if (isReadonlyDpi) {
-    $("roDpiNote").textContent = `Live X/Y sensor readout (${s.caps.dpiMin}–${s.caps.dpiMax.toLocaleString()} DPI) via 0xff getter — writes blocked at dispatch`;
+    $("roDpiNote").textContent = `Live sensor readout (${s.caps.dpiMin}–${s.caps.dpiMax.toLocaleString()} DPI) — editing is locked for safety`;
   }
 
   $("idleRow").hidden = !s.caps.powerTune;
@@ -1073,19 +1118,19 @@ function applySessionChrome() {
   $("low").max = s.caps.lowMax ?? 100;
   $("low").step = s.caps.lowStep ?? 5;
   $("powerNote").textContent = s.caps.powerTune
-    ? (s.info.prio === 0 ? "Wireless settings (saved on mouse even over cable)" : "Wireless")
-    : s.caps.batteryRead ? "Battery telemetry (read-only)"
-    : tier === 0 ? "Pointer only — no vendor battery telemetry"
-    : "Wired / no battery reported";
+    ? "Saved on your mouse"
+    : s.caps.batteryRead ? "Battery status"
+    : tier === 0 ? "No battery data reported by this mouse"
+    : "Wired mouse (no battery)";
 
   $("dongleTab").hidden = !s.caps.dongle;
   if (!s.caps.dongle && activeTab === "dongle") showTab("perf");
 
   $("appFoot").textContent = tier === 0
-    ? "Tier 0 · Pointer only. Zero vendor HID reports are sent to this device."
+    ? "Standard mouse mode — onboard settings are left untouched."
     : tier === 1
-    ? "Tier 1 · Read-only. Only reviewed firmware and X/Y DPI getters are active; all writes are blocked at dispatch."
-    : "Changes are written to the mouse straight away and read back to confirm. Settings re-sync every 10 s and when you come back to the window.";
+    ? "Read-only mode — viewing live DPI and firmware without changing mouse settings."
+    : "Changes save directly to your mouse and stay in sync automatically.";
 
   buildPollButtons();
   renderDpi();
@@ -1109,7 +1154,9 @@ function renderFleet() {
   for (const s of sessions.values()) {
     const vk = vpKey(s.vid, s.pid);
     openCounts.set(vk, (openCounts.get(vk) || 0) + 1);
-    const dpiStr = s.S.dpi ? `${s.S.dpi[0]} DPI` : "—";
+    const dpiStr = s.S.dpi
+      ? (s.S.dpi[0] === s.S.dpi[1] ? `${s.S.dpi[0]} DPI` : `${s.S.dpi[0]}×${s.S.dpi[1]} DPI`)
+      : "—";
     const pollStr = s.S.poll ? `${fmtHz(s.S.poll)}Hz` : "";
     const battStr = s.S.battery != null ? `${Math.round(s.S.battery)}%` : "";
     const meta = [dpiStr, pollStr, battStr].filter(Boolean).join(" · ") || s.link;
@@ -1129,7 +1176,7 @@ function renderFleet() {
     const c = openCounts.get(key) || 0;
     if (c > 0) { openCounts.set(key, c - 1); continue; }
     cards.push(`
-      <div class="mcard sys" data-sys="${key}" data-driver="${m.driver}" tabindex="0" role="button" title="Detected via Linux sysfs — click to grant browser WebHID access">
+      <div class="mcard sys" data-sys="${key}" data-driver="${m.driver}" tabindex="0" role="button" title="Detected on this PC — click to connect">
         <div class="mcard-top"><i class="mcard-dot"></i><span class="mcard-name">${m.name}</span></div>
         <div class="mcard-sub"><span class="mcard-tag">${m.driver}</span><span>Detected · Click to connect</span></div>
       </div>`);
@@ -1717,8 +1764,8 @@ function renderBatteryNotify() {
   box.disabled = batteryNotifyLoading || batteryNotifySaving || !batteryNotify;
   box.checked = !!batteryNotify?.enabled;
   $("notifyDesc").textContent = batteryNotifyLoading ? "Loading notification settings…" : batteryNotify
-    ? `The local helper warns you at ${batteryNotify.low}% and again at ${batteryNotify.critical}%, even with this window closed.`
-    : "Needs the local helper on 127.0.0.1:8766 (mousetool.service), which reads the battery and sends the warnings.";
+    ? `Sends a desktop alert at ${batteryNotify.low}% and ${batteryNotify.critical}% battery, even when this page is closed.`
+    : "Start the Mouse Tool background helper to receive low-battery alerts.";
 }
 async function loadBatteryNotify() {
   if (batteryNotifySaving) return;

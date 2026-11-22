@@ -1,7 +1,9 @@
 // Localhost helper API client (127.0.0.1:8766 or current loopback origin)
 
 export const HELPER =
-  location.protocol === "http:" && (location.hostname === "127.0.0.1" || location.hostname === "localhost")
+  typeof location !== "undefined" &&
+  location.protocol === "http:" &&
+  (location.hostname === "127.0.0.1" || location.hostname === "localhost")
     ? location.origin
     : "http://127.0.0.1:8766";
 

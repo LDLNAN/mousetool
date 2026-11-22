@@ -77,25 +77,47 @@ These images come from a synthetic fixture, not from a real device or session: a
   - `open`: Launches the local UI (`http://127.0.0.1:8766/`) in a WebHID-capable browser (`brave`, `chromium`, or `google-chrome`), falling back to `xdg-open` if none is installed.
 - **Diagnostics (`tools/probe.py`)**: Reads device state by default and scans all connected HID mice (`Razer`, `Endgame Gear 8k / -we`, `Logitech HID++`, `Pulsar`, `CompX ODM`, `Glorious`, and generic mice) by protocol. The opt-in `--roundtrip-stages` check writes the current Razer DPI stages back to the mouse and reads them again.
 
-## Setup
+## Quick Start
 
-### 1. Desktop launcher & background helper service
-Run `./install.sh` (or `./platform/linux/install.sh`) to install `platform/linux/mousetool.desktop` (`~/.local/share/applications/`) and enable the `platform/linux/mousetool.service` systemd user service (`mousetool.py serve` on `127.0.0.1:8766`):
+### Linux (1–2 steps)
+
+1. **Install the app, background helper, and mouse permissions:**
+   ```bash
+   ./install.sh --udev
+   ```
+   *(Omit `--udev` if you only want the launcher and helper without root prompts.)*
+2. **Open Mouse Tool** from your app menu or run:
+   ```bash
+   ./mousetool.py open
+   ```
+   *(Optional — for custom mouse acceleration curves, install `mouseaccel` and run `./install.sh --mouseaccel-perms && sudo usermod -aG mouseaccel "$USER"`, then log out and back in. The **Acceleration** tab also walks you through this step by step with copyable commands and a live status check.)*
+
+### Windows 11 (2 steps)
+
+Requires 64-bit Python 3.10+ and Microsoft Edge.
+
+1. **Install Raw Accel** (optional, for mouse acceleration): download the latest v1.7.x release from [Raw Accel Releases](https://github.com/RawAccelOfficial/rawaccel/releases), run `installer.exe`, restart Windows, and unzip the folder.
+2. **Install Mouse Tool** from PowerShell (normal user, no admin required):
+   ```powershell
+   powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -RawAccelDir "$env:USERPROFILE\Downloads\RawAccel_v1.7.1\RawAccel"
+   ```
+   Then open **mousetool** from the Start menu. If Raw Accel isn't set up yet, the **Acceleration** tab shows a guided checklist with a direct download link and a **Check again** button.
+
+---
+
+## Detailed Setup & Permissions
+
+### Linux: Desktop launcher, udev rules & kernel acceleration
+`./install.sh` (or `./platform/linux/install.sh`) installs `platform/linux/mousetool.desktop` (`~/.local/share/applications/`) and enables `platform/linux/mousetool.service` (`mousetool.py serve` on `127.0.0.1:8766`):
 ```bash
 ./install.sh
-# Or also install/update udev rules (prompts for sudo):
+# Also install/update udev rules for browser mouse access (prompts for sudo):
 ./install.sh --udev
 ```
 
-### 2. Udev rules (for WebHID & non-root hidraw access)
-If upgrading from an older version, reinstall `platform/linux/60-mousetool.rules` to pick up all newly supported vendor rules:
-```bash
-sudo cp platform/linux/60-mousetool.rules /etc/udev/rules.d/
-sudo udevadm control --reload-rules && sudo udevadm trigger
-```
+If upgrading from an older version, rerun `./install.sh --udev` (or copy `platform/linux/60-mousetool.rules` to `/etc/udev/rules.d/` and reload udev) to pick up newly supported mice.
 
-### 3. Kernel acceleration write permissions (optional, for Acceleration tab)
-For `mouseaccel`, create its group and install its udev rule and helper, then add yourself to the group and log out/in:
+For `mouseaccel` acceleration permissions, create its group and udev helper, then add your user to the group and log out/in:
 ```bash
 ./install.sh --mouseaccel-perms
 sudo usermod -aG mouseaccel "$USER"
