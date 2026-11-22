@@ -20,6 +20,7 @@ EXPECTED_ASSETS = [
     ("/app.js", "text/javascript; charset=utf-8"),
     ("/accel_graph.js", "text/javascript; charset=utf-8"),
     ("/helper_client.js", "text/javascript; charset=utf-8"),
+    ("/polling_meter.js", "text/javascript; charset=utf-8"),
     ("/drivers/common.js", "text/javascript; charset=utf-8"),
     ("/drivers/registry.js", "text/javascript; charset=utf-8"),
     ("/drivers/classifier.js", "text/javascript; charset=utf-8"),

@@ -29,6 +29,7 @@ import {
   makePulsarXs1Api,
 } from "./drivers/pulsar.js";
 import { makeRazerApi } from "./drivers/razer.js";
+import { createPollingMeter } from "./polling_meter.js";
 import {
   getSupportedFilters,
   loadRegistry,
@@ -841,40 +842,31 @@ $("btnResetAll").addEventListener("click", async () => {
 // live polling rate meter (universal across any mouse)
 (() => {
   const box = $("hzBox"), val = $("hzVal"), stats = $("hzStats");
-  let lastTs = null, emaHz = 0, peakHz = 0, samples = 0, active = false, decayT = null;
-  function record(ts) {
-    if (lastTs != null) {
-      const dt = ts - lastTs;
-      if (dt > 0.08 && dt < 120) {
-        const inst = 1000 / dt;
-        emaHz = emaHz ? emaHz * 0.85 + inst * 0.15 : inst;
-        if (samples > 10 && emaHz > peakHz) peakHz = emaHz;
-        samples++;
-        val.innerHTML = `${Math.round(emaHz)}<small>Hz</small>`;
-        stats.textContent = `Interval: ${dt.toFixed(2)} ms · Peak: ${Math.round(peakHz)} Hz · ${samples} events`;
-      }
-    }
-    lastTs = ts;
-    clearTimeout(decayT);
-    decayT = setTimeout(() => { lastTs = null; box.classList.remove("on"); }, 350);
+  const meter = createPollingMeter();
+  let active = false, decayT = null;
+  function renderMeter(st) {
+    if (!st.ready) return;
+    val.innerHTML = `${Math.round(st.hz)}<small>Hz</small>`;
+    const peakStr = st.peakHz > 0 ? `${Math.round(st.peakHz)} Hz` : "– Hz";
+    stats.textContent = `Interval: ${st.avgIntervalMs.toFixed(2)} ms · Peak: ${peakStr} · ${st.totalEvents} events`;
   }
-  const onMove = (e) => {
+  function onPointer(e, sourceKind) {
     if (!active) return;
     box.classList.add("on");
-    const evs = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
-    if (evs.length) {
-      for (const ce of evs) record(ce.timeStamp);
-    } else record(e.timeStamp);
-  };
-  box.addEventListener("pointerenter", () => { active = true; lastTs = null; });
-  box.addEventListener("pointerleave", () => { active = false; lastTs = null; box.classList.remove("on"); });
-  if ("onpointerrawupdate" in window) box.addEventListener("pointerrawupdate", onMove);
-  box.addEventListener("pointermove", onMove);
+    const st = meter.ingestPointerEvent(e, sourceKind);
+    renderMeter(st);
+    clearTimeout(decayT);
+    decayT = setTimeout(() => { meter.resetWindow(); box.classList.remove("on"); }, 350);
+  }
+  box.addEventListener("pointerenter", () => { active = true; meter.resetWindow(); });
+  box.addEventListener("pointerleave", () => { active = false; meter.resetWindow(); box.classList.remove("on"); });
+  if ("onpointerrawupdate" in window) box.addEventListener("pointerrawupdate", (e) => onPointer(e, "raw"));
+  box.addEventListener("pointermove", (e) => onPointer(e, "move"));
   $("hzReset").addEventListener("click", (e) => {
     e.stopPropagation();
-    lastTs = null; emaHz = 0; peakHz = 0; samples = 0;
+    meter.resetStats();
     val.innerHTML = `–<small>Hz</small>`;
-    stats.textContent = "Move pointer inside this pad · Peak: – Hz";
+    stats.textContent = "Move pointer continuously inside this pad · Peak: – Hz";
   });
 })();
 

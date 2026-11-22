@@ -267,14 +267,18 @@ function createAccelController({ $, getActiveDpi, isAccelTabActive, setState, to
         const pcx = g.px(pxVal), pcy = clampY(g.py(pPlotSx)), pcyY = clampY(g.py(pPlotSy));
         const pl = $("accelPeakLine");
         pl.setAttribute("x1", pcx.toFixed(1)); pl.setAttribute("x2", pcx.toFixed(1));
-        const d = 10;
+        const d = 8;
         $("accelPeakDot").setAttribute(
           "points",
           `${pcx.toFixed(1)},${(pcy - d).toFixed(1)} ${(pcx + d).toFixed(1)},${pcy.toFixed(1)} ${pcx.toFixed(1)},${(pcy + d).toFixed(1)} ${(pcx - d).toFixed(1)},${pcy.toFixed(1)}`
         );
         const pdY = $("accelPeakDotY");
         if (g.hasY) {
-          pdY.setAttribute("cx", pcx.toFixed(1)); pdY.setAttribute("cy", pcyY.toFixed(1));
+          const dy = 7;
+          pdY.setAttribute(
+            "points",
+            `${pcx.toFixed(1)},${(pcyY - dy).toFixed(1)} ${(pcx + dy).toFixed(1)},${pcyY.toFixed(1)} ${pcx.toFixed(1)},${(pcyY + dy).toFixed(1)} ${(pcx - dy).toFixed(1)},${pcyY.toFixed(1)}`
+          );
         }
         _svgShow(pdY, g.hasY);
         const pOver = $("accelPeakOver");
@@ -379,13 +383,16 @@ function createAccelController({ $, getActiveDpi, isAccelTabActive, setState, to
       g += `<line class="gridline" x1="${xx.toFixed(1)}" y1="${T}" x2="${xx.toFixed(1)}" y2="${H - B}"/>`;
       g += `<text class="ax" x="${xx.toFixed(1)}" y="${H - 10}" text-anchor="middle">${xv}</text>`;
     }
-    if (yMin <= 1 && 1 <= yMax) {
+    const hasBase = yMin <= 1 && 1 <= yMax;
+    if (hasBase) {
       g += `<line class="base" x1="${L}" y1="${py(1).toFixed(1)}" x2="${W - R}" y2="${py(1).toFixed(1)}"/>`;
     }
     const pathX = pts.map(([x, sx], i) => `${i ? "L" : "M"}${px(x).toFixed(1)},${py(sx).toFixed(1)}`).join(" ");
     const areaX = `${pathX} L${px(accelXMax).toFixed(1)},${py(yMin).toFixed(1)} L${L},${py(yMin).toFixed(1)} Z`;
     const hasY = Math.abs((accelDraft.YX_RATIO ?? 1) - 1) > 1e-4;
     $("accelLegendY").hidden = !hasY;
+    if ($("accelLegendBase")) $("accelLegendBase").hidden = !hasBase;
+    if ($("accelCurveMeta")) $("accelCurveMeta").classList.toggle("has-y", hasY);
     const pathY = hasY ? pts.map(([x, , sy], i) => `${i ? "L" : "M"}${px(x).toFixed(1)},${py(sy).toFixed(1)}`).join(" ") : "";
 
     g += `<path class="area-x" d="${areaX}"/>`;
@@ -398,7 +405,7 @@ function createAccelController({ $, getActiveDpi, isAccelTabActive, setState, to
     g += `<path class="line-x" d="${pathX}"/>`;
     g += `<g id="accelPeakGroup" style="display:none">`;
     g += `<line class="peak-line" id="accelPeakLine" x1="0" y1="${T}" x2="0" y2="${H - B}"/>`;
-    g += `<circle class="peak-dot-y" id="accelPeakDotY" cx="0" cy="0" r="6.5" style="display:none"/>`;
+    g += `<polygon class="peak-dot-y" id="accelPeakDotY" points="0,0" style="display:none"/>`;
     g += `<polygon class="peak-dot" id="accelPeakDot" points="0,0"/>`;
     g += `<g id="accelPeakOver" style="display:none"><rect class="over-pill" rx="3" x="0" y="0" width="44" height="15"/><text class="over-txt" x="0" y="0" text-anchor="end"></text></g>`;
     g += `</g>`;
@@ -682,7 +689,10 @@ function createAccelController({ $, getActiveDpi, isAccelTabActive, setState, to
         m.driver === "missing" ? "Install the Raw Accel driver manually (see README)." : ""
       ].filter(Boolean).join(" · ");
       $("accelLiveBadge").parentElement.hidden = true;
-      for (const marker of document.querySelectorAll(".legend .live, .legend .peak")) marker.parentElement.hidden = true;
+      for (const marker of document.querySelectorAll(".legend .live, .legend .peak")) {
+        const legend = marker.closest(".legend");
+        if (legend) legend.hidden = true;
+      }
       return;
     }
     el.title = !m ? "Kernel acceleration module (helper not reachable)"
