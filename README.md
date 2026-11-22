@@ -219,3 +219,25 @@ The curve check samples about 460 speeds from 1e-6 to 1e6 counts/ms, including p
 python3 -m unittest -v test_mousetool.py test_desktop_pointer.py test_rawaccel_export.py
 ```
 The suite requires no third-party Python packages. The JavaScript curve comparison skips when Node.js is unavailable. The Plasma command-line parser check skips when `busctl` is unavailable.
+
+### Windows 11 and Raw Accel
+
+Use 64-bit Python 3.10 or newer and Edge. Install the signed driver manually using the [Raw Accel release instructions](https://github.com/RawAccelOfficial/rawaccel/releases), reboot as instructed, and extract the 1.7.x application files. From the mousetool checkout run Windows PowerShell as your normal user:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -RawAccelDir "$env:USERPROFILE\Downloads\RawAccel_v1.7.1\RawAccel"
+```
+
+Open **mousetool** from Start, or run `python "$env:LOCALAPPDATA\mousetool\app\mousetool.py" serve`. Edge opens the localhost UI on port 8766. Use Connect to grant WebHID access to a supported mouse, or choose **Acceleration & desktop** to edit the driver curve without connecting a mouse.
+
+Saving replaces the default Raw Accel configuration. Mousetool checks the exported curve, writes it, waits for the driver, then compares the complete active configuration before saving it under `%LOCALAPPDATA%\mousetool\state`. The Startup shortcut reapplies that saved file at sign-in. Per-device profiles and custom timing settings require the Raw Accel GUI. Windows has no live speed feed in mousetool.
+
+To remove the app, select **Reset to no acceleration** if desired, close the server, and run:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\mousetool\app\install.ps1" -Uninstall
+```
+
+This removes the per-user shortcuts, app files and saved curve. Manage the driver separately using Raw Accel's instructions.
+
+For the hardware smoke test, use a separate app copy under `%USERPROFILE%\mousetool-test-scratch` with the three unblocked Raw Accel files in its `rawaccel` subdirectory. Close any server on port 8766, then run `python test-windows.py` from that copy. The script uses temporary per-user settings, tests apply and logon replay, then restores no acceleration and checks the complete driver readback. A successful run ends with `FINAL no acceleration verified`.

@@ -1128,7 +1128,7 @@ input[type=range]:focus-visible::-webkit-slider-thumb { border-color: var(--acce
     <div class="panel" data-panel="accel" hidden>
       <section class="group">
         <div class="ghead">
-          <span class="idx">06.1</span><h2>Kernel acceleration</h2>
+          <span class="idx">06.1</span><h2 id="accelHeading">Kernel acceleration</h2>
           <span class="accelbackend none" id="accelBackend" title="Kernel acceleration module"><i class="livedot"></i><span id="accelBackendName">mouseaccel / maccel</span></span>
           <span class="note">Applies before libinput and games (including raw input)</span>
           <div class="spacer"></div>
@@ -1142,6 +1142,7 @@ input[type=range]:focus-visible::-webkit-slider-thumb { border-color: var(--acce
         </div>
         <div class="accelnotice" id="accelPerm" hidden></div>
 
+        <div class="accelnotice" id="windowsAccel" hidden><span></span><div class="spacer"></div><button id="windowsReset">Reset to no acceleration</button></div>
         <div id="accelBody" hidden>
           <div class="setting">
             <div class="label"><b>Curve mode</b><p id="accelModeDesc">Choose how mouse speed scales sensitivity.</p></div>
@@ -4907,7 +4908,7 @@ slider("low", "low", "Low battery warning", (p) => `${p}%`, (p) => Math.max(0x0c
 // ======================================================================
 // acceleration (mouseaccel, or maccel legacy, + desktop pointer settings via local helper on 127.0.0.1:8766)
 // ======================================================================
-const HELPER = "http://127.0.0.1:8766";
+const HELPER = navigator.platform.startsWith("Win") && location.protocol === "http:" && location.hostname === "127.0.0.1" ? location.origin : "http://127.0.0.1:8766";
 const MACCEL_DEFAULTS = {
   MODE: "linear", SENS_MULT: 1, YX_RATIO: 1, INPUT_DPI: 1000, ANGLE_ROTATION: 0,
   ACCEL: 0, OFFSET: 0, OUTPUT_CAP: 0,
@@ -5397,7 +5398,7 @@ function disablePointerFallback() {
 }
 
 function shouldStreamMotion() {
-  return !document.hidden
+  return accelLive?.maccel?.backend?.name !== "rawaccel" && !document.hidden
     && activeTab === "accel"
     && !$("app").hidden
     && !$("accelBody").hidden
@@ -5587,6 +5588,21 @@ function renderAccelBackend(m) {
   el.classList.toggle("legacy", !!(b?.loaded && b.legacy));
   el.classList.toggle("none", !b?.loaded);
   $("accelBackendName").textContent = !m ? "mouseaccel / maccel" : (b.loaded ? (b.label || b.name) : "not loaded");
+  if (b?.name === "rawaccel") {
+    $("accelBackendName").textContent = b.label;
+    el.title = "Driver " + m.driver;
+    $("accelHeading").textContent = "Pointer acceleration";
+    el.nextElementSibling.textContent = "Applies to the default Raw Accel profile";
+    $("windowsAccel").hidden = false;
+    $("windowsReset").disabled = !m.loaded;
+    $("windowsAccel").firstElementChild.textContent = [
+      "Driver " + m.driver, m.saved_state, m.last_apply, m.message,
+      m.driver === "missing" ? "Install the Raw Accel driver manually (see README)." : ""
+    ].filter(Boolean).join(" · ");
+    $("accelLiveBadge").parentElement.hidden = true;
+    for (const marker of document.querySelectorAll(".legend .live, .legend .peak")) marker.parentElement.hidden = true;
+    return;
+  }
   el.title = !m ? "Kernel acceleration module (helper not reachable)"
     : b.loaded ? `Module ${b.name}${b.legacy ? " (legacy; mouseaccel replaces it)" : ""}\nParameters: ${b.params_path || "?"}\nSpeed device: ${b.speed_device || "?"}`
     : "Neither mouseaccel nor maccel is loaded";
@@ -5619,6 +5635,7 @@ async function loadAccel() {
       $("accelBody").hidden = true;
       $("accelPerm").hidden = false;
       $("accelPerm").className = "accelnotice bad";
+      $("accelPerm").hidden = b.name === "rawaccel";
       $("accelPerm").innerHTML = m?.loaded
         ? `<span>${accelModuleCode(b.name)} is loaded, but its curve parameters could not all be read. Refresh after restoring read access.</span>`
         : b.candidate
@@ -5648,7 +5665,16 @@ async function loadAccel() {
   } catch {
     $("accelOffline").hidden = false;
     $("accelPerm").hidden = true;
-    renderAccelBackend(null);
+    const windows = accelLive?.maccel?.backend?.name === "rawaccel";
+    if (windows) {
+      $("windowsAccel").hidden = true;
+      $("accelBackendName").textContent = "Raw Accel (Windows) · Offline";
+      $("accelBackend").classList.add("none");
+      $("accelBackend").title = "Driver state unavailable";
+      $("accelOffline").firstElementChild.textContent = "Local helper is offline. Open mousetool from Start and retry.";
+    } else {
+      renderAccelBackend(null);
+    }
     if (accelLive?.maccel) accelLive.maccel.writable = false;
     accelDraft ??= { ...MACCEL_DEFAULTS };
     $("accelBody").hidden = false;
@@ -5682,9 +5708,22 @@ $("accelRevert").addEventListener("click", () => {
   accelDraft = accelSnapshot(accelLive.maccel);
   renderAccelParams(); renderAccelCurve(); renderAccelDirty();
 });
+$("windowsReset").addEventListener("click", async () => {
+  if (!confirm("Replace the active Raw Accel configuration and saved curve with no acceleration?")) return;
+  try {
+    const res = await fetch(HELPER + "/api/accel?backend=rawaccel", {
+      method: "POST", headers: {"Content-Type": "application/json", "X-Mouse-Tool": "1"},
+      body: JSON.stringify({reset: true})
+    });
+    if (!res.ok) throw new Error((await res.json()).error);
+    accelDraft = null;
+  } catch (err) { toast(err.message, true); }
+  await loadAccel();
+});
 $("accelDefaults").addEventListener("click", () => {
   if (!accelLive?.maccel?.writable) return;
   accelDraft = { ...MACCEL_DEFAULTS };
+  if (accelDraftBackend === "rawaccel") Object.assign(accelDraft, {MODE: "no_accel", ACCEL: 0.005});
   renderAccelParams(); renderAccelCurve(); renderAccelDirty();
 });
 $("accelApply").addEventListener("click", async () => {
@@ -5714,6 +5753,7 @@ $("accelApply").addEventListener("click", async () => {
     setState("maccel", "saved");
     toast("Acceleration curve saved");
   } catch (err) {
+    if (backend === "rawaccel") await loadAccel();
     setState("maccel", "error", err.message);
     toast(err.message, true);
   }
