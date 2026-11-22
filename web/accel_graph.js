@@ -1,0 +1,905 @@
+// Acceleration curve math, SVG curve visualizer, live swipe telemetry & desktop pointer UI
+import {
+  fetchHelperStatus,
+  openHelperMotionStream,
+  postHelperAccel,
+  postHelperAccelReset,
+  postHelperDesktop,
+} from "./helper_client.js";
+
+const MACCEL_DEFAULTS = {
+  MODE: "linear", SENS_MULT: 1, YX_RATIO: 1, INPUT_DPI: 1000, ANGLE_ROTATION: 0,
+  ACCEL: 0, OFFSET: 0, OUTPUT_CAP: 0,
+  DECAY_RATE: 0.1, LIMIT: 1.5,
+  GAMMA: 1, SMOOTH: 0.5, MOTIVITY: 1.5, SYNC_SPEED: 5,
+};
+const MODE_DESCS = {
+  linear: "Sensitivity rises linearly above the speed offset, optionally capped at Output Cap.",
+  natural: "Logarithmic-like curve with smooth diminishing returns approaching the Limit multiplier.",
+  synchronous: "S-curve centered on Sync Speed, scaling smoothly between 1 / Motivity and Motivity.",
+  no_accel: "1:1 raw multiplier (SENS_MULT and Y/X ratio still apply).",
+};
+const MODE_PARAMS = {
+  linear: [
+    { k: "ACCEL", label: "Accel", min: 0, max: 1, step: 0.005, desc: "Slope of sensitivity increase per count/ms." },
+    { k: "OFFSET", label: "Offset", min: 0, max: 40, step: 0.25, desc: "Input speed (counts/ms) before acceleration begins." },
+    { k: "OUTPUT_CAP", label: "Output cap", min: 0, max: 10, step: 0.05, desc: "Max sensitivity multiplier (0 = uncapped)." },
+  ],
+  natural: [
+    { k: "DECAY_RATE", label: "Decay rate", min: 0.001, max: 2, step: 0.005, desc: "How quickly sensitivity approaches the limit." },
+    { k: "OFFSET", label: "Offset", min: 0, max: 40, step: 0.25, desc: "Input speed (counts/ms) before acceleration begins." },
+    { k: "LIMIT", label: "Limit", min: 1, max: 10, step: 0.05, desc: "Asymptote multiplier for high-speed movement." },
+  ],
+  synchronous: [
+    { k: "SYNC_SPEED", label: "Sync speed", min: 0.1, max: 40, step: 0.25, desc: "Midpoint speed where multiplier equals 1.0×." },
+    { k: "MOTIVITY", label: "Motivity", min: 1.01, max: 10, step: 0.05, desc: "Max multiplier (min multiplier is 1 / Motivity)." },
+    { k: "GAMMA", label: "Gamma", min: 0.05, max: 10, step: 0.05, desc: "Steepness around Sync Speed." },
+    { k: "SMOOTH", label: "Smooth", min: 0, max: 1, step: 0.02, desc: "Transition softness near min and max bounds." },
+  ],
+  no_accel: [],
+};
+const GLOBAL_ACCEL_PARAMS = [
+  { k: "SENS_MULT", label: "Sensitivity multiplier", min: 0.05, max: 5, step: 0.02, desc: "Overall post-curve multiplier." },
+  { k: "YX_RATIO", label: "Y / X ratio", min: 0.2, max: 3, step: 0.02, desc: "Vertical sensitivity relative to horizontal." },
+  { k: "INPUT_DPI", label: "Normalized DPI", min: 100, max: 35000, step: 50, desc: "Mouse DPI used by the kernel module to normalize speed to 1000 DPI." },
+  { k: "ANGLE_ROTATION", label: "Angle rotation (°)", min: -45, max: 45, step: 0.5, desc: "Rotates input movement vector in degrees." },
+];
+const ACCEL_MODULES = ["mouseaccel", "maccel"];
+
+function maccelEval(x, cfg) {
+  const m = cfg.MODE || "linear";
+  let s = 1;
+  if (m === "linear") {
+    const accel = cfg.ACCEL ?? 0, off = cfg.OFFSET ?? 0, cap = cfg.OUTPUT_CAP ?? 0;
+    if (x > off) {
+      let b = accel * ((x - off) * (x - off)) / x;
+      let sign = 1;
+      if (cap > 0) {
+        let c = cap - 1;
+        if (c < 0) { c = -c; sign = -1; }
+        b = Math.min(b, c);
+      }
+      s = 1 + sign * b;
+    }
+  } else if (m === "natural") {
+    const decay = cfg.DECAY_RATE ?? 0.1, off = cfg.OFFSET ?? 0, lim = cfg.LIMIT ?? 1.5;
+    if (x > off && lim > 1 && decay > 0) {
+      const l = lim - 1;
+      const a = decay / Math.abs(l);
+      const c = -l / a;
+      const ox = off - x;
+      const dec = Math.exp(a * ox);
+      const out = l * (dec / a - ox) + c;
+      s = out / x + 1;
+    }
+  } else if (m === "synchronous") {
+    const gamma = cfg.GAMMA ?? 1, smooth = cfg.SMOOTH ?? 0.5, mot = Math.max(1.0001, cfg.MOTIVITY ?? 1.5), sync = Math.max(0.0001, cfg.SYNC_SPEED ?? 5);
+    const logM = Math.log(mot), gc = gamma / logM, logS = Math.log(sync);
+    const sharp = smooth === 0 ? 16 : 0.5 / smooth;
+    if (sharp >= 16) {
+      const ls = Math.max(-1, Math.min(1, gc * (Math.log(Math.max(1e-6, x)) - logS)));
+      s = Math.exp(ls * logM);
+    } else if (Math.abs(x - sync) < 1e-9) {
+      s = 1;
+    } else {
+      const ld = Math.log(Math.max(1e-6, x)) - logS;
+      const sign = ld > 0 ? 1 : -1;
+      const ls = gc * Math.abs(ld);
+      const exp = sign * Math.pow(Math.tanh(Math.pow(ls, sharp)), 1 / sharp);
+      s = Math.exp(exp * logM);
+    }
+  }
+  const sx = s * (cfg.SENS_MULT ?? 1);
+  return [sx, sx * (cfg.YX_RATIO ?? 1)];
+}
+
+function accelSnapshot(m) {
+  return {
+    MODE: m?.mode || "linear",
+    ...Object.fromEntries(
+      Object.keys(MACCEL_DEFAULTS)
+        .filter((k) => k !== "MODE")
+        .map((k) => [k, +(m?.params?.[k] ?? MACCEL_DEFAULTS[k]).toFixed(6)])
+    ),
+  };
+}
+
+function accelBackendInfo(m) {
+  const b = m?.backend;
+  if (b && (b.name || b.candidate !== undefined || b.installed_backends)) return b;
+  return m?.loaded
+    ? { name: "maccel", label: "maccel (legacy)", legacy: true, loaded: true,
+        params_path: "/sys/module/maccel/parameters", speed_device: "/dev/maccel", also_loaded: [] }
+    : { name: null, label: null, loaded: false, candidate: m?.installed ? "maccel" : null, also_loaded: [] };
+}
+
+function accelModuleCode(name) {
+  const n = ACCEL_MODULES.includes(name) ? name : "mouseaccel";
+  return n === "maccel" ? "<code>maccel</code> (legacy)" : "<code>mouseaccel</code>";
+}
+
+function createAccelController({ $, getActiveDpi, isAccelTabActive, setState, toast, paintRanges, onSystemMice }) {
+  let accelLive = null;   // { maccel, desktop } from helper
+  let accelDraftBackend = null;
+  let accelDraft = null;  // working copy of mode + params
+  let accelXMax = 40;
+  let accelLoading = false;
+  let desktopSaving = false;
+
+  const accelMotion = {
+    es: null,
+    retryTimer: null,
+    statusTimer: null,
+    rafId: 0,
+    ptrRafId: 0,
+    ptrOn: false,
+    connected: false,
+    state: {
+      speed: 0, raw_speed: 0, peak: 0, peak_age_ms: 0, peak_hold_ms: 2800,
+      swipe_min: 0, swipe_max: 0, swipe_id: 0, active: false, dpi: 1000, source: "none", devices: 0,
+    },
+    ptr: { lastTs: 0, lastEv: 0, lastMot: 0, speed: 0, peak: 0, peakTs: 0, min: 0, max: 0, inSwipe: false, swipeId: 0 },
+  };
+
+  function _svgShow(el, on) {
+    if (el) el.style.display = on ? "" : "none";
+  }
+
+  function accelDirty() {
+    if (!accelLive?.maccel?.loaded || !accelDraft) return false;
+    const orig = accelSnapshot(accelLive.maccel);
+    return Object.keys(orig).some((k) => k === "MODE" ? orig[k] !== accelDraft[k] : Math.abs(orig[k] - accelDraft[k]) > 1e-5);
+  }
+
+  function renderAccelDirty() {
+    const d = accelDirty();
+    const canWrite = !!accelLive?.maccel?.writable;
+    $("accelDirty").hidden = !d;
+    $("accelRevert").hidden = !d;
+    $("accelApply").hidden = !d || !canWrite;
+  }
+
+  function setAccelLiveBadge(mode, text, title) {
+    const badge = $("accelLiveBadge");
+    const label = $("accelLiveSrc");
+    if (!badge || !label) return;
+    badge.className = "livebadge" + (mode ? ` ${mode}` : "");
+    label.textContent = text;
+    if (title) badge.title = title;
+  }
+
+  function _placeOverPill(grp, text, g, cy) {
+    const rect = grp.querySelector("rect");
+    const txt = grp.querySelector("text");
+    txt.textContent = text;
+    const w = Math.max(42, text.length * 6.2 + 10);
+    const h = 15;
+    const rx = g.W - g.R - w - 6;
+    const ry = Math.max(g.T + 2, Math.min(g.H - g.B - h - 2, cy - h / 2));
+    rect.setAttribute("x", rx.toFixed(1));
+    rect.setAttribute("y", ry.toFixed(1));
+    rect.setAttribute("width", w.toFixed(1));
+    rect.setAttribute("height", h);
+    txt.setAttribute("x", (rx + w - 4).toFixed(1));
+    txt.setAttribute("y", (ry + 10.5).toFixed(1));
+    _svgShow(grp, true);
+    return ry;
+  }
+
+  function renderAccelLiveOverlay() {
+    const svg = $("accelSvg");
+    const g = svg?._geom;
+    if (!g || !accelDraft || !accelMotion) return;
+
+    const st = accelMotion.state;
+    const isPtr = st.source === "pointer";
+    const streamDpi = st.dpi > 0 ? st.dpi : 1000;
+    const draftDpi = accelDraft.INPUT_DPI > 0 ? accelDraft.INPUT_DPI : streamDpi;
+    const dpiScale = streamDpi / draftDpi;
+    if (isPtr || st.source === "maccel" || !accelMotion.connected) {
+      for (const id of ["accelSwipeGroup", "accelPeakGroup", "accelLiveGroup"]) {
+        _svgShow($(id), false);
+      }
+      let text = "Awaiting motion source";
+      if (isPtr) {
+        text = `Approx. window motion · Now ${st.speed.toFixed(1)} · Peak ${st.peak.toFixed(1)} browser units/ms`;
+      } else if (st.source === "maccel" && accelMotion.connected) {
+        const last = Number.isFinite(st.last_speed) ? (st.last_speed * dpiScale).toFixed(1) + " c/ms" : "—";
+        text = `Last ${ACCEL_MODULES.includes(st.backend) ? st.backend : "kernel"} value ${last} · Motion timing unknown`;
+      }
+      $("accelLiveReadout").textContent = text;
+      return;
+    }
+
+    const speed = Math.max(0, (st.speed || 0) * dpiScale);
+    const peak = Math.max(0, (st.peak || 0) * dpiScale);
+    const swipeMin = Math.max(0, (st.swipe_min || 0) * dpiScale);
+    const swipeMax = Math.max(0, (st.swipe_max || 0) * dpiScale);
+
+    const [nowSx, nowSy] = maccelEval(Math.max(0.05, speed), accelDraft);
+    const hasPeak = peak > 0.05;
+    const [peakSx, peakSy] = hasPeak ? maccelEval(Math.max(0.05, peak), accelDraft) : [0, 0];
+    const clampY = (y) => Math.max(g.T, Math.min(g.H - g.B, y));
+
+    const holdMs = st.peak_hold_ms || 2800;
+    const remMs = Math.max(0, holdMs - (st.peak_age_ms || 0));
+    const fade = st.active ? 1 : Math.max(0.18, Math.min(1, remMs / 500));
+
+    // Swipe band + highlighted curve segment
+    const swipeGrp = $("accelSwipeGroup");
+    if (swipeGrp) {
+      if (hasPeak) {
+        const lo = Math.min(accelXMax, Math.max(0, Math.min(swipeMin, peak)));
+        const hi = Math.min(accelXMax, Math.max(lo, Math.max(swipeMax, peak)));
+        const x1 = g.px(lo), x2 = g.px(hi);
+        const band = $("accelSwipeBand");
+        band.setAttribute("x", x1.toFixed(1));
+        band.setAttribute("width", Math.max(2, x2 - x1).toFixed(1));
+
+        const steps = 36;
+        const dX = [], dY = [];
+        for (let i = 0; i <= steps; i++) {
+          const xv = Math.max(0.05, lo + (i / steps) * (hi - lo));
+          const [sx, sy] = maccelEval(xv, accelDraft);
+          const cmd = i ? "L" : "M";
+          dX.push(`${cmd}${g.px(xv).toFixed(1)},${clampY(g.py(sx)).toFixed(1)}`);
+          if (g.hasY) dY.push(`${cmd}${g.px(xv).toFixed(1)},${clampY(g.py(sy)).toFixed(1)}`);
+        }
+        $("accelSwipeTrail").setAttribute("d", dX.join(" "));
+        const trailY = $("accelSwipeTrailY");
+        if (g.hasY) trailY.setAttribute("d", dY.join(" "));
+        _svgShow(trailY, g.hasY);
+        swipeGrp.style.opacity = fade.toFixed(2);
+        _svgShow(swipeGrp, true);
+      } else {
+        _svgShow(swipeGrp, false);
+      }
+    }
+
+    // Peak hold marker
+    let peakPillY = null;
+    const peakGrp = $("accelPeakGroup");
+    if (peakGrp) {
+      if (hasPeak) {
+        const peakOver = peak > accelXMax;
+        const pxVal = Math.min(peak, accelXMax);
+        const [pPlotSx, pPlotSy] = maccelEval(Math.max(0.05, pxVal), accelDraft);
+        const pcx = g.px(pxVal), pcy = clampY(g.py(pPlotSx)), pcyY = clampY(g.py(pPlotSy));
+        const pl = $("accelPeakLine");
+        pl.setAttribute("x1", pcx.toFixed(1)); pl.setAttribute("x2", pcx.toFixed(1));
+        const d = 10;
+        $("accelPeakDot").setAttribute(
+          "points",
+          `${pcx.toFixed(1)},${(pcy - d).toFixed(1)} ${(pcx + d).toFixed(1)},${pcy.toFixed(1)} ${pcx.toFixed(1)},${(pcy + d).toFixed(1)} ${(pcx - d).toFixed(1)},${pcy.toFixed(1)}`
+        );
+        const pdY = $("accelPeakDotY");
+        if (g.hasY) {
+          pdY.setAttribute("cx", pcx.toFixed(1)); pdY.setAttribute("cy", pcyY.toFixed(1));
+        }
+        _svgShow(pdY, g.hasY);
+        const pOver = $("accelPeakOver");
+        if (peakOver) {
+          peakPillY = _placeOverPill(pOver, `>${peak.toFixed(1)} ▸`, g, pcy);
+        } else {
+          _svgShow(pOver, false);
+        }
+        peakGrp.style.opacity = fade.toFixed(2);
+        _svgShow(peakGrp, true);
+      } else {
+        _svgShow(peakGrp, false);
+      }
+    }
+
+    // Live current-position marker
+    const liveGrp = $("accelLiveGroup");
+    if (liveGrp) {
+      if (accelMotion.connected) {
+        const moving = speed >= 0.05;
+        const liveOver = speed > accelXMax;
+        const lxVal = Math.min(speed, accelXMax);
+        const [lPlotSx, lPlotSy] = maccelEval(Math.max(0.05, lxVal), accelDraft);
+        const lcx = g.px(lxVal), lcy = clampY(g.py(lPlotSx)), lcyY = clampY(g.py(lPlotSy));
+        const ll = $("accelLiveLine");
+        ll.setAttribute("x1", lcx.toFixed(1)); ll.setAttribute("x2", lcx.toFixed(1));
+        const halo = $("accelLiveHalo");
+        halo.setAttribute("cx", lcx.toFixed(1)); halo.setAttribute("cy", lcy.toFixed(1));
+        halo.setAttribute("r", (8 + Math.min(4, speed / 15)).toFixed(1));
+        _svgShow(halo, moving);
+        const dot = $("accelLiveDot");
+        dot.setAttribute("cx", lcx.toFixed(1)); dot.setAttribute("cy", lcy.toFixed(1));
+        const dotY = $("accelLiveDotY");
+        if (g.hasY) {
+          dotY.setAttribute("cx", lcx.toFixed(1)); dotY.setAttribute("cy", lcyY.toFixed(1));
+        }
+        _svgShow(dotY, g.hasY);
+        const lOver = $("accelLiveOver");
+        if (liveOver) {
+          let targetY = lcy;
+          if (peakPillY !== null && Math.abs((targetY - 7.5) - peakPillY) < 18) {
+            targetY = peakPillY + 26 <= g.H - g.B - 10 ? peakPillY + 25.5 : peakPillY - 10.5;
+          }
+          _placeOverPill(lOver, `>${speed.toFixed(1)} ▸`, g, targetY);
+        } else {
+          _svgShow(lOver, false);
+        }
+        liveGrp.style.opacity = moving ? "1" : "0.48";
+        _svgShow(liveGrp, true);
+      } else {
+        _svgShow(liveGrp, false);
+      }
+    }
+
+    // Telemetry numeric readout
+    const ro = $("accelLiveReadout");
+    if (ro) {
+      const nowOverTag = speed > accelXMax ? `<span class="lv-over">&gt;</span>` : "";
+      const nowYTag = g.hasY ? ` <span class="lv-dim">(Y ${nowSy.toFixed(2)}×)</span>` : "";
+      const nowHtml = `<span class="lv-now">Now: ${nowOverTag}<b>${speed.toFixed(1)}</b> c/ms → <b>${nowSx.toFixed(2)}×</b>${nowYTag}</span>`;
+      let peakHtml;
+      if (hasPeak) {
+        const peakOverTag = peak > accelXMax ? `<span class="lv-over">&gt;</span>` : "";
+        const peakYTag = g.hasY ? ` <span class="lv-dim">(Y ${peakSy.toFixed(2)}×)</span>` : "";
+        peakHtml = `<span class="lv-peak">Peak: ${peakOverTag}<b>${peak.toFixed(1)}</b> c/ms → <b>${peakSx.toFixed(2)}×</b>${peakYTag}</span>`;
+      } else {
+        peakHtml = `<span class="lv-peak lv-dim">Peak: —</span>`;
+      }
+      ro.innerHTML = `${nowHtml}<span class="lv-sep">·</span>${peakHtml}`;
+    }
+  }
+
+  function renderAccelCurve() {
+    if (!accelDraft) return;
+    const svg = $("accelSvg");
+    const W = 640, H = 240, L = 46, R = 16, T = 16, B = 28;
+    const PW = W - L - R, PH = H - T - B;
+    const N = 160;
+    const pts = [];
+    let yMax = 2.0, yMin = 0.5;
+    for (let i = 0; i <= N; i++) {
+      const x = Math.max(0.05, (i / N) * accelXMax);
+      const [sx, sy] = maccelEval(x, accelDraft);
+      pts.push([x, sx, sy]);
+      yMax = Math.max(yMax, sx, sy);
+      yMin = Math.min(yMin, sx, sy);
+    }
+    yMax = Math.ceil((yMax * 1.1) * 4) / 4;
+    yMin = Math.max(0, Math.floor((yMin * 0.9) * 4) / 4);
+    if (yMax - yMin < 0.5) yMax = yMin + 0.5;
+    const px = (x) => L + (x / accelXMax) * PW;
+    const py = (y) => T + (1 - (y - yMin) / (yMax - yMin)) * PH;
+
+    let g = "";
+    for (let i = 0; i <= 4; i++) {
+      const yv = yMin + (i / 4) * (yMax - yMin), yy = py(yv);
+      g += `<line class="gridline" x1="${L}" y1="${yy.toFixed(1)}" x2="${W - R}" y2="${yy.toFixed(1)}"/>`;
+      g += `<text class="ax" x="${L - 6}" y="${(yy + 3).toFixed(1)}" text-anchor="end">${yv.toFixed(2)}×</text>`;
+    }
+    for (let i = 0; i <= 4; i++) {
+      const xv = (i / 4) * accelXMax, xx = px(xv);
+      g += `<line class="gridline" x1="${xx.toFixed(1)}" y1="${T}" x2="${xx.toFixed(1)}" y2="${H - B}"/>`;
+      g += `<text class="ax" x="${xx.toFixed(1)}" y="${H - 10}" text-anchor="middle">${xv}</text>`;
+    }
+    if (yMin <= 1 && 1 <= yMax) {
+      g += `<line class="base" x1="${L}" y1="${py(1).toFixed(1)}" x2="${W - R}" y2="${py(1).toFixed(1)}"/>`;
+    }
+    const pathX = pts.map(([x, sx], i) => `${i ? "L" : "M"}${px(x).toFixed(1)},${py(sx).toFixed(1)}`).join(" ");
+    const areaX = `${pathX} L${px(accelXMax).toFixed(1)},${py(yMin).toFixed(1)} L${L},${py(yMin).toFixed(1)} Z`;
+    const hasY = Math.abs((accelDraft.YX_RATIO ?? 1) - 1) > 1e-4;
+    $("accelLegendY").hidden = !hasY;
+    const pathY = hasY ? pts.map(([x, , sy], i) => `${i ? "L" : "M"}${px(x).toFixed(1)},${py(sy).toFixed(1)}`).join(" ") : "";
+
+    g += `<path class="area-x" d="${areaX}"/>`;
+    g += `<g id="accelSwipeGroup" style="display:none">`;
+    g += `<rect class="swipe-band" id="accelSwipeBand" x="${L}" y="${T}" width="0" height="${PH}"/>`;
+    g += `<path class="swipe-trail-y" id="accelSwipeTrailY" d="" style="display:none"/>`;
+    g += `<path class="swipe-trail" id="accelSwipeTrail" d=""/>`;
+    g += `</g>`;
+    if (hasY) g += `<path class="line-y" d="${pathY}"/>`;
+    g += `<path class="line-x" d="${pathX}"/>`;
+    g += `<g id="accelPeakGroup" style="display:none">`;
+    g += `<line class="peak-line" id="accelPeakLine" x1="0" y1="${T}" x2="0" y2="${H - B}"/>`;
+    g += `<circle class="peak-dot-y" id="accelPeakDotY" cx="0" cy="0" r="6.5" style="display:none"/>`;
+    g += `<polygon class="peak-dot" id="accelPeakDot" points="0,0"/>`;
+    g += `<g id="accelPeakOver" style="display:none"><rect class="over-pill" rx="3" x="0" y="0" width="44" height="15"/><text class="over-txt" x="0" y="0" text-anchor="end"></text></g>`;
+    g += `</g>`;
+    g += `<g id="accelLiveGroup" style="display:none">`;
+    g += `<line class="live-line" id="accelLiveLine" x1="0" y1="${T}" x2="0" y2="${H - B}"/>`;
+    g += `<circle class="live-halo" id="accelLiveHalo" cx="0" cy="0" r="9" style="display:none"/>`;
+    g += `<circle class="live-dot-y" id="accelLiveDotY" cx="0" cy="0" r="3.5" style="display:none"/>`;
+    g += `<circle class="live-dot" id="accelLiveDot" cx="0" cy="0" r="4.5"/>`;
+    g += `<g id="accelLiveOver" style="display:none"><rect class="over-pill live" rx="3" x="0" y="0" width="44" height="15"/><text class="over-txt live" x="0" y="0" text-anchor="end"></text></g>`;
+    g += `</g>`;
+    g += `<line class="cross" id="accelCross" x1="0" y1="${T}" x2="0" y2="${H - B}" style="display:none"/>`;
+    g += `<circle class="dot-x" id="accelDot" cx="0" cy="0" r="4" style="display:none"/>`;
+    svg.innerHTML = g;
+    svg._geom = { W, H, L, R, T, B, PW, PH, yMin, yMax, hasY, px, py };
+    renderAccelLiveOverlay();
+  }
+
+  function scheduleAccelOverlay() {
+    if (accelMotion.rafId) return;
+    accelMotion.rafId = requestAnimationFrame(() => {
+      accelMotion.rafId = 0;
+      renderAccelLiveOverlay();
+    });
+  }
+
+  function _ptrTick() {
+    accelMotion.ptrRafId = 0;
+    if (!accelMotion.ptrOn) return;
+    const p = accelMotion.ptr;
+    const now = performance.now();
+    const idleMs = p.lastEv ? (now - p.lastEv) : 1e9;
+    let curSpeed = 0;
+    let active = false;
+    if (idleMs <= 45) {
+      curSpeed = p.speed;
+      active = curSpeed > 0.05;
+    } else if (p.speed > 0) {
+      curSpeed = p.speed * Math.exp(-(idleMs - 45) / 35);
+      if (curSpeed < 0.05) { curSpeed = 0; p.speed = 0; p.inSwipe = false; }
+    }
+    if (idleMs >= 220) p.inSwipe = false;
+    let peakAge = 0;
+    if (p.peak > 0 && p.peakTs) {
+      peakAge = Math.max(0, now - p.peakTs);
+      if (!active && peakAge >= 2800) {
+        p.peak = 0; p.min = 0; p.max = 0; p.peakTs = 0; peakAge = 0;
+      }
+    }
+    accelMotion.state = {
+      speed: curSpeed, raw_speed: active ? curSpeed : 0, peak: p.peak,
+      peak_age_ms: Math.round(peakAge), peak_hold_ms: 2800,
+      swipe_min: p.min, swipe_max: p.max, swipe_id: p.swipeId,
+      active, dpi: accelDraft?.INPUT_DPI || 1000, source: "pointer", devices: 0,
+    };
+    renderAccelLiveOverlay();
+    if (active || curSpeed > 0 || p.peak > 0) {
+      accelMotion.ptrRafId = requestAnimationFrame(_ptrTick);
+    }
+  }
+
+  function _onPointerMotion(e) {
+    if (!accelMotion.ptrOn) return;
+    const p = accelMotion.ptr;
+    const evs = typeof e.getCoalescedEvents === "function" ? e.getCoalescedEvents() : [e];
+    const list = evs.length ? evs : [e];
+    let moved = false;
+    for (const ev of list) {
+      const ts = ev.timeStamp || performance.now();
+      const dx = ev.movementX || 0, dy = ev.movementY || 0;
+      if (p.lastTs > 0 && (dx !== 0 || dy !== 0)) {
+        const dt = ts - p.lastTs;
+        if (dt > 0 && dt < 250) {
+          const inst = Math.hypot(dx, dy) / dt;
+          const now = performance.now();
+          const gap = p.lastEv ? (now - p.lastEv) : 1e9;
+          if (p.speed <= 0.05 || gap >= 45) p.speed = inst;
+          else p.speed += (1 - Math.exp(-Math.max(0.1, dt) / 10)) * (inst - p.speed);
+          p.lastEv = now;
+          if (p.speed >= 0.35) {
+            const isNew = (!p.inSwipe && (!p.lastMot || now - p.lastMot >= 220)) || p.peak <= 0;
+            if (isNew) {
+              p.swipeId++; p.peak = p.speed; p.peakTs = now; p.min = p.speed; p.max = p.speed; p.inSwipe = true;
+            } else {
+              p.inSwipe = true;
+              if (p.speed > p.peak) p.peak = p.speed;
+              p.peakTs = now;
+              p.min = Math.min(p.min, p.speed);
+              p.max = Math.max(p.max, p.speed);
+            }
+            p.lastMot = now;
+          }
+          moved = true;
+        }
+      }
+      p.lastTs = ts;
+    }
+    if (moved && !accelMotion.ptrRafId) accelMotion.ptrRafId = requestAnimationFrame(_ptrTick);
+  }
+
+  function enablePointerFallback(reason) {
+    if (accelMotion.ptrOn) return;
+    accelMotion.ptrOn = true;
+    accelMotion.connected = true;
+    accelMotion.ptr = { lastTs: 0, lastEv: 0, lastMot: 0, speed: 0, peak: 0, peakTs: 0, min: 0, max: 0, inSwipe: false, swipeId: 0 };
+    accelMotion.state = {
+      speed: 0, raw_speed: 0, peak: 0, peak_age_ms: 0, peak_hold_ms: 2800,
+      swipe_min: 0, swipe_max: 0, swipe_id: 0, active: false, dpi: accelDraft?.INPUT_DPI || 1000, source: "pointer", devices: 0,
+    };
+    window.addEventListener("pointermove", _onPointerMotion, { passive: true });
+    setAccelLiveBadge("fallback", "Window only", reason || "Fallback: browser pointermove (window-only)");
+    scheduleAccelOverlay();
+  }
+
+  function disablePointerFallback() {
+    if (!accelMotion.ptrOn) return;
+    accelMotion.ptrOn = false;
+    window.removeEventListener("pointermove", _onPointerMotion);
+    if (accelMotion.ptrRafId) { cancelAnimationFrame(accelMotion.ptrRafId); accelMotion.ptrRafId = 0; }
+  }
+
+  function shouldStreamMotion() {
+    return accelLive?.maccel?.backend?.name !== "rawaccel" && !document.hidden
+      && isAccelTabActive()
+      && !$("app").hidden
+      && !$("accelBody").hidden
+      && !!accelDraft;
+  }
+
+  function stopAccelMotion() {
+    if (!accelMotion) return;
+    clearTimeout(accelMotion.statusTimer);
+    if (accelMotion.retryTimer) { clearTimeout(accelMotion.retryTimer); accelMotion.retryTimer = null; }
+    if (accelMotion.es) { accelMotion.es.close(); accelMotion.es = null; }
+    disablePointerFallback();
+    if (accelMotion.rafId) { cancelAnimationFrame(accelMotion.rafId); accelMotion.rafId = 0; }
+    accelMotion.connected = false;
+    accelMotion.state.speed = 0;
+    accelMotion.state.active = false;
+    setAccelLiveBadge("", "Idle", "Live telemetry pauses when leaving the Acceleration tab");
+    renderAccelLiveOverlay();
+  }
+
+  function startAccelMotion() {
+    if (!accelMotion || !shouldStreamMotion()) return;
+    if (accelMotion.es) return;
+    if (accelMotion.retryTimer) { clearTimeout(accelMotion.retryTimer); accelMotion.retryTimer = null; }
+    if (!accelMotion.ptrOn) setAccelLiveBadge("", "Connecting…", "Connecting to local helper motion stream");
+    const es = openHelperMotionStream();
+    accelMotion.es = es;
+    es.onmessage = (ev) => {
+      if (accelMotion.es !== es) return;
+      let data;
+      try { data = JSON.parse(ev.data); } catch { return; }
+      if (data.source === "none") {
+        enablePointerFallback("Calibrated motion unavailable. Showing approximate browser movement.");
+        return;
+      }
+      disablePointerFallback();
+      accelMotion.connected = true;
+      accelMotion.state = data;
+      const devs = data.devices || 0;
+      const mod = ACCEL_MODULES.includes(data.backend) ? data.backend : "kernel";
+      if (data.source === "maccel+evdev") {
+        setAccelLiveBadge("on", `Live · ${mod}`, `Latest global speed from /dev/${mod === "kernel" ? "maccel" : mod}, sampled on movement from ${devs} evdev device(s). Short peaks may be missed.`);
+      } else if (data.source === "evdev") {
+        setAccelLiveBadge("on", "Live · evdev", `Raw evdev mouse motion (${devs} device${devs === 1 ? "" : "s"})`);
+      } else if (data.source === "maccel") {
+        setAccelLiveBadge("", "Last sample", `${mod === "kernel" ? "The kernel module" : mod} provides one global value without a sample timestamp.`);
+      }
+      scheduleAccelOverlay();
+    };
+    es.onerror = () => {
+      if (accelMotion.es !== es) return;
+      es.close();
+      accelMotion.es = null;
+      if (!shouldStreamMotion()) return;
+      enablePointerFallback("Helper motion stream unavailable — using window-only pointermove fallback");
+      accelMotion.retryTimer = setTimeout(() => {
+        accelMotion.retryTimer = null;
+        if (shouldStreamMotion() && !accelMotion.es) startAccelMotion();
+      }, 10000);
+    };
+  }
+
+  function syncAccelMotion() {
+    if (!accelMotion) return;
+    if (shouldStreamMotion()) startAccelMotion();
+    else stopAccelMotion();
+  }
+
+  function renderAccelDpiHint() {
+    const b = $("accelUseMouseDpi"); if (!b || !accelDraft) return;
+    const mdpi = getActiveDpi();
+    b.hidden = !mdpi || mdpi === accelDraft.INPUT_DPI || !accelLive?.maccel?.writable;
+    if (mdpi) b.textContent = `Use mouse DPI (${mdpi})`;
+  }
+
+  function renderAccelParams() {
+    if (!accelDraft) return;
+    const mode = accelDraft.MODE || "linear";
+    for (const b of $("accelMode").children) b.classList.toggle("sel", b.dataset.mode === mode);
+    $("accelModeDesc").textContent = MODE_DESCS[mode] ?? "";
+    const ro = !accelLive?.maccel?.writable;
+    const list = [...(MODE_PARAMS[mode] ?? []), ...GLOBAL_ACCEL_PARAMS];
+    const wrap = $("accelParams");
+    wrap.innerHTML = "";
+    for (const p of list) {
+      const val = accelDraft[p.k] ?? MACCEL_DEFAULTS[p.k];
+      const row = document.createElement("div");
+      row.className = "setting";
+      const syncBtn = p.k === "INPUT_DPI" ? `<button class="ghost" id="accelUseMouseDpi" hidden>Use mouse DPI</button>` : "";
+      row.innerHTML = `
+        <div class="label"><b>${p.label}</b><p>${p.desc}</p></div>
+        <div class="control">
+          ${syncBtn}
+          <input type="range" min="${p.min}" max="${p.max}" step="${p.step}" value="${Math.max(p.min, Math.min(p.max, val))}" data-pk="${p.k}" ${ro ? "disabled" : ""} aria-label="${p.label} slider">
+          <input type="number" step="${p.step}" value="${val}" data-nk="${p.k}" ${ro ? "disabled" : ""} aria-label="${p.label}">
+        </div>`;
+      const rng = row.querySelector('input[type="range"]');
+      const num = row.querySelector('input[type="number"]');
+      const setVal = (v) => {
+        if (!Number.isFinite(v)) return;
+        accelDraft[p.k] = v;
+        rng.value = Math.max(p.min, Math.min(p.max, v));
+        paintRanges();
+        renderAccelCurve();
+        renderAccelDirty();
+      };
+      rng.addEventListener("input", () => { const v = parseFloat(rng.value); num.value = v; setVal(v); });
+      num.addEventListener("input", () => { const v = parseFloat(num.value); if (Number.isFinite(v)) setVal(v); });
+      num.addEventListener("keydown", (e) => { if (e.key === "Enter" && accelDirty() && !ro) $("accelApply").click(); });
+      wrap.appendChild(row);
+    }
+    const sb = $("accelUseMouseDpi");
+    if (sb) sb.addEventListener("click", () => {
+      const mdpi = getActiveDpi();
+      if (!mdpi) return;
+      accelDraft.INPUT_DPI = mdpi;
+      renderAccelParams(); renderAccelCurve(); renderAccelDirty();
+    });
+    renderAccelDpiHint();
+    paintRanges();
+  }
+
+  function renderDesktop() {
+    const n = accelLive?.desktop;
+    $("desktopGroup").hidden = !n;
+    if (!n) return;
+    $("desktopHeading").textContent = `Desktop pointer settings (${n.label})`;
+    const other = n.accel_profile && !["flat", "adaptive"].includes(n.accel_profile);
+    $("desktopNote").textContent = n.message + (other ? ` · Current profile: ${n.accel_profile}` : "");
+    for (const row of $("desktopGroup").querySelectorAll(".setting")) row.hidden = n.accel_speed == null;
+    if (n.accel_speed == null) return;
+    for (const b of $("desktopProfile").children) {
+      b.disabled = !n.writable || desktopSaving;
+      b.classList.toggle("sel", b.dataset.prof === n.accel_profile);
+      b.setAttribute("aria-pressed", String(b.dataset.prof === n.accel_profile));
+    }
+    $("desktopSpeed").disabled = !n.writable || desktopSaving;
+    $("desktopSpeed").value = n.accel_speed;
+    $("desktopSpeedVal").textContent = n.accel_speed.toFixed(2);
+    paintRanges();
+  }
+
+  function renderAccelBackend(m) {
+    const el = $("accelBackend");
+    if (!el) return;
+    const b = m ? accelBackendInfo(m) : null;
+    el.classList.toggle("legacy", !!(b?.loaded && b.legacy));
+    el.classList.toggle("none", !b?.loaded);
+    $("accelBackendName").textContent = !m ? "mouseaccel / maccel" : (b.loaded ? (b.label || b.name) : "not loaded");
+    if (b?.name === "rawaccel") {
+      $("accelBackendName").textContent = b.label;
+      el.title = "Driver " + m.driver;
+      $("accelHeading").textContent = "Pointer acceleration";
+      el.nextElementSibling.textContent = "Applies to the default Raw Accel profile";
+      $("windowsAccel").hidden = false;
+      $("windowsReset").disabled = !m.loaded;
+      $("windowsAccel").firstElementChild.textContent = [
+        "Driver " + m.driver, m.saved_state, m.last_apply, m.message,
+        m.driver === "missing" ? "Install the Raw Accel driver manually (see README)." : ""
+      ].filter(Boolean).join(" · ");
+      $("accelLiveBadge").parentElement.hidden = true;
+      for (const marker of document.querySelectorAll(".legend .live, .legend .peak")) marker.parentElement.hidden = true;
+      return;
+    }
+    el.title = !m ? "Kernel acceleration module (helper not reachable)"
+      : b.loaded ? `Module ${b.name}${b.legacy ? " (legacy; mouseaccel replaces it)" : ""}\nParameters: ${b.params_path || "?"}\nSpeed device: ${b.speed_device || "?"}`
+      : "Neither mouseaccel nor maccel is loaded";
+  }
+
+  async function loadAccel() {
+    if (accelLoading) return;
+    accelLoading = true;
+    try {
+      const { res, data } = await fetchHelperStatus();
+      if (!res.ok) throw new Error("Status unavailable");
+      const dirty = accelDirty();
+      accelLive = data;
+      clearTimeout(accelMotion.statusTimer);
+      if (Array.isArray(data.system_mice)) {
+        onSystemMice(data.system_mice);
+      }
+      $("accelOffline").hidden = true;
+      const m = data.accel ?? data.maccel;
+      accelLive.maccel = m;
+      renderAccelBackend(m);
+      const b = accelBackendInfo(m);
+      const keepDraft = dirty && accelDraftBackend === b.name;
+      accelDraftBackend = b.name;
+      if (!m?.loaded || m.parameters_available === false) {
+        accelDraft = null;
+        renderAccelDirty();
+        $("accelBody").hidden = true;
+        $("accelPerm").hidden = false;
+        $("accelPerm").className = "accelnotice bad";
+        $("accelPerm").hidden = b.name === "rawaccel";
+        $("accelPerm").innerHTML = m?.loaded
+          ? `<span>${accelModuleCode(b.name)} is loaded, but its curve parameters could not all be read. Refresh after restoring read access.</span>`
+          : b.candidate
+          ? `<span>${accelModuleCode(b.candidate)} is installed but the kernel module isn't loaded. Run <code>sudo modprobe ${ACCEL_MODULES.includes(b.candidate) ? b.candidate : "mouseaccel"}</code>.</span>`
+          : `<span>No kernel acceleration module is installed. Install <code>mouseaccel</code> (or the legacy <code>maccel</code>).</span>`;
+      } else {
+        $("accelBody").hidden = false;
+        const also = (b.also_loaded || []).filter((n) => ACCEL_MODULES.includes(n));
+        const group = ACCEL_MODULES.includes(m.group) ? m.group : (b.name || "maccel");
+        if (also.length) {
+          $("accelPerm").hidden = false;
+          $("accelPerm").className = "accelnotice bad";
+          $("accelPerm").innerHTML = `<span>${accelModuleCode(b.name)} and ${also.map(accelModuleCode).join(", ")} are both loaded. mouseaccel passes motion through unchanged while maccel is loaded, so these settings don't apply. Unload maccel with <code>sudo rmmod maccel</code>, then reload mouseaccel.</span>`;
+        } else if (!m.writable) {
+          $("accelPerm").hidden = false;
+          $("accelPerm").className = "accelnotice";
+          $("accelPerm").innerHTML = `<span>Read-only preview — add yourself to the <code>${group}</code> group to edit ${accelModuleCode(b.name)}: <code>sudo usermod -aG ${group} $USER</code> and log out/in.</span>`;
+        } else {
+          $("accelPerm").hidden = true;
+        }
+        if (!keepDraft) accelDraft = accelSnapshot(m);
+        renderAccelParams();
+        renderAccelCurve();
+        renderAccelDirty();
+      }
+      renderDesktop();
+    } catch {
+      $("accelOffline").hidden = false;
+      $("accelPerm").hidden = true;
+      const windows = accelLive?.maccel?.backend?.name === "rawaccel";
+      if (windows) {
+        $("windowsAccel").hidden = true;
+        $("accelBackendName").textContent = "Raw Accel (Windows) · Offline";
+        $("accelBackend").classList.add("none");
+        $("accelBackend").title = "Driver state unavailable";
+        $("accelOffline").firstElementChild.textContent = "Local helper is offline. Open mousetool from Start and retry.";
+      } else {
+        renderAccelBackend(null);
+      }
+      if (accelLive?.maccel) accelLive.maccel.writable = false;
+      accelDraft ??= { ...MACCEL_DEFAULTS };
+      $("accelBody").hidden = false;
+      renderAccelParams();
+      renderAccelCurve();
+      renderAccelDirty();
+      clearTimeout(accelMotion.statusTimer);
+      if (shouldStreamMotion()) accelMotion.statusTimer = setTimeout(loadAccel, 10000);
+      $("desktopGroup").hidden = true;
+    } finally {
+      accelLoading = false;
+      syncAccelMotion();
+    }
+  }
+
+  async function postDesktop(updates) {
+    if (desktopSaving || !accelLive?.desktop?.writable) return;
+    desktopSaving = true;
+    renderDesktop();
+    setState("desktop", "saving");
+    try {
+      const { res, data } = await postHelperDesktop(updates);
+      if (data.desktop) accelLive.desktop = data.desktop;
+      if (!res.ok) throw new Error(data.error || "Failed to update desktop settings");
+      setState("desktop", "saved");
+    } catch (err) {
+      setState("desktop", "error", err.message);
+      toast(err.message, true);
+    } finally {
+      desktopSaving = false;
+      renderDesktop();
+    }
+  }
+
+  // Wire event listeners for acceleration & desktop pointer panels
+  document.addEventListener("visibilitychange", () => {
+    if (shouldStreamMotion() && !$("accelOffline").hidden) loadAccel();
+    else syncAccelMotion();
+  });
+  window.addEventListener("pagehide", () => stopAccelMotion());
+
+  $("accelSvg").addEventListener("mousemove", (e) => {
+    const g = $("accelSvg")._geom; if (!g || !accelDraft) return;
+    const rect = $("accelSvg").getBoundingClientRect();
+    const sx = ((e.clientX - rect.left) / rect.width) * g.W;
+    const xv = Math.max(0.05, Math.min(accelXMax, ((sx - g.L) / g.PW) * accelXMax));
+    const [vx, vy] = maccelEval(xv, accelDraft);
+    const cx = g.px(xv), cy = g.py(vx);
+    const cross = $("accelCross"), dot = $("accelDot");
+    if (cross && dot) {
+      cross.setAttribute("x1", cx); cross.setAttribute("x2", cx); _svgShow(cross, true);
+      dot.setAttribute("cx", cx); dot.setAttribute("cy", cy); _svgShow(dot, true);
+    }
+    $("accelProbe").textContent = `${xv.toFixed(1)} counts/ms → ${vx.toFixed(3)}×` + (Math.abs(vx - vy) > 1e-4 ? ` (Y: ${vy.toFixed(3)}×)` : "");
+  });
+  $("accelSvg").addEventListener("mouseleave", () => {
+    _svgShow($("accelCross"), false);
+    _svgShow($("accelDot"), false);
+    $("accelProbe").textContent = "Hover curve to inspect speed → multiplier";
+  });
+
+  $("accelRefresh").addEventListener("click", () => { accelDraft = null; loadAccel(); });
+  $("accelRetry").addEventListener("click", () => loadAccel());
+  $("accelMode").addEventListener("click", (e) => {
+    const b = e.target.closest("button"); if (!b || !accelDraft || !accelLive?.maccel?.writable) return;
+    accelDraft.MODE = b.dataset.mode;
+    renderAccelParams(); renderAccelCurve(); renderAccelDirty();
+  });
+  $("accelXMax").addEventListener("click", (e) => {
+    const b = e.target.closest("button"); if (!b) return;
+    accelXMax = +b.dataset.x;
+    for (const x of $("accelXMax").children) x.classList.toggle("sel", +x.dataset.x === accelXMax);
+    renderAccelCurve();
+  });
+  $("accelRevert").addEventListener("click", () => {
+    if (!accelLive?.maccel) return;
+    accelDraft = accelSnapshot(accelLive.maccel);
+    renderAccelParams(); renderAccelCurve(); renderAccelDirty();
+  });
+  $("windowsReset").addEventListener("click", async () => {
+    if (!confirm("Replace the active Raw Accel configuration and saved curve with no acceleration?")) return;
+    try {
+      const res = await postHelperAccelReset();
+      if (!res.ok) throw new Error((await res.json()).error);
+      accelDraft = null;
+    } catch (err) { toast(err.message, true); }
+    await loadAccel();
+  });
+  $("accelDefaults").addEventListener("click", () => {
+    if (!accelLive?.maccel?.writable) return;
+    accelDraft = { ...MACCEL_DEFAULTS };
+    if (accelDraftBackend === "rawaccel") Object.assign(accelDraft, { MODE: "no_accel", ACCEL: 0.005 });
+    renderAccelParams(); renderAccelCurve(); renderAccelDirty();
+  });
+  $("accelApply").addEventListener("click", async () => {
+    if (!accelDraftBackend || !accelDraft || !accelLive?.maccel?.writable) return;
+    const backend = accelDraftBackend;
+    setState("maccel", "saving");
+    try {
+      const { res, data } = await postHelperAccel(backend, accelDraft);
+      if (!res.ok) {
+        if (res.status === 409) await loadAccel();
+        throw new Error(data.error || "Failed to save curve");
+      }
+      const st = data.accel ?? data.maccel;
+      accelLive.maccel = st;
+      renderAccelBackend(st);
+      accelDraftBackend = accelBackendInfo(st).name;
+      accelDraft = accelSnapshot(st);
+      renderAccelParams(); renderAccelCurve(); renderAccelDirty();
+      setState("maccel", "saved");
+      toast("Acceleration curve saved");
+    } catch (err) {
+      if (backend === "rawaccel") await loadAccel();
+      setState("maccel", "error", err.message);
+      toast(err.message, true);
+    }
+  });
+
+  $("desktopProfile").addEventListener("click", (e) => {
+    const b = e.target.closest("button"); if (!b) return;
+    const prof = b.dataset.prof;
+    if (accelLive?.desktop?.accel_profile === prof) return;
+    postDesktop({ accel_profile: prof });
+  });
+  $("desktopSpeed").addEventListener("input", () => { $("desktopSpeedVal").textContent = (+$("desktopSpeed").value).toFixed(2); });
+  $("desktopSpeed").addEventListener("change", () => { postDesktop({ accel_speed: +$("desktopSpeed").value }); });
+
+  return {
+    loadAccel,
+    syncAccelMotion,
+    stopAccelMotion,
+    renderAccelDpiHint,
+  };
+}
+
+export {
+  MACCEL_DEFAULTS,
+  MODE_DESCS,
+  MODE_PARAMS,
+  GLOBAL_ACCEL_PARAMS,
+  ACCEL_MODULES,
+  maccelEval,
+  accelSnapshot,
+  accelBackendInfo,
+  accelModuleCode,
+  createAccelController,
+};

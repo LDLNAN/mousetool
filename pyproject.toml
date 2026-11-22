@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mousetool"
+version = "0.1.0"
+description = "Universal web and CLI suite for managing connected mice, kernel acceleration, and desktop pointer settings."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.scripts]
+mousetool = "mousetool.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["mousetool*"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"

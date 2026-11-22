@@ -7,12 +7,19 @@ import threading
 import time
 from urllib.parse import urlsplit
 
-import rawaccel_export as curves
+from . import rawaccel_export as curves
 
-APP = Path(__file__).resolve().parent
+APP = Path(__file__).resolve().parents[2]
 LABEL = "Raw Accel (Windows)"
 UNAVAILABLE = "Not available on Windows"
 OFF = dict(curves.DEFAULTS, MODE="no_accel", ACCEL=0.005)
+
+
+def _read_script_path():
+    candidate = APP / "platform" / "windows" / "read-rawaccel.ps1"
+    if candidate.is_file():
+        return candidate
+    return APP / "read-rawaccel.ps1"
 
 
 def run(args):
@@ -26,7 +33,7 @@ def run(args):
 def read_active():
     shell = Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0/powershell.exe"
     result = run([shell, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
-                  "-File", APP / "read-rawaccel.ps1"])
+                  "-File", _read_script_path()])
     if result.returncode:
         raise OSError(result.stderr.decode("utf-8", "replace").strip() or "Driver readback failed")
     return curves.loads(result.stdout.decode("utf-8-sig"))
@@ -142,17 +149,7 @@ class WindowsRoutes:
         if not self._origin_ok():
             return self._send(403, {"error": "Forbidden"})
         path = urlsplit(self.path).path
-        assets = {"/": ("index.html", "text/html; charset=utf-8"), "/index.html": ("index.html", "text/html; charset=utf-8"),
-                  "/icon.svg": ("icon.svg", "image/svg+xml")}
-        if path in assets:
-            name, mime = assets[path]
-            data = (APP / name).read_bytes()
-            self.send_response(200)
-            self.send_header("Content-Type", mime)
-            self.send_header("Content-Length", str(len(data)))
-            self.end_headers()
-            self.wfile.write(data)
-        elif path in ("/api/accel", "/api/maccel", "/api/status"):
+        if path in ("/api/accel", "/api/maccel", "/api/status"):
             st = self.server.acceleration.state()
             self._send(200, {"version": 2, "accel": st, "maccel": st, "accel_backend": st["backend"],
                              "system_mice": [], "desktop": None, "niri": None})
@@ -160,8 +157,11 @@ class WindowsRoutes:
             self._send(200, {"mice": [], "message": "Connect with WebHID in Edge"})
         elif path in ("/api/motion", "/api/motion/stream", "/api/desktop", "/api/battery", "/api/niri"):
             self._send(501, {"error": UNAVAILABLE})
-        else:
+        elif path.startswith("/api/"):
             self._send(404, {"error": "Not found"})
+        else:
+            from ..server import _request_target_path, serve_static_asset
+            serve_static_asset(self, _request_target_path(self), web_dir=APP / "web", repo_root=APP)
 
     def do_POST(self):
         if not self._origin_ok() or self.headers.get("X-Mouse-Tool") != "1":

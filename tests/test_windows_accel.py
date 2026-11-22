@@ -6,9 +6,9 @@ import unittest
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 
-from mousetool import Api
-import rawaccel_export as curves
-from windows_accel import OFF, WindowsAccel, WindowsRoutes, restore_saved
+from mousetool.server import Api
+from mousetool.accel import rawaccel_export as curves
+from mousetool.accel.windows import OFF, WindowsAccel, WindowsRoutes, restore_saved
 
 
 class WindowsAccelTests(unittest.TestCase):

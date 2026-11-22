@@ -10,6 +10,10 @@ is explicitly passed for Razer).
 """
 import argparse
 import os
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from mousetool import (
     discover_system_mice,

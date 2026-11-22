@@ -7,13 +7,16 @@ import sys
 import tempfile
 from urllib.request import Request, urlopen
 
-import rawaccel_export as curves
-from windows_accel import OFF, read_active, write_settings
+APP = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(APP))
+
+from mousetool.accel import rawaccel_export as curves
+from mousetool.accel.windows import OFF, read_active, write_settings
 
 
 def main():
     scratch = Path.home() / ".t3" + "/scratch"
-    app = Path(__file__).resolve().parent
+    app = APP
     if sys.platform != "win32" or not app.is_relative_to(scratch):
         raise SystemExit("Run the test from an app copy under the Windows user's mousetool-test-scratch")
     url = "http://127.0.0.1:8766"
@@ -42,7 +45,7 @@ def main():
                 assert read_active() == expected
                 print("PASS classic 0.0425, DPI 3200, Y/X 1.25; exact readback", flush=True)
                 write_settings(rollback)
-                subprocess.run([sys.executable, app / "windows_accel.py"], env=env, check=True)
+                subprocess.run([sys.executable, "-m", "mousetool.accel.windows"], env=env, cwd=app, check=True)
                 assert read_active() == expected
                 print("PASS logon replay after clearing active curve", flush=True)
                 api("/api/accel", {"reset": True})
