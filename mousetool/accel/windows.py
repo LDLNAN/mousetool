@@ -13,6 +13,136 @@ APP = Path(__file__).resolve().parents[2]
 LABEL = "Raw Accel (Windows)"
 UNAVAILABLE = "Not available on Windows"
 OFF = dict(curves.DEFAULTS, MODE="no_accel", ACCEL=0.005)
+RAWACCEL_RELEASES_URL = "https://github.com/RawAccelOfficial/rawaccel/releases"
+RAWACCEL_BINARIES = ("writer.exe", "wrapper.dll", "Newtonsoft.Json.dll")
+WINDOWS_INSTALL_CMD = (
+    'powershell -NoProfile -ExecutionPolicy Bypass -File .\\install.ps1 '
+    '-RawAccelDir "$env:USERPROFILE\\Downloads\\RawAccel_v1.7.1\\RawAccel"'
+)
+
+
+def _default_startup_shortcut():
+    appdata = os.environ.get("APPDATA")
+    if not appdata:
+        return None
+    return Path(appdata) / "Microsoft/Windows/Start Menu/Programs/Startup/mousetool Raw Accel.lnk"
+
+
+def windows_setup_status(state, rawaccel_dir=None, startup_shortcut=None):
+    """Read-only Windows Raw Accel setup diagnostics for /api/status."""
+    driver = state.get("driver") or ("running" if state.get("loaded") else "missing")
+    ra_dir = Path(rawaccel_dir) if rawaccel_dir is not None else (APP / "rawaccel")
+    writer_present = all((ra_dir / name).is_file() for name in RAWACCEL_BINARIES)
+    startup_path = Path(startup_shortcut) if startup_shortcut is not None else _default_startup_shortcut()
+    persistence_installed = bool(startup_path and startup_path.is_file())
+    driver_running = driver == "running"
+
+    steps = []
+    if driver_running:
+        steps.append({
+            "id": "driver",
+            "title": "Raw Accel driver",
+            "status": "installed",
+            "description": "The Raw Accel driver is installed and running.",
+            "command": None,
+            "url": None,
+            "url_label": None,
+        })
+    else:
+        steps.append({
+            "id": "driver",
+            "title": "Download and install Raw Accel",
+            "status": "needs_setup",
+            "description": "Download the latest Raw Accel v1.7.x release, run installer.exe, and restart Windows.",
+            "command": None,
+            "url": RAWACCEL_RELEASES_URL,
+            "url_label": "Download Raw Accel",
+        })
+
+    if writer_present:
+        steps.append({
+            "id": "writer",
+            "title": "Raw Accel helper tools",
+            "status": "installed",
+            "description": "Mouse Tool can apply and verify your curve.",
+            "command": None,
+            "url": None,
+            "url_label": None,
+        })
+    else:
+        steps.append({
+            "id": "writer",
+            "title": "Link your Raw Accel folder",
+            "status": "needs_setup",
+            "description": "Extract the Raw Accel zip and run this once in PowerShell:",
+            "command": WINDOWS_INSTALL_CMD,
+            "url": None,
+            "url_label": None,
+        })
+
+    if persistence_installed:
+        steps.append({
+            "id": "persistence",
+            "title": "Keep curve after restart",
+            "status": "installed",
+            "description": "Your saved curve restores automatically when you sign in.",
+            "command": None,
+            "url": None,
+            "url_label": None,
+        })
+    elif not writer_present:
+        steps.append({
+            "id": "persistence",
+            "title": "Keep curve after restart",
+            "status": "needs_setup",
+            "description": "Added automatically when you run Step 2 above (creates a sign-in shortcut).",
+            "command": None,
+            "url": None,
+            "url_label": None,
+        })
+    else:
+        steps.append({
+            "id": "persistence",
+            "title": "Keep curve after restart",
+            "status": "needs_setup",
+            "description": "Run install.ps1 to add a sign-in shortcut so your curve stays active after rebooting:",
+            "command": WINDOWS_INSTALL_CMD,
+            "url": None,
+            "url_label": None,
+        })
+
+    loaded = bool(state.get("loaded"))
+    writable = bool(state.get("writable"))
+    ready = bool(driver_running and loaded and writable)
+    if ready:
+        summary = "Ready"
+    elif driver == "missing":
+        summary = "Raw Accel needs setup"
+    elif not driver_running:
+        summary = "Raw Accel driver unavailable"
+    elif not writer_present:
+        summary = "Link Raw Accel tools"
+    else:
+        summary = "Active Raw Accel profile cannot be edited here"
+
+    return {
+        "platform": "windows",
+        "ready": ready,
+        "summary": summary,
+        "driver": {
+            "name": "rawaccel",
+            "label": "Raw Accel",
+            "installed": driver_running,
+            "loaded": loaded,
+            "writable": writable,
+            "driver_state": driver,
+            "status": "installed" if driver_running else "needs_setup",
+        },
+        "writer_present": writer_present,
+        "persistence_installed": persistence_installed,
+        "download_url": RAWACCEL_RELEASES_URL,
+        "steps": steps,
+    }
 
 
 def _read_script_path():
@@ -71,14 +201,21 @@ def writer_lock(folder):
 
 
 class WindowsAccel:
-    def __init__(self, folder, reader=read_active, writer=write_settings, probe=driver_status):
+    def __init__(self, folder, reader=read_active, writer=write_settings, probe=driver_status,
+                 rawaccel_dir=None, startup_shortcut=None):
         self.folder = Path(folder)
         self.saved = self.folder / "settings.json"
         self.read = reader
         self.write = writer
         self.probe = probe
+        self.rawaccel_dir = rawaccel_dir
+        self.startup_shortcut = startup_shortcut
         self.lock = threading.RLock()
         self.last = "No apply this session"
+
+    def setup_status(self, state=None):
+        st = state if state is not None else self.state()
+        return windows_setup_status(st, rawaccel_dir=self.rawaccel_dir, startup_shortcut=self.startup_shortcut)
 
     def state(self):
         with self.lock:
@@ -152,6 +289,7 @@ class WindowsRoutes:
         if path in ("/api/accel", "/api/maccel", "/api/status"):
             st = self.server.acceleration.state()
             self._send(200, {"version": 2, "accel": st, "maccel": st, "accel_backend": st["backend"],
+                             "setup": self.server.acceleration.setup_status(st),
                              "system_mice": [], "desktop": None, "niri": None})
         elif path == "/api/devices":
             self._send(200, {"mice": [], "message": "Connect with WebHID in Edge"})

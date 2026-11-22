@@ -14,37 +14,142 @@ const MACCEL_DEFAULTS = {
   GAMMA: 1, SMOOTH: 0.5, MOTIVITY: 1.5, SYNC_SPEED: 5,
 };
 const MODE_DESCS = {
-  linear: "Sensitivity rises linearly above the speed offset, optionally capped at Output Cap.",
-  natural: "Logarithmic-like curve with smooth diminishing returns approaching the Limit multiplier.",
-  synchronous: "S-curve centered on Sync Speed, scaling smoothly between 1 / Motivity and Motivity.",
-  no_accel: "1:1 raw multiplier (SENS_MULT and Y/X ratio still apply).",
+  linear: "Speed rises steadily as you move faster, up to your optional cap.",
+  natural: "Smooth curve that ramps up gently and levels off near your limit.",
+  synchronous: "S-shaped curve that feels slower for fine aim and faster for big swipes.",
+  no_accel: "No speed boost — constant sensitivity at every hand speed.",
 };
 const MODE_PARAMS = {
   linear: [
-    { k: "ACCEL", label: "Accel", min: 0, max: 1, step: 0.005, desc: "Slope of sensitivity increase per count/ms." },
-    { k: "OFFSET", label: "Offset", min: 0, max: 40, step: 0.25, desc: "Input speed (counts/ms) before acceleration begins." },
-    { k: "OUTPUT_CAP", label: "Output cap", min: 0, max: 10, step: 0.05, desc: "Max sensitivity multiplier (0 = uncapped)." },
+    { k: "ACCEL", label: "Accel", min: 0, max: 1, step: 0.005, desc: "How quickly sensitivity rises as you move faster." },
+    { k: "OFFSET", label: "Offset", min: 0, max: 40, step: 0.25, desc: "Hand speed before acceleration starts (0 = immediately)." },
+    { k: "OUTPUT_CAP", label: "Output cap", min: 0, max: 10, step: 0.05, desc: "Highest sensitivity multiplier allowed (0 = no limit)." },
   ],
   natural: [
-    { k: "DECAY_RATE", label: "Decay rate", min: 0.001, max: 2, step: 0.005, desc: "How quickly sensitivity approaches the limit." },
-    { k: "OFFSET", label: "Offset", min: 0, max: 40, step: 0.25, desc: "Input speed (counts/ms) before acceleration begins." },
-    { k: "LIMIT", label: "Limit", min: 1, max: 10, step: 0.05, desc: "Asymptote multiplier for high-speed movement." },
+    { k: "DECAY_RATE", label: "Decay rate", min: 0.001, max: 2, step: 0.005, desc: "How quickly the curve reaches your top multiplier." },
+    { k: "OFFSET", label: "Offset", min: 0, max: 40, step: 0.25, desc: "Hand speed before acceleration starts (0 = immediately)." },
+    { k: "LIMIT", label: "Limit", min: 1, max: 10, step: 0.05, desc: "Maximum speed boost on fast swipes." },
   ],
   synchronous: [
-    { k: "SYNC_SPEED", label: "Sync speed", min: 0.1, max: 40, step: 0.25, desc: "Midpoint speed where multiplier equals 1.0×." },
-    { k: "MOTIVITY", label: "Motivity", min: 1.01, max: 10, step: 0.05, desc: "Max multiplier (min multiplier is 1 / Motivity)." },
-    { k: "GAMMA", label: "Gamma", min: 0.05, max: 10, step: 0.05, desc: "Steepness around Sync Speed." },
-    { k: "SMOOTH", label: "Smooth", min: 0, max: 1, step: 0.02, desc: "Transition softness near min and max bounds." },
+    { k: "SYNC_SPEED", label: "Sync speed", min: 0.1, max: 40, step: 0.25, desc: "Hand speed where sensitivity equals 1.0×." },
+    { k: "MOTIVITY", label: "Motivity", min: 1.01, max: 10, step: 0.05, desc: "Maximum boost on fast swipes (slow aim scales down symmetrically)." },
+    { k: "GAMMA", label: "Gamma", min: 0.05, max: 10, step: 0.05, desc: "How sharply sensitivity changes around Sync speed." },
+    { k: "SMOOTH", label: "Smooth", min: 0, max: 1, step: 0.02, desc: "Softens the bend near the slowest and fastest speeds." },
   ],
   no_accel: [],
 };
 const GLOBAL_ACCEL_PARAMS = [
-  { k: "SENS_MULT", label: "Sensitivity multiplier", min: 0.05, max: 5, step: 0.02, desc: "Overall post-curve multiplier." },
-  { k: "YX_RATIO", label: "Y / X ratio", min: 0.2, max: 3, step: 0.02, desc: "Vertical sensitivity relative to horizontal." },
-  { k: "INPUT_DPI", label: "Normalized DPI", min: 100, max: 35000, step: 50, desc: "Mouse DPI used by the kernel module to normalize speed to 1000 DPI." },
-  { k: "ANGLE_ROTATION", label: "Angle rotation (°)", min: -45, max: 45, step: 0.5, desc: "Rotates input movement vector in degrees." },
+  { k: "SENS_MULT", label: "Sensitivity multiplier", min: 0.05, max: 5, step: 0.02, desc: "Scales your entire curve up or down." },
+  { k: "YX_RATIO", label: "Y / X ratio", min: 0.2, max: 3, step: 0.02, desc: "Makes vertical movement faster or slower than horizontal." },
+  { k: "INPUT_DPI", label: "Mouse DPI", min: 100, max: 35000, step: 50, desc: "Matches the curve to your mouse's current DPI." },
+  { k: "ANGLE_ROTATION", label: "Angle rotation (°)", min: -45, max: 45, step: 0.5, desc: "Tilts horizontal movement to match your natural wrist angle." },
 ];
 const ACCEL_MODULES = ["mouseaccel", "maccel"];
+const RAWACCEL_RELEASES_URL = "https://github.com/RawAccelOfficial/rawaccel/releases";
+
+function escHtml(s) {
+  return String(s ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function deriveSetupStatus(data) {
+  if (data?.setup && Array.isArray(data.setup.steps)) return data.setup;
+  const m = data?.accel ?? data?.maccel;
+  if (!m) return null;
+  const b = accelBackendInfo(m);
+  if (b.name === "rawaccel") {
+    const running = m.driver === "running" || !!m.loaded;
+    const ready = !!(running && m.loaded && m.writable);
+    return {
+      platform: "windows",
+      ready,
+      summary: ready ? "Ready" : (m.driver === "missing" ? "Raw Accel needs setup" : "Raw Accel needs attention"),
+      driver: {
+        name: "rawaccel", label: "Raw Accel", installed: running,
+        loaded: !!m.loaded, writable: !!m.writable, status: running ? "installed" : "needs_setup",
+      },
+      steps: [
+        {
+          id: "driver",
+          title: running ? "Raw Accel driver" : "Download and install Raw Accel",
+          status: running ? "installed" : "needs_setup",
+          description: running
+            ? "The Raw Accel driver is installed and running."
+            : "Download the latest Raw Accel v1.7.x release, run installer.exe, and restart Windows.",
+          command: null,
+          url: running ? null : RAWACCEL_RELEASES_URL,
+          url_label: running ? null : "Download Raw Accel",
+        },
+        {
+          id: "writer",
+          title: "Link your Raw Accel folder",
+          status: ready ? "installed" : "needs_setup",
+          description: ready
+            ? "Mouse Tool can apply and verify your curve."
+            : "Extract the Raw Accel zip and run this once in PowerShell:",
+          command: ready ? null : 'powershell -NoProfile -ExecutionPolicy Bypass -File .\\install.ps1 -RawAccelDir "$env:USERPROFILE\\Downloads\\RawAccel_v1.7.1\\RawAccel"',
+          url: null,
+          url_label: null,
+        },
+      ],
+    };
+  }
+  const mod = ACCEL_MODULES.includes(b.name || b.candidate) ? (b.name || b.candidate) : "mouseaccel";
+  const also = (b.also_loaded || []).filter((n) => ACCEL_MODULES.includes(n));
+  const group = ACCEL_MODULES.includes(m.group) ? m.group : mod;
+  const loaded = !!m.loaded;
+  const paramsOk = m.parameters_available !== false;
+  const writable = !!m.writable;
+  const ready = loaded && paramsOk && writable && !also.length;
+  return {
+    platform: "linux",
+    ready,
+    summary: ready ? "Ready" : also.length ? "Driver conflict detected" : loaded && !writable ? "Needs save permission" : "Needs a quick setup",
+    driver: {
+      name: mod, label: b.label || mod, installed: !!m.installed || loaded,
+      loaded, writable, status: (loaded && paramsOk && !also.length) ? "installed" : "needs_setup",
+    },
+    steps: [
+      {
+        id: "driver",
+        title: (loaded && paramsOk && !also.length) ? `${b.label || mod} driver`
+          : also.length ? "Unload conflicting maccel driver"
+          : b.candidate ? `Load the ${mod} driver`
+          : "Install the mouseaccel driver",
+        status: (loaded && paramsOk && !also.length) ? "installed" : "needs_setup",
+        description: (loaded && paramsOk && !also.length)
+          ? "Running and ready for custom sensitivity curves."
+          : also.length ? "Both mouseaccel and maccel are loaded, so changes are ignored. Unload maccel and reload mouseaccel:"
+          : b.candidate ? `${mod} is installed on this PC, but not loaded yet. Load it with:`
+          : "Install the Linux mouseaccel driver (recommended) or legacy maccel, then load it:",
+        command: (loaded && paramsOk && !also.length) ? null
+          : also.length ? "sudo rmmod maccel && sudo modprobe -r mouseaccel && sudo modprobe mouseaccel"
+          : `sudo modprobe ${mod}`,
+        url: (!loaded && !b.candidate) ? "https://www.maccel.org" : null,
+        url_label: (!loaded && !b.candidate) ? "maccel guide (legacy)" : null,
+      },
+      {
+        id: "permissions",
+        title: (loaded && writable) ? "Save permissions" : `Allow saving without root`,
+        status: (loaded && writable) ? "installed" : "needs_setup",
+        description: (loaded && writable)
+          ? "Mouse Tool can save acceleration changes directly."
+          : mod === "maccel"
+          ? "Add your user to the maccel group, then log out and back in:"
+          : "Install the mouseaccel permission rule and add your user to the group (then log out and back in):",
+        command: (loaded && writable) ? null
+          : mod === "maccel"
+          ? `sudo usermod -aG ${group} "$USER"`
+          : './install.sh --mouseaccel-perms && sudo usermod -aG mouseaccel "$USER"',
+        url: null,
+        url_label: null,
+      },
+    ],
+  };
+}
 
 function maccelEval(x, cfg) {
   const m = cfg.MODE || "linear";
@@ -670,24 +775,89 @@ function createAccelController({ $, getActiveDpi, isAccelTabActive, setState, to
     paintRanges();
   }
 
+  function renderAccelSetup(setup, m) {
+    const box = $("accelSetup");
+    if (!box) return;
+    if (!setup || setup.ready) {
+      box.hidden = true;
+      box.innerHTML = "";
+      return;
+    }
+    const isWin = setup.platform === "windows";
+    const title = isWin ? "Set up Raw Accel on Windows" : "Set up mouse acceleration";
+    const intro = isWin
+      ? "Follow these steps once so Mouse Tool can apply your acceleration curve across Windows and games."
+      : m?.loaded && !m?.writable
+      ? "Your acceleration driver is running in preview mode. Finish the permission step below to save changes."
+      : "Complete these quick steps once to enable custom mouse acceleration in every app and game.";
+    const pillClass = setup.ready ? "ok" : "warn";
+    const pillText = setup.ready ? "Installed" : "Needs setup";
+    const stepsHtml = (setup.steps || []).map((step, i) => {
+      const done = step.status === "installed";
+      const badgeClass = done ? "ok" : "warn";
+      const badgeLabel = done ? "Installed" : "Needs setup";
+      const safeUrl = typeof step.url === "string" && step.url.startsWith("https://") ? step.url : null;
+      const linkClass = isWin ? "setup-link" : "setup-link secondary";
+      const linkHtml = safeUrl
+        ? `<div class="setup-actions"><a class="${linkClass}" href="${escHtml(safeUrl)}" target="_blank" rel="noopener noreferrer">${escHtml(step.url_label || "Download")} ↗</a></div>`
+        : "";
+      const cmdHtml = step.command
+        ? `<div class="setup-cmd"><code>${escHtml(step.command)}</code><button type="button" class="setup-copy" data-copy="${escHtml(step.command)}">Copy</button></div>`
+        : "";
+      return `
+        <li class="setup-step${done ? " done" : ""}">
+          <span class="setup-num" aria-hidden="true">${done ? "✓" : i + 1}</span>
+          <div class="setup-step-body">
+            <div class="setup-step-top">
+              <span class="setup-step-title">${escHtml(step.title)}</span>
+              <span class="setup-pill ${badgeClass}">${badgeLabel}</span>
+            </div>
+            <p class="setup-step-desc">${escHtml(step.description)}</p>
+            ${linkHtml}
+            ${cmdHtml}
+          </div>
+        </li>`;
+    }).join("");
+    box.innerHTML = `
+      <div class="setup-head">
+        <h3 class="setup-title">${escHtml(title)}</h3>
+        <span class="setup-pill ${pillClass}">${pillText}</span>
+        <div class="spacer"></div>
+        <button type="button" id="accelSetupCheck">Check again</button>
+      </div>
+      <p class="setup-intro">${escHtml(intro)}</p>
+      <ol class="setup-steps">${stepsHtml}</ol>`;
+    box.hidden = false;
+    const checkBtn = $("accelSetupCheck");
+    if (checkBtn) {
+      checkBtn.addEventListener("click", () => loadAccel(true));
+    }
+  }
+
   function renderAccelBackend(m) {
     const el = $("accelBackend");
     if (!el) return;
     const b = m ? accelBackendInfo(m) : null;
+    const sub = $("accelSubtitle") || el.nextElementSibling;
     el.classList.toggle("legacy", !!(b?.loaded && b.legacy));
     el.classList.toggle("none", !b?.loaded);
-    $("accelBackendName").textContent = !m ? "mouseaccel / maccel" : (b.loaded ? (b.label || b.name) : "not loaded");
+    $("accelBackendName").textContent = !m ? "mouseaccel / maccel" : (b.loaded ? (b.label || b.name) : "Needs setup");
     if (b?.name === "rawaccel") {
-      $("accelBackendName").textContent = b.label;
-      el.title = "Driver " + m.driver;
-      $("accelHeading").textContent = "Pointer acceleration";
-      el.nextElementSibling.textContent = "Applies to the default Raw Accel profile";
-      $("windowsAccel").hidden = false;
+      $("accelBackendName").textContent = m.loaded ? b.label : "Raw Accel · Needs setup";
+      el.title = "Raw Accel driver: " + (m.driver || "missing");
+      $("accelHeading").textContent = "Mouse acceleration";
+      if (sub) sub.textContent = "Applies your curve across Windows and games with Raw Accel";
+      const showWinBar = !!m.loaded;
+      $("windowsAccel").hidden = !showWinBar;
       $("windowsReset").disabled = !m.loaded;
-      $("windowsAccel").firstElementChild.textContent = [
-        "Driver " + m.driver, m.saved_state, m.last_apply, m.message,
-        m.driver === "missing" ? "Install the Raw Accel driver manually (see README)." : ""
-      ].filter(Boolean).join(" · ");
+      if (showWinBar) {
+        $("windowsAccel").firstElementChild.textContent = [
+          "Raw Accel running", m.saved_state, m.last_apply, m.message,
+        ].filter(Boolean).join(" · ");
+      }
+      if ($("accelTechInfo")) {
+        $("accelTechInfo").textContent = `Driver: ${m.driver || "unknown"} · ${m.saved_state || "No saved curve"}`;
+      }
       $("accelLiveBadge").parentElement.hidden = true;
       for (const marker of document.querySelectorAll(".legend .live, .legend .peak")) {
         const legend = marker.closest(".legend");
@@ -695,14 +865,25 @@ function createAccelController({ $, getActiveDpi, isAccelTabActive, setState, to
       }
       return;
     }
-    el.title = !m ? "Kernel acceleration module (helper not reachable)"
+    $("windowsAccel").hidden = true;
+    $("accelHeading").textContent = "Mouse acceleration";
+    if (sub) sub.textContent = "Smoothly adjusts pointer speed everywhere, including games";
+    if ($("accelTechInfo")) {
+      const pathHint = b?.loaded && b.params_path
+        ? `Active driver: ${b.label || b.name} (${b.params_path}). Export your current curve for Windows Raw Accel v1.7.1:`
+        : "Export your current curve for Windows Raw Accel v1.7.1:";
+      $("accelTechInfo").textContent = pathHint;
+    }
+    el.title = !m ? "Mouse acceleration driver (helper offline)"
       : b.loaded ? `Module ${b.name}${b.legacy ? " (legacy; mouseaccel replaces it)" : ""}\nParameters: ${b.params_path || "?"}\nSpeed device: ${b.speed_device || "?"}`
-      : "Neither mouseaccel nor maccel is loaded";
+      : "No mouse acceleration driver is running yet";
   }
 
-  async function loadAccel() {
+  async function loadAccel(isManualRecheck = false) {
     if (accelLoading) return;
     accelLoading = true;
+    const checkBtn = $("accelSetupCheck");
+    if (checkBtn) { checkBtn.disabled = true; checkBtn.textContent = "Checking…"; }
     try {
       const { res, data } = await fetchHelperStatus();
       if (!res.ok) throw new Error("Status unavailable");
@@ -717,51 +898,38 @@ function createAccelController({ $, getActiveDpi, isAccelTabActive, setState, to
       accelLive.maccel = m;
       renderAccelBackend(m);
       const b = accelBackendInfo(m);
+      const setup = deriveSetupStatus(data);
+      renderAccelSetup(setup, m);
       const keepDraft = dirty && accelDraftBackend === b.name;
       accelDraftBackend = b.name;
       if (!m?.loaded || m.parameters_available === false) {
         accelDraft = null;
         renderAccelDirty();
         $("accelBody").hidden = true;
-        $("accelPerm").hidden = false;
-        $("accelPerm").className = "accelnotice bad";
-        $("accelPerm").hidden = b.name === "rawaccel";
-        $("accelPerm").innerHTML = m?.loaded
-          ? `<span>${accelModuleCode(b.name)} is loaded, but its curve parameters could not all be read. Refresh after restoring read access.</span>`
-          : b.candidate
-          ? `<span>${accelModuleCode(b.candidate)} is installed but the kernel module isn't loaded. Run <code>sudo modprobe ${ACCEL_MODULES.includes(b.candidate) ? b.candidate : "mouseaccel"}</code>.</span>`
-          : `<span>No kernel acceleration module is installed. Install <code>mouseaccel</code> (or the legacy <code>maccel</code>).</span>`;
+        $("accelPerm").hidden = true;
       } else {
         $("accelBody").hidden = false;
-        const also = (b.also_loaded || []).filter((n) => ACCEL_MODULES.includes(n));
-        const group = ACCEL_MODULES.includes(m.group) ? m.group : (b.name || "maccel");
-        if (also.length) {
-          $("accelPerm").hidden = false;
-          $("accelPerm").className = "accelnotice bad";
-          $("accelPerm").innerHTML = `<span>${accelModuleCode(b.name)} and ${also.map(accelModuleCode).join(", ")} are both loaded. mouseaccel passes motion through unchanged while maccel is loaded, so these settings don't apply. Unload maccel with <code>sudo rmmod maccel</code>, then reload mouseaccel.</span>`;
-        } else if (!m.writable) {
-          $("accelPerm").hidden = false;
-          $("accelPerm").className = "accelnotice";
-          $("accelPerm").innerHTML = `<span>Read-only preview — add yourself to the <code>${group}</code> group to edit ${accelModuleCode(b.name)}: <code>sudo usermod -aG ${group} $USER</code> and log out/in.</span>`;
-        } else {
-          $("accelPerm").hidden = true;
-        }
+        $("accelPerm").hidden = true;
         if (!keepDraft) accelDraft = accelSnapshot(m);
         renderAccelParams();
         renderAccelCurve();
         renderAccelDirty();
       }
       renderDesktop();
+      if (isManualRecheck) {
+        toast(setup?.ready ? "Acceleration setup is ready" : `Checked — ${setup?.summary || "still needs setup"}`);
+      }
     } catch {
       $("accelOffline").hidden = false;
       $("accelPerm").hidden = true;
+      if ($("accelSetup")) $("accelSetup").hidden = true;
       const windows = accelLive?.maccel?.backend?.name === "rawaccel";
       if (windows) {
         $("windowsAccel").hidden = true;
         $("accelBackendName").textContent = "Raw Accel (Windows) · Offline";
         $("accelBackend").classList.add("none");
         $("accelBackend").title = "Driver state unavailable";
-        $("accelOffline").firstElementChild.textContent = "Local helper is offline. Open mousetool from Start and retry.";
+        $("accelOffline").firstElementChild.textContent = "Background helper is offline. Open mousetool from Start and check again.";
       } else {
         renderAccelBackend(null);
       }
@@ -774,8 +942,11 @@ function createAccelController({ $, getActiveDpi, isAccelTabActive, setState, to
       clearTimeout(accelMotion.statusTimer);
       if (shouldStreamMotion()) accelMotion.statusTimer = setTimeout(loadAccel, 10000);
       $("desktopGroup").hidden = true;
+      if (isManualRecheck) toast("Helper is still offline", true);
     } finally {
       accelLoading = false;
+      const btn = $("accelSetupCheck");
+      if (btn) { btn.disabled = false; btn.textContent = "Check again"; }
       syncAccelMotion();
     }
   }
@@ -826,8 +997,8 @@ function createAccelController({ $, getActiveDpi, isAccelTabActive, setState, to
     $("accelProbe").textContent = "Hover curve to inspect speed → multiplier";
   });
 
-  $("accelRefresh").addEventListener("click", () => { accelDraft = null; loadAccel(); });
-  $("accelRetry").addEventListener("click", () => loadAccel());
+  $("accelRefresh").addEventListener("click", () => { accelDraft = null; loadAccel(false); });
+  $("accelRetry").addEventListener("click", () => loadAccel(true));
   $("accelMode").addEventListener("click", (e) => {
     const b = e.target.closest("button"); if (!b || !accelDraft || !accelLive?.maccel?.writable) return;
     accelDraft.MODE = b.dataset.mode;
@@ -911,5 +1082,6 @@ export {
   accelSnapshot,
   accelBackendInfo,
   accelModuleCode,
+  deriveSetupStatus,
   createAccelController,
 };

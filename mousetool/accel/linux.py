@@ -2,6 +2,8 @@
 import glob
 import math
 import os
+import shutil
+import subprocess
 
 # mouseaccel is a maccel 0.5.9 fork with the same parameter names and value formats. It refuses to load next to
 # maccel. mousetool prefers mouseaccel when its module directory exists and falls back to maccel (legacy).
@@ -184,3 +186,228 @@ def maccel_live_config():
         where = (st.get("backend") or {}).get("params_path") or SYS
         raise OSError(f"could not read MODE/{', '.join(missing) or 'params'} from {where}")
     return {"MODE": st["mode"], **st["params"]}
+
+
+UDEV_RULES_DIRS = ("/etc/udev/rules.d", "/usr/lib/udev/rules.d", "/lib/udev/rules.d")
+SYSTEMD_USER_UNIT = "~/.config/systemd/user/mousetool.service"
+
+
+def _has_udev_rule(filename, udev_dirs=None):
+    dirs = UDEV_RULES_DIRS if udev_dirs is None else udev_dirs
+    return any(os.path.isfile(os.path.join(d, filename)) for d in dirs)
+
+
+def _check_systemd_service_active():
+    """Read-only check whether the user mousetool.service unit is active."""
+    systemctl = shutil.which("systemctl")
+    if not systemctl:
+        return None
+    try:
+        res = subprocess.run(
+            [systemctl, "--user", "is-active", "mousetool.service"],
+            capture_output=True,
+            text=True,
+            timeout=1.5,
+            check=False,
+        )
+        return res.returncode == 0 and res.stdout.strip() == "active"
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
+def linux_setup_status(state=None, udev_dirs=None, service_unit_path=None, service_active=None):
+    """Read-only Linux setup diagnostics for the Acceleration guided setup card.
+
+    Never invokes sudo, modprobe, dkms, or any mutating command.
+    """
+    st = state if state is not None else maccel_state()
+    b = st.get("backend") or {}
+    mod_name = b.get("name") or b.get("candidate") or "mouseaccel"
+    if mod_name not in ("mouseaccel", "maccel"):
+        mod_name = "mouseaccel"
+    mod_label = b.get("label") or ("maccel (legacy)" if mod_name == "maccel" else mod_name)
+
+    loaded = bool(st.get("loaded"))
+    installed = bool(st.get("installed"))
+    params_ok = bool(st.get("parameters_available"))
+    writable = bool(st.get("writable"))
+    also_loaded = [n for n in (b.get("also_loaded") or []) if n in ("mouseaccel", "maccel")]
+    group = st.get("group") or mod_name
+    if group not in ("mouseaccel", "maccel"):
+        group = "mouseaccel"
+    in_group = bool(st.get("in_group"))
+
+    mousetool_udev = _has_udev_rule("60-mousetool.rules", udev_dirs)
+    if mod_name == "mouseaccel":
+        accel_udev = _has_udev_rule("99-mouseaccel.rules", udev_dirs)
+    else:
+        accel_udev = _has_udev_rule("99-maccel.rules", udev_dirs) or bool(st.get("group_exists"))
+
+    unit_path = os.path.expanduser(service_unit_path or SYSTEMD_USER_UNIT)
+    service_installed = os.path.isfile(unit_path)
+    svc_active = _check_systemd_service_active() if service_active is None else service_active
+
+    steps = []
+
+    # Step 1: Kernel acceleration driver
+    if loaded and params_ok and not also_loaded:
+        steps.append({
+            "id": "driver",
+            "title": f"{mod_label} driver",
+            "status": "installed",
+            "description": "Running and ready for custom sensitivity curves.",
+            "command": None,
+            "url": None,
+            "url_label": None,
+        })
+    elif loaded and also_loaded:
+        steps.append({
+            "id": "driver",
+            "title": "Unload conflicting maccel driver",
+            "status": "needs_setup",
+            "description": "Both mouseaccel and maccel are loaded, so changes are ignored. Unload maccel and reload mouseaccel:",
+            "command": "sudo rmmod maccel && sudo modprobe -r mouseaccel && sudo modprobe mouseaccel",
+            "url": None,
+            "url_label": None,
+        })
+    elif loaded and not params_ok:
+        steps.append({
+            "id": "driver",
+            "title": f"Restore {mod_name} read access",
+            "status": "needs_setup",
+            "description": "The driver is loaded, but its settings could not be read. Re-apply permissions and reload it:",
+            "command": f"./install.sh --mouseaccel-perms && sudo modprobe -r {mod_name} && sudo modprobe {mod_name}",
+            "url": None,
+            "url_label": None,
+        })
+    elif installed:
+        steps.append({
+            "id": "driver",
+            "title": f"Load the {mod_name} driver",
+            "status": "needs_setup",
+            "description": f"{mod_name} is installed on this PC, but not loaded yet. Load it with:",
+            "command": f"sudo modprobe {mod_name}",
+            "url": None,
+            "url_label": None,
+        })
+    else:
+        steps.append({
+            "id": "driver",
+            "title": "Install the mouseaccel driver",
+            "status": "needs_setup",
+            "description": "Install the Linux mouseaccel driver (recommended) or legacy maccel, then load it:",
+            "command": "sudo modprobe mouseaccel",
+            "url": "https://www.maccel.org",
+            "url_label": "maccel guide (legacy)",
+        })
+
+    # Step 2: Driver write permissions & udev rules
+    if loaded and writable:
+        steps.append({
+            "id": "permissions",
+            "title": "Save permissions",
+            "status": "installed",
+            "description": "Mouse Tool can save acceleration changes directly.",
+            "command": None,
+            "url": None,
+            "url_label": None,
+        })
+    elif accel_udev and not in_group:
+        steps.append({
+            "id": "permissions",
+            "title": f"Join the {group} group",
+            "status": "needs_setup",
+            "description": "Allow Mouse Tool to save changes without root, then log out and back in:",
+            "command": f'sudo usermod -aG {group} "$USER"',
+            "url": None,
+            "url_label": None,
+        })
+    elif mod_name == "maccel":
+        steps.append({
+            "id": "permissions",
+            "title": "Join the maccel group",
+            "status": "needs_setup",
+            "description": "Allow Mouse Tool to save changes without root, then log out and back in:",
+            "command": 'sudo usermod -aG maccel "$USER"',
+            "url": None,
+            "url_label": None,
+        })
+    else:
+        steps.append({
+            "id": "permissions",
+            "title": "Allow saving without root",
+            "status": "needs_setup",
+            "description": "Install the mouseaccel permission rule and add your user to the group (then log out and back in):",
+            "command": './install.sh --mouseaccel-perms && sudo usermod -aG mouseaccel "$USER"',
+            "url": None,
+            "url_label": None,
+        })
+
+    # Step 3: Mouse USB rules & background helper service
+    if mousetool_udev and (svc_active or service_installed):
+        steps.append({
+            "id": "helper",
+            "title": "Mouse USB access & helper service",
+            "status": "installed",
+            "description": "Browser mouse permissions and the background helper are set up.",
+            "command": None,
+            "url": None,
+            "url_label": None,
+        })
+    elif not mousetool_udev:
+        steps.append({
+            "id": "helper",
+            "title": "Enable browser mouse access",
+            "status": "needs_setup",
+            "description": "Run once to install USB permission rules and start the helper at login:",
+            "command": "./install.sh --udev",
+            "url": None,
+            "url_label": None,
+        })
+    else:
+        steps.append({
+            "id": "helper",
+            "title": "Start helper automatically at login",
+            "status": "needs_setup",
+            "description": "Optional: enable the background service so Mouse Tool is always ready:",
+            "command": "./install.sh",
+            "url": None,
+            "url_label": None,
+        })
+
+    ready = bool(loaded and params_ok and writable and not also_loaded)
+    if ready:
+        summary = "Ready"
+    elif loaded and also_loaded:
+        summary = "Driver conflict detected"
+    elif loaded and not params_ok:
+        summary = "Driver needs permission repair"
+    elif loaded and not writable:
+        summary = "Needs save permission"
+    elif installed:
+        summary = "Driver not loaded"
+    else:
+        summary = "Needs a quick setup"
+
+    return {
+        "platform": "linux",
+        "ready": ready,
+        "summary": summary,
+        "driver": {
+            "name": mod_name,
+            "label": mod_label,
+            "installed": installed,
+            "loaded": loaded,
+            "writable": writable,
+            "status": "installed" if (loaded and params_ok and not also_loaded) else "needs_setup",
+        },
+        "udev": {
+            "mousetool_rules": mousetool_udev,
+            "accel_rules": accel_udev,
+        },
+        "service": {
+            "unit_installed": service_installed,
+            "active": svc_active,
+        },
+        "steps": steps,
+    }

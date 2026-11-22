@@ -295,6 +295,7 @@ class Api(BaseHTTPRequestHandler):
                 "accel": st,            # detected backend: mouseaccel, or maccel (legacy)
                 "maccel": st,           # same object, kept for older UIs
                 "accel_backend": st.get("backend"),
+                "setup": linux_accel.linux_setup_status(st),
                 "niri": desktop_pointer.niri_state(),
                 "desktop": desktop_pointer.desktop_state(),
                 "system_mice": hid_discovery.discover_system_mice(),
