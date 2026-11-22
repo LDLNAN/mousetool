@@ -220,7 +220,9 @@ class WindowsAccel:
     def state(self):
         with self.lock:
             state = {"backend": {"name": "rawaccel", "label": LABEL}, "loaded": False,
-                     "parameters_available": False, "writable": False, "last_apply": self.last,
+                     "parameters_available": False, "writable": False,
+                     "lut_supported": True, "lut_writable": False, "lut_points": None,
+                     "last_apply": self.last,
                      "saved_state": "Unverified" if self.saved.exists() else "No saved curve"}
             try:
                 active = self.read()
@@ -241,7 +243,9 @@ class WindowsAccel:
                     raise ValueError("Per-device profiles cannot be edited here")
                 if report["lossy"]:
                     raise ValueError(" ".join(report["lossy"]))
+                lut_points = cfg.pop("LUT_POINTS", None)
                 state.update(mode=cfg.pop("MODE"), params=cfg, writable=True, parameters_available=True,
+                             lut_supported=True, lut_writable=True, lut_points=lut_points,
                              message=" ".join(report["notes"]))
             except ValueError as exc:
                 state["message"] = str(exc)

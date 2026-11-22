@@ -692,6 +692,7 @@ def tune_cmd(args):
 
 def maccel_cmd(args):
     if args.set:
+        from .accel import rawaccel_export as rx
         updates = {}
         for item in args.set:
             if "=" not in item:
@@ -699,7 +700,12 @@ def maccel_cmd(args):
             k, v = item.split("=", 1)
             k = k.strip().upper()
             v = v.strip()
-            updates[k] = v if k == "MODE" else float(v)
+            if k == "MODE":
+                updates[k] = v
+            elif k == "LUT_POINTS":
+                updates[k] = rx.parse_lut_points_arg(v)
+            else:
+                updates[k] = float(v)
         print(json.dumps(linux_accel.maccel_set(updates), indent=2))
     else:
         print(json.dumps(linux_accel.maccel_state(), indent=2))

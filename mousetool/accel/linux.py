@@ -5,6 +5,18 @@ import os
 import shutil
 import subprocess
 
+from .rawaccel_export import (
+    LUT_DX_MIN,
+    LUT_MAX_POINTS,
+    LUT_MIN_POINTS,
+    LUT_X_MAX,
+    LUT_X_MIN,
+    LUT_Y_MAX,
+    LUT_Y_MIN,
+    RawAccelExportError,
+    validate_lut_points,
+)
+
 # mouseaccel is a maccel 0.5.9 fork with the same parameter names and value formats. It refuses to load next to
 # maccel. mousetool prefers mouseaccel when its module directory exists and falls back to maccel (legacy).
 SYS_MODULE = "/sys/module"         # where loaded modules appear
@@ -18,13 +30,60 @@ ACCEL_BACKENDS = (                 # detection order = preference
 SYS = None                         # override for the parameters directory (None: the detected module's)
 RESETS = None                      # override for the reset-scripts directory (None: the detected module's)
 FIX = 1 << 32                      # both modules are built with 64-bit fixed point on x86_64: value * 2^32
-MODES = ["linear", "natural", "synchronous", "no_accel"]
+LUT_STR_MAX = 3072                 # matches mouseaccel MA_LUT_STR_MAX
+MODES = ["linear", "natural", "synchronous", "no_accel", "lookup"]
 PARAMS = {
     "SENS_MULT": (0.01, 50), "YX_RATIO": (0.01, 50), "INPUT_DPI": (50, 50000), "ANGLE_ROTATION": (-180, 180),
     "ACCEL": (0, 50), "OFFSET": (0, 1000), "OUTPUT_CAP": (0, 100),
     "DECAY_RATE": (0.0001, 100), "LIMIT": (1, 100),
     "GAMMA": (0.0001, 100), "SMOOTH": (0, 1), "MOTIVITY": (1.0001, 100), "SYNC_SPEED": (0.0001, 1000),
 }
+
+
+def parse_lut_points_sysfs(raw_text):
+    """Decode mouseaccel LUT_POINTS sysfs format ('x0,y0;x1,y1;...' in Q32.32 fixed point)."""
+    if not isinstance(raw_text, str):
+        raise ValueError("LUT_POINTS sysfs text must be a string")
+    text = raw_text.rstrip("\r\n")
+    if not text or len(text) > LUT_STR_MAX:
+        raise ValueError("LUT_POINTS sysfs value is empty or too long")
+    pairs = []
+    for token in text.split(";"):
+        parts = token.split(",")
+        if len(parts) != 2 or not parts[0] or not parts[1]:
+            raise ValueError(f"malformed LUT_POINTS entry: {token!r}")
+        try:
+            xr = int(parts[0], 10)
+            yr = int(parts[1], 10)
+        except ValueError as exc:
+            raise ValueError(f"non-integer LUT_POINTS entry: {token!r}") from exc
+        pairs.append([xr / FIX, yr / FIX])
+    try:
+        return validate_lut_points(pairs)
+    except RawAccelExportError as exc:
+        raise ValueError(str(exc)) from exc
+
+
+def encode_lut_points_sysfs(points):
+    """Validate and encode [[x, y], ...] control points to mouseaccel Q32.32 sysfs format."""
+    try:
+        norm = validate_lut_points(points)
+    except RawAccelExportError as exc:
+        raise ValueError(str(exc)) from exc
+    min_dx_raw = int(round(LUT_DX_MIN * FIX))
+    encoded = []
+    prev_x_raw = None
+    for x, y in norm:
+        x_raw = int(round(x * FIX))
+        y_raw = int(round(y * FIX))
+        if prev_x_raw is not None and (x_raw - prev_x_raw) < min_dx_raw:
+            raise ValueError(f"LUT_POINTS x values must increase by at least {LUT_DX_MIN}")
+        prev_x_raw = x_raw
+        encoded.append(f"{x_raw},{y_raw}")
+    text = ";".join(encoded)
+    if len(text) > LUT_STR_MAX:
+        raise ValueError(f"encoded LUT_POINTS exceeds maximum length ({LUT_STR_MAX} bytes)")
+    return text
 
 
 def _backend_info(b, sys_module, dev_dir, src_dir, var_opt):
@@ -86,7 +145,9 @@ def maccel_state(backend=None):
     sys_dir = _params_dir(b)
     loaded = b["loaded"] if SYS is None else os.path.isdir(SYS)
     st = {"installed": b["installed"] or loaded, "parameters_available": False,
-          "loaded": loaded, "writable": False, "params": {}, "mode": None,
+          "loaded": loaded, "writable": False,
+          "lut_supported": False, "lut_writable": False, "lut_points": None,
+          "params": {}, "mode": None,
           "in_group": False, "group_exists": False, "group": b.get("group"),
           "backend": {k: b.get(k) for k in ("name", "label", "legacy", "loaded", "params_path", "speed_device",
                                              "also_loaded", "installed_backends")}}
@@ -116,6 +177,16 @@ def maccel_state(backend=None):
         st["mode"] = MODES[m % len(MODES)]
     except (OSError, ValueError):
         pass
+    lut_path = f"{sys_dir}/LUT_POINTS"
+    lut_supported = os.path.isfile(lut_path)
+    st["lut_supported"] = lut_supported
+    if lut_supported:
+        st["lut_writable"] = os.access(lut_path, os.W_OK)
+        try:
+            with open(lut_path) as f:
+                st["lut_points"] = parse_lut_points_sysfs(f.read())
+        except (OSError, ValueError):
+            st["lut_points"] = None
     st["parameters_available"] = st["mode"] is not None and st["params"].keys() == PARAMS.keys()
     st["writable"] = st["parameters_available"] and all(
         os.access(f"{sys_dir}/{name}", os.W_OK) for name in ("MODE", *PARAMS))
@@ -129,6 +200,9 @@ def _write_param(name, raw, backend):
     sys_dir = _params_dir(backend)
     with open(f"{sys_dir}/{name}", "w") as f:
         f.write(str(raw))
+    if name == "LUT_POINTS":
+        # Existing udev reset helper parses single integer params only; avoid writing semicolon syntax there.
+        return
     resets = _resets_dir(backend)
     if not resets:
         return
@@ -152,12 +226,26 @@ def maccel_set(updates, expected_backend=None):
     if not st["writable"]:
         grp_name = b.get("group") or "mouseaccel"
         raise PermissionError(f"no write access to {label} — add yourself to the {grp_name} group and log in again")
-    todo = []
+    needs_lut = "LUT_POINTS" in updates or updates.get("MODE") == "lookup"
+    if needs_lut:
+        if not st["lut_supported"]:
+            raise PermissionError("Custom curves need an updated mouseaccel driver (LUT_POINTS parameter not present)")
+        if not st["lut_writable"]:
+            grp_name = b.get("group") or "mouseaccel"
+            raise PermissionError(
+                f"no write access to {label} LUT_POINTS — add yourself to the {grp_name} group and log in again"
+            )
+    lut_todo = None
+    scalar_todo = []
+    mode_todo = None
     for k, v in updates.items():
         if k == "MODE":
             if v not in MODES:
                 raise ValueError(f"unknown mode {v!r}")
-            todo.append(("MODE", MODES.index(v)))
+            mode_todo = ("MODE", MODES.index(v))
+            continue
+        if k == "LUT_POINTS":
+            lut_todo = ("LUT_POINTS", encode_lut_points_sysfs(v))
             continue
         if k not in PARAMS:
             raise ValueError(f"unknown parameter {k!r}")
@@ -166,8 +254,10 @@ def maccel_set(updates, expected_backend=None):
         lo, hi = PARAMS[k]
         if not lo <= v <= hi:
             raise ValueError(f"{k} must be between {lo} and {hi}")
-        todo.append((k, int(round(v * FIX))))
-    for k, raw in todo:
+        scalar_todo.append((k, int(round(v * FIX))))
+    # Always write LUT_POINTS before MODE so switching into lookup mode (MODE=4) is atomic with the new curve.
+    ordered = ([lut_todo] if lut_todo is not None else []) + scalar_todo + ([mode_todo] if mode_todo is not None else [])
+    for k, raw in ordered:
         _write_param(k, raw, b)
     return maccel_state(b)
 
@@ -185,7 +275,10 @@ def maccel_live_config():
     if st["mode"] is None or missing:
         where = (st.get("backend") or {}).get("params_path") or SYS
         raise OSError(f"could not read MODE/{', '.join(missing) or 'params'} from {where}")
-    return {"MODE": st["mode"], **st["params"]}
+    cfg = {"MODE": st["mode"], **st["params"]}
+    if st.get("lut_points") is not None:
+        cfg["LUT_POINTS"] = st["lut_points"]
+    return cfg
 
 
 UDEV_RULES_DIRS = ("/etc/udev/rules.d", "/usr/lib/udev/rules.d", "/lib/udev/rules.d")

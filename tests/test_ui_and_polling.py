@@ -713,5 +713,151 @@ class TestMT024UxPolishAndTierModal(unittest.TestCase):
         self.assertEqual(out["kbdHome"], 100)
 
 
+class TestMT014CustomAccelCurveUI(unittest.TestCase):
+    def test_accel_lut_math_insert_drag_clamp_delete_floor_and_presets(self):
+        script = """
+        import {
+          LUT_MIN_POINTS,
+          LUT_MAX_POINTS,
+          LUT_STARTER_POINTS,
+          LUT_PRESETS,
+          evalLutSens,
+          insertLutPoint,
+          moveLutPoint,
+          removeLutPoint,
+          addMidpointLutPoint,
+          getLutPreset,
+          matchingLutPresetId,
+        } from "./web/accel_lut.js";
+
+        // Evaluation: flat clamp below x0, linear interpolation inside, flat clamp above x_last
+        const curve = [[2, 0.8], [10, 1.2], [20, 2.0]];
+        const evals = {
+          below: evalLutSens(0.5, curve),
+          at0: evalLutSens(2, curve),
+          mid1: evalLutSens(6, curve),
+          mid2: evalLutSens(15, curve),
+          atLast: evalLutSens(20, curve),
+          above: evalLutSens(80, curve),
+        };
+
+        // Insert point in sorted order
+        const ins = insertLutPoint(curve, 12.6, 1.51, { shiftKey: false, maxX: 40 });
+
+        // Drag middle point past neighbor clamps strictly between neighbors without inverting
+        const clampedRight = moveLutPoint(ins.points, ins.index, 99, 12.5, { shiftKey: false, maxX: 40 });
+        const clampedLeft = moveLutPoint(ins.points, ins.index, 0, -2, { shiftKey: false, maxX: 40 });
+
+        // Shift fine snap (0.05 X / 0.01 Y) vs coarse snap (0.25 X / 0.02 Y)
+        const fine = moveLutPoint(ins.points, ins.index, 12.56, 1.534, { shiftKey: true, maxX: 40 });
+        const coarse = moveLutPoint(ins.points, ins.index, 12.56, 1.534, { shiftKey: false, maxX: 40 });
+
+        // Delete down to min 2 floor, then refuse deleting below 2
+        const del1 = removeLutPoint(ins.points, 2);
+        const del2 = removeLutPoint(del1.points, 1);
+        const delFloor = removeLutPoint(del2.points, 0);
+
+        // Max 64-point cap enforced
+        let full = [[0, 1], [1, 1]];
+        for (let i = 2; i < LUT_MAX_POINTS; i++) {
+          full = insertLutPoint(full, i, 1.1, { snap: false, maxX: 100 }).points;
+        }
+        const overCap = insertLutPoint(full, 80, 1.5, { snap: false, maxX: 100 });
+
+        // Midpoint button helper & presets
+        const midAdded = addMidpointLutPoint(LUT_STARTER_POINTS, 1, 40);
+        const presetIds = LUT_PRESETS.map((p) => p.id);
+        const scurve = getLutPreset("scurve");
+        const matched = matchingLutPresetId(scurve);
+
+        console.log(JSON.stringify({
+          evals,
+          ins,
+          clampedRightPt: clampedRight[ins.index],
+          clampedLeftPt: clampedLeft[ins.index],
+          finePt: fine[ins.index],
+          coarsePt: coarse[ins.index],
+          del1Len: del1.points.length,
+          del2Len: del2.points.length,
+          delFloor,
+          fullLen: full.length,
+          overCapAdded: overCap.added,
+          overCapReason: overCap.reason,
+          midAdded,
+          presetIds,
+          matched,
+        }));
+        """
+        res = json.loads(_run_node_esm(script))
+        self.assertAlmostEqual(res["evals"]["below"], 0.8)
+        self.assertAlmostEqual(res["evals"]["at0"], 0.8)
+        self.assertAlmostEqual(res["evals"]["mid1"], 1.0)
+        self.assertAlmostEqual(res["evals"]["mid2"], 1.6)
+        self.assertAlmostEqual(res["evals"]["atLast"], 2.0)
+        self.assertAlmostEqual(res["evals"]["above"], 2.0)
+
+        self.assertTrue(res["ins"]["added"])
+        self.assertEqual(res["ins"]["index"], 2)
+        self.assertEqual(res["ins"]["points"][2], [12.5, 1.52])
+
+        # Clamped between x=10 and x=20 with 0.1 gap, and Y clamped to [0.05, 10.0]
+        self.assertEqual(res["clampedRightPt"], [19.9, 10.0])
+        self.assertEqual(res["clampedLeftPt"], [10.1, 0.05])
+        self.assertEqual(res["finePt"], [12.55, 1.53])
+        self.assertEqual(res["coarsePt"], [12.5, 1.54])
+
+        self.assertEqual(res["del1Len"], 3)
+        self.assertEqual(res["del2Len"], 2)
+        self.assertFalse(res["delFloor"]["removed"])
+        self.assertEqual(res["delFloor"]["reason"], "min")
+        self.assertEqual(len(res["delFloor"]["points"]), 2)
+
+        self.assertEqual(res["fullLen"], 64)
+        self.assertFalse(res["overCapAdded"])
+        self.assertEqual(res["overCapReason"], "max")
+
+        self.assertTrue(res["midAdded"]["added"])
+        self.assertEqual(len(res["midAdded"]["points"]), 5)
+        self.assertEqual(res["presetIds"], ["flat", "ramp", "scurve", "stepcap"])
+        self.assertEqual(res["matched"], "scurve")
+
+    def test_custom_mode_html_css_and_preview_only_notice_contracts(self):
+        html = (WEB_DIR / "index.html").read_text(encoding="utf-8")
+        css = (WEB_DIR / "styles.css").read_text(encoding="utf-8")
+        accel_js = (WEB_DIR / "accel_graph.js").read_text(encoding="utf-8")
+
+        self.assertIn('data-mode="lookup">Custom</button>', html)
+        self.assertIn('id="accelLutNotice"', html)
+        self.assertIn(".curvesvg .lut-pt", css)
+        self.assertIn(".curvesvg .lut-badge-bg", css)
+        self.assertIn("maccel (legacy) does not support Custom curves", accel_js)
+        self.assertIn("does not expose LUT_POINTS yet", accel_js)
+        self.assertIn('role="slider"', accel_js)
+
+        # Verify accelSnapshot preserves exact loaded LUT points and falls back to 4-point starter when absent
+        script = """
+        import { accelSnapshot, maccelEval } from "./web/accel_graph.js";
+        const withKernelDefault = accelSnapshot({
+          mode: "lookup",
+          params: { SENS_MULT: 1, YX_RATIO: 1, INPUT_DPI: 1000, ANGLE_ROTATION: 0, ACCEL: 0, OFFSET: 0, OUTPUT_CAP: 0, DECAY_RATE: 0.1, LIMIT: 1.5, GAMMA: 1, SMOOTH: 0.5, MOTIVITY: 1.5, SYNC_SPEED: 5 },
+          lut_supported: true,
+          lut_points: [[0, 1], [10, 1]],
+        });
+        const withoutLut = accelSnapshot({
+          mode: "linear",
+          params: { SENS_MULT: 1, YX_RATIO: 1, INPUT_DPI: 1000, ANGLE_ROTATION: 0, ACCEL: 0, OFFSET: 0, OUTPUT_CAP: 0, DECAY_RATE: 0.1, LIMIT: 1.5, GAMMA: 1, SMOOTH: 0.5, MOTIVITY: 1.5, SYNC_SPEED: 5 },
+          lut_supported: false,
+          lut_points: null,
+        });
+        const ev = maccelEval(10, { MODE: "lookup", SENS_MULT: 1.2, YX_RATIO: 0.5, LUT_POINTS: [[0, 1], [20, 2]] });
+        console.log(JSON.stringify({ withKernelDefault: withKernelDefault.LUT_POINTS, withoutLut: withoutLut.LUT_POINTS, ev }));
+        """
+        out = json.loads(_run_node_esm(script))
+        self.assertEqual(out["withKernelDefault"], [[0, 1], [10, 1]])
+        self.assertEqual(len(out["withoutLut"]), 4)
+        self.assertAlmostEqual(out["ev"][0], 1.8)
+        self.assertAlmostEqual(out["ev"][1], 0.9)
+
+
 if __name__ == "__main__":
     unittest.main()

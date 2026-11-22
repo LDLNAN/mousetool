@@ -26,10 +26,13 @@ TOL = rx.DEFAULT_TOLERANCE
 
 
 def cfg(**kw):
-    return {**rx.DEFAULTS, **kw}
+    out = {**rx.DEFAULTS, **kw}
+    if out.get("MODE") == "lookup" and "LUT_POINTS" not in kw:
+        out["LUT_POINTS"] = [[0.0, 1.0], [5.0, 1.0], [15.0, 1.4], [30.0, 1.6]]
+    return out
 
 
-# One fixture per behaviour that matters for the mapping, all four modes covered.
+# One fixture per behaviour that matters for the mapping, all five modes covered.
 FIXTURES = {
     "linear_uncapped": cfg(MODE="linear", ACCEL=0.05, OFFSET=2, OUTPUT_CAP=0),
     "linear_capped": cfg(MODE="linear", ACCEL=0.1, OFFSET=1.5, OUTPUT_CAP=2.5, SENS_MULT=0.8, YX_RATIO=1.2,
@@ -44,6 +47,10 @@ FIXTURES = {
     "synchronous_sharp_edge": cfg(MODE="synchronous", GAMMA=0.5, SMOOTH=1 / 32, MOTIVITY=2, SYNC_SPEED=4),
     "synchronous_smooth_1": cfg(MODE="synchronous", GAMMA=0.3, SMOOTH=1, MOTIVITY=10, SYNC_SPEED=20),
     "no_accel": cfg(MODE="no_accel", SENS_MULT=0.5, YX_RATIO=2, ANGLE_ROTATION=45, INPUT_DPI=3200),
+    "lookup_ramp": cfg(MODE="lookup", ACCEL=0.005, SENS_MULT=0.9, YX_RATIO=1.15, INPUT_DPI=1600, ANGLE_ROTATION=2.5,
+                       LUT_POINTS=[[0.0, 1.0], [5.0, 1.0], [15.0, 1.4], [30.0, 1.6]]),
+    "lookup_scurve": cfg(MODE="lookup", ACCEL=0.005,
+                         LUT_POINTS=[[1.5, 0.7], [6.0, 0.9], [12.5, 1.35], [22.0, 1.8], [40.0, 1.8]]),
 }
 
 
@@ -406,6 +413,10 @@ class TestVersionedRoundTrip(unittest.TestCase):
             c = {"MODE": rng.choice(rx.MODES)}
             for p, (lo, hi) in rx.PARAMS.items():
                 c[p] = rng.uniform(lo, hi)
+            if c["MODE"] == "lookup":
+                n_pts = rng.randint(2, 8)
+                xs = sorted(rng.sample([round(k * 0.25, 2) for k in range(400)], n_pts))
+                c["LUT_POINTS"] = [[float(x), round(rng.uniform(0.2, 4.0), 4)] for x in xs]
             configs.append(c)
         for c in configs:
             for include_check in (True, False):
@@ -995,6 +1006,131 @@ class TestVerifyRound2Regressions(ScratchCli, unittest.TestCase):
         line = next(x for x in res.stderr.splitlines() if x.startswith("curve check:"))
         self.assertIn("returns exactly 1x within 1e-9 counts/ms of SYNC_SPEED", line)
         self.assertNotIn("see notes", res.stderr)
+
+
+class TestCustomLutMode(ScratchCli, unittest.TestCase):
+    """MT-014: Custom Lookup-Table (MODE='lookup') forward/reverse mapping, validation, edge speeds & JS parity."""
+
+    def test_lookup_forward_reverse_and_curve_check_exact_equivalence(self):
+        pts = [[1.0, 0.75], [5.5, 1.0], [12.0, 1.4], [25.0, 1.85], [40.0, 1.6]]
+        c = cfg(MODE="lookup", ACCEL=0.005, SENS_MULT=0.85, YX_RATIO=1.2, INPUT_DPI=1600,
+                ANGLE_ROTATION=-2.0, LUT_POINTS=pts)
+        settings, mapping = rx.maccel_to_rawaccel(c)
+        self.assertEqual(rx.validate_settings(settings), [])
+        ax = args_x(settings)
+        self.assertEqual(ax["mode"], "lut")
+        self.assertFalse(ax[rx.K_GAIN])
+        self.assertEqual(ax["data"], [1.0, 0.75, 5.5, 1.0, 12.0, 1.4, 25.0, 1.85, 40.0, 1.6])
+        self.assertEqual(mapping["lossy"], [])
+        self.assertFalse(mapping["flat"])
+
+        # Edge speeds cover every knot plus surrounding epsilons and midpoints
+        edges = rx.edge_speeds(c)
+        for kx, _ in pts:
+            self.assertIn(kx, edges)
+            self.assertTrue(any(abs(x - (kx + 1e-6 * kx)) < 1e-12 for x in edges))
+        self.assertIn(0.5 * (1.0 + 5.5), edges)
+
+        # Exact curve_check equivalence (< 1e-12)
+        chk = rx.curve_check(c, settings=settings)
+        self.assertTrue(chk["equivalent"], chk)
+        self.assertLessEqual(chk["max_rel_error"], 1e-12)
+        self.assertLessEqual(chk["maccel_formula_max_rel_error"], 1e-12)
+        self.assertLessEqual(chk["pipeline_max_rel_error"], 1e-12)
+
+        # Reverse mapping round-trip
+        back, rep = rx.rawaccel_to_maccel(settings)
+        self.assertEqual(back["MODE"], "lookup")
+        self.assertEqual(back["LUT_POINTS"], pts)
+        self.assertEqual(rep["lossy"], [])
+        self.assertEqual(rx.maccel_to_rawaccel(back)[0], settings)
+
+        # Hand-verified clamp & linear interpolation values
+        p = prof_of(settings)
+        self.assertAlmostEqual(rx.rawaccel_profile_sens(0.2, p)[0], 0.75 * 0.85, places=14)   # below x0
+        self.assertAlmostEqual(rx.rawaccel_profile_sens(1.0, p)[0], 0.75 * 0.85, places=14)   # at x0
+        self.assertAlmostEqual(rx.rawaccel_profile_sens(3.25, p)[0], 0.875 * 0.85, places=14) # midpoint
+        self.assertAlmostEqual(rx.rawaccel_profile_sens(99.0, p)[0], 1.6 * 0.85, places=14)   # above x_last
+        self.assertAlmostEqual(rx.rawaccel_profile_sens(99.0, p)[1], 1.6 * 0.85 * 1.2, places=14)
+
+    def test_lookup_rejections_for_missing_velocity_and_malformed_tables(self):
+        # Missing LUT_POINTS when MODE == "lookup"
+        no_lut = {**rx.DEFAULTS, "MODE": "lookup"}
+        with self.assertRaisesRegex(rx.RawAccelExportError, "missing maccel parameter.*LUT_POINTS"):
+            rx.normalize_maccel(no_lut)
+
+        # Reject Velocity LUT (Gain = true) on import
+        s, _ = rx.maccel_to_rawaccel(FIXTURES["lookup_ramp"])
+        vel = copy.deepcopy(s)
+        args_x(vel)[rx.K_GAIN] = True
+        with self.assertRaisesRegex(rx.RawAccelExportError, "Velocity mode"):
+            rx.rawaccel_to_maccel(vel)
+
+        # Malformed / out-of-range / non-monotonic / too-few / too-many points
+        bad_tables = [
+            ([], "between 2 and 64"),
+            ([[0.0, 1.0]], "between 2 and 64"),
+            ([[float(i), 1.0] for i in range(65)], "between 2 and 64"),
+            ([[5.0, 1.0], [5.0, 1.5]], "strictly greater"),
+            ([[5.0, 1.0], [4.0, 1.5]], "strictly greater"),
+            ([[1.0, 1.0], [1.0004, 1.5]], "at least 0.001"),
+            ([[-0.01, 1.0], [10.0, 1.5]], "between 0 and 1000"),
+            ([[0.0, 1.0], [1000.5, 1.5]], "between 0 and 1000"),
+            ([[0.0, 0.04], [10.0, 1.5]], "between 0.05 and 10"),
+            ([[0.0, 1.0], [10.0, 10.01]], "between 0.05 and 10"),
+            ([[0.0, float("nan")], [10.0, 1.5]], "finite numbers"),
+            ([[0.0, True], [10.0, 1.5]], "finite numbers"),
+            ([[0.0], [10.0, 1.5]], "pair"),
+        ]
+        for bad, pattern in bad_tables:
+            with self.subTest(bad=bad), self.assertRaisesRegex(rx.RawAccelExportError, pattern):
+                rx.normalize_maccel(cfg(MODE="lookup", LUT_POINTS=bad))
+
+        # validate_settings catches odd-length and non-monotonic Raw Accel LUT data
+        for mutate, msg in (
+            (lambda d: args_x(d).update(data=[0.0, 1.0, 10.0]), "at least 2 points"),
+            (lambda d: args_x(d).update(data=[0.0, 1.0, 5.0, 1.2, 10.0]), "x, y pairs"),
+            (lambda d: args_x(d).update(data=[5.0, 1.0, 5.0, 1.2]), "strictly increasing"),
+        ):
+            t = copy.deepcopy(s)
+            mutate(t)
+            with self.subTest(msg=msg):
+                self.assertTrue(any(msg in e for e in rx.validate_settings(t)), rx.validate_settings(t))
+
+    @unittest.skipUnless(shutil.which("node"), "node not installed")
+    def test_js_maccel_eval_matches_python_and_rawaccel_on_lookup_curves(self):
+        with open(os.path.join(REPO, "web", "accel_graph.js")) as f:
+            src = f.read()
+        js = re.search(r"^(?:export )?function maccelEval\(x, cfg\) \{.*?^\}$", src, re.S | re.M).group(0).removeprefix("export ")
+        pts64 = [[round(i * 1.5, 3), round(0.5 + 1.8 * math.sin(i / 63.0 * math.pi), 4)] for i in range(64)]
+        curves_list = [
+            FIXTURES["lookup_ramp"],
+            FIXTURES["lookup_scurve"],
+            cfg(MODE="lookup", ACCEL=0.005, SENS_MULT=1.35, YX_RATIO=0.75, LUT_POINTS=pts64),
+        ]
+        cases = []
+        for c in curves_list:
+            speeds = sorted(set([0.001, 0.5, 1.0, 5.0, 12.5, 25.0, 40.0, 120.0] + rx.edge_speeds(c)[::4]))
+            for x in speeds:
+                cases.append((x, c))
+        script = (js + "\nlet d='';process.stdin.on('data',c=>d+=c).on('end',()=>{"
+                  "const out=JSON.parse(d).map(([x,c])=>maccelEval(x,c));process.stdout.write(JSON.stringify(out));});")
+        res = subprocess.run(["node", "-e", script], input=json.dumps(cases), capture_output=True, text=True, timeout=60)
+        self.assertEqual(res.returncode, 0, res.stderr)
+        js_vals = json.loads(res.stdout)
+        worst = 0.0
+        for (x, c), (jx, jy) in zip(cases, js_vals):
+            px, py = rx.app_sens(x, c)
+            rax, ray = rx.rawaccel_profile_sens(x, prof_of(rx.maccel_to_rawaccel(c)[0]))
+            worst = max(worst, rx._rel(jx, px), rx._rel(jy, py), rx._rel(jx, rax), rx._rel(jy, ray))
+        self.assertLessEqual(worst, 1e-12)
+
+    def test_cli_preview_and_export_with_lookup_set(self):
+        res = self.cli(["preview", "--set", "MODE=lookup", "LUT_POINTS=0,1;10,1.5;25,2.0", "ACCEL=0.005"])
+        self.assertEqual(res.returncode, 0, res.stderr)
+        self.assertIn("Raw Accel lut (Gain off)", res.stdout)
+        self.assertIn("EQUIVALENT:", res.stdout)
+        self.assertIn("LUT_POINTS", res.stdout)
 
 
 if __name__ == "__main__":
