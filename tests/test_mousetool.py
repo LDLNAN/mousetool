@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
+import fcntl
+import glob
 import http.client
 import json
 import os
 import re
 import struct
+import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -12,6 +16,14 @@ from http.server import ThreadingHTTPServer
 from unittest import mock
 
 import mousetool
+from mousetool import battery as battery_mod
+from mousetool import cli as cli_mod
+from mousetool import desktop_pointer as desktop_mod
+from mousetool import hid_discovery as hid_mod
+from mousetool import motion as motion_mod
+from mousetool.accel import linux as linux_accel
+
+REPO_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 class TestRazerProtocol(unittest.TestCase):
@@ -36,8 +48,7 @@ class TestRazerProtocol(unittest.TestCase):
         self.assertLess(mousetool.DEVICES[0x00B3][2], mousetool.DEVICES[0x00A6][2])
 
     def test_device_lists_consistent_across_repo(self):
-        repo_dir = os.path.dirname(os.path.abspath(__file__))
-        with open(os.path.join(repo_dir, "60-mousetool.rules")) as f:
+        with open(os.path.join(REPO_DIR, "platform", "linux", "60-mousetool.rules")) as f:
             rules_txt = f.read()
         rules_vp = {
             (int(v, 16), int(p, 16))
@@ -46,8 +57,13 @@ class TestRazerProtocol(unittest.TestCase):
                 rules_txt,
             )
         }
-        with open(os.path.join(repo_dir, "index.html")) as f:
-            html = f.read()
+        web_js_parts = []
+        drivers_dir = os.path.join(REPO_DIR, "web", "drivers")
+        for fname in sorted(os.listdir(drivers_dir)):
+            if fname.endswith(".js"):
+                with open(os.path.join(drivers_dir, fname)) as f:
+                    web_js_parts.append(f.read())
+        html = "\n".join(web_js_parts)
 
         single_vid_tables = [
             ("DEVICES", mousetool.DEVICES, mousetool.RAZER_VID),
@@ -60,11 +76,11 @@ class TestRazerProtocol(unittest.TestCase):
         ]
         all_py_vp = set()
         for js_name, py_map, vid in single_vid_tables:
-            m = re.search(rf"const {js_name} = \{{(.*?)\n\}};", html, re.S)
-            self.assertIsNotNone(m, f"Missing {js_name} in index.html")
+            m = re.search(rf"(?:export )?const {js_name} = \{{(.*?)\n\}};", html, re.S)
+            self.assertIsNotNone(m, f"Missing {js_name} in web/drivers/*.js")
             html_pids = {int(p, 16) for p in re.findall(r"0x([0-9a-fA-F]{4}):", m.group(1))}
             py_pids = set(py_map.keys())
-            self.assertEqual(py_pids, html_pids, f"index.html mismatch for {js_name}")
+            self.assertEqual(py_pids, html_pids, f"web/drivers/*.js mismatch for {js_name}")
             all_py_vp |= {(vid, pid) for pid in py_pids}
 
         multi_vid_tables = [
@@ -75,20 +91,20 @@ class TestRazerProtocol(unittest.TestCase):
             ("GLORIOUS_PIXART", mousetool.GLORIOUS_PIXART),
         ]
         for js_name, py_map in multi_vid_tables:
-            m = re.search(rf"const {js_name} = \{{(.*?)\n\}};", html, re.S)
-            self.assertIsNotNone(m, f"Missing {js_name} in index.html")
+            m = re.search(rf"(?:export )?const {js_name} = \{{(.*?)\n\}};", html, re.S)
+            self.assertIsNotNone(m, f"Missing {js_name} in web/drivers/*.js")
             html_vp = {
                 (int(v, 16), int(p, 16))
                 for v, p in re.findall(r'"([0-9a-fA-F]{4}):([0-9a-fA-F]{4})":', m.group(1))
             }
             py_vp = set(py_map.keys())
-            self.assertEqual(py_vp, html_vp, f"index.html mismatch for {js_name}")
+            self.assertEqual(py_vp, html_vp, f"web/drivers/*.js mismatch for {js_name}")
             all_py_vp |= py_vp
 
         self.assertEqual(all_py_vp, rules_vp, "udev rules mismatch vs Python device registries")
 
-        m_atk = re.search(r"const ATK_PRODUCTS = \{(.*?)\n\};", html, re.S)
-        self.assertIsNotNone(m_atk, "Missing ATK_PRODUCTS in index.html")
+        m_atk = re.search(r"(?:export )?const ATK_PRODUCTS = \{(.*?)\n\};", html, re.S)
+        self.assertIsNotNone(m_atk, "Missing ATK_PRODUCTS in web/drivers/*.js")
         html_atk = {(int(c), int(mid)) for c, mid in re.findall(r'"(\d+):(\d+)":', m_atk.group(1))}
         self.assertEqual(set(mousetool.ATK_PRODUCTS.keys()), html_atk, "ATK_PRODUCTS mismatch")
 
@@ -235,7 +251,7 @@ class TestMultiMouseDiscovery(unittest.TestCase):
                 "link": "USB cable",
             },
         ]
-        with mock.patch.object(mousetool, "discover_mice", return_value=fake):
+        with mock.patch.object(hid_mod, "discover_mice", return_value=fake):
             self.assertEqual(mousetool.select_mice()[0]["driver"], "razer")
             self.assertEqual(len(mousetool.select_mice(all_devices=True)), 3)
             self.assertEqual(mousetool.select_mice("2")[0]["pid"], 0x1964)
@@ -282,9 +298,9 @@ class TestMultiMouseDiscovery(unittest.TestCase):
             with open(os.path.join(m2, "device", "uevent"), "w") as f:
                 f.write("PRODUCT=3/461/4e66/110\nPHYS=usb-0000:00:14.0-2/input0\n")
 
-            with mock.patch.object(mousetool, "discover_mice", return_value=fake_cfg), \
-                 mock.patch.object(mousetool, "_sysfs_batteries", return_value={}), \
-                 mock.patch.object(mousetool.glob, "glob", return_value=[m1, m2]):
+            with mock.patch.object(hid_mod, "discover_mice", return_value=fake_cfg), \
+                 mock.patch.object(hid_mod, "_sysfs_batteries", return_value={}), \
+                 mock.patch.object(glob, "glob", return_value=[m1, m2]):
                 res = mousetool.discover_system_mice()
             self.assertEqual(len(res), 2)
             self.assertEqual(res[0]["driver"], "razer")
@@ -307,7 +323,7 @@ class TestMaccelAndNiri(unittest.TestCase):
             with open(os.path.join(sys_dir, "MODE"), "w") as f:
                 f.write("0")
 
-            with mock.patch.object(mousetool, "SYS", sys_dir), mock.patch.object(mousetool, "RESETS", resets_dir):
+            with mock.patch.object(linux_accel, "SYS", sys_dir), mock.patch.object(linux_accel, "RESETS", resets_dir):
                 st = mousetool.maccel_set({"MODE": "natural", "LIMIT": 1.5, "DECAY_RATE": 0.25})
                 self.assertEqual(st["mode"], "natural")
                 self.assertAlmostEqual(st["params"]["LIMIT"], 1.5)
@@ -398,8 +414,8 @@ class TestAccelBackend(unittest.TestCase):
 
     def _patched(self, **tree):
         paths = _make_accel_tree(self.root, **tree)
-        stack = [mock.patch.object(mousetool, k, v) for k, v in paths.items()]
-        stack += [mock.patch.object(mousetool, "SYS", None), mock.patch.object(mousetool, "RESETS", None)]
+        stack = [mock.patch.object(linux_accel, k, v) for k, v in paths.items()]
+        stack += [mock.patch.object(linux_accel, "SYS", None), mock.patch.object(linux_accel, "RESETS", None)]
         for p in stack:
             p.start()
             self.addCleanup(p.stop)
@@ -516,7 +532,7 @@ class TestAccelBackend(unittest.TestCase):
 
     def test_read_only_params_name_the_module_group(self):
         paths = self._patched(loaded=("mouseaccel",))
-        with mock.patch.object(mousetool.os, "access", return_value=False):
+        with mock.patch.object(os, "access", return_value=False):
             with self.assertRaisesRegex(PermissionError, "mouseaccel group"):
                 mousetool.maccel_set({"LIMIT": 1.5})
         self.assertEqual(self._read("sys", "module", "mouseaccel", "parameters", "LIMIT"), str(mousetool.FIX))
@@ -568,9 +584,9 @@ class TestAccelBackend(unittest.TestCase):
         t.start()
         try:
             with mock.patch.dict(os.environ, {"MOUSETOOL_DESKTOP": "xfce"}), \
-                 mock.patch.object(mousetool, "niri_state", return_value={}), \
-                 mock.patch.object(mousetool, "discover_system_mice", return_value=[]), \
-                 mock.patch.object(mousetool.MOTION_HUB, "refresh_dpi"):
+                 mock.patch.object(desktop_mod, "niri_state", return_value={}), \
+                 mock.patch.object(hid_mod, "discover_system_mice", return_value=[]), \
+                 mock.patch.object(motion_mod.MOTION_HUB, "refresh_dpi"):
                 c = http.client.HTTPConnection("127.0.0.1", srv.server_address[1], timeout=2)
                 c.request("GET", "/api/status", headers={"Origin": "null"})
                 body = json.loads(c.getresponse().read())
@@ -614,8 +630,8 @@ class TestAccelBackend(unittest.TestCase):
 
     def test_cli_accel_alias(self):
         for cmd in ("accel", "maccel"):
-            with mock.patch.object(mousetool.sys, "argv", ["mousetool.py", cmd]), \
-                 mock.patch.object(mousetool, "maccel_state", return_value={"backend": {"name": "mouseaccel"}}), \
+            with mock.patch.object(sys, "argv", ["mousetool.py", cmd]), \
+                 mock.patch.object(linux_accel, "maccel_state", return_value={"backend": {"name": "mouseaccel"}}), \
                  mock.patch("builtins.print") as out:
                 mousetool.main()
             self.assertIn('"mouseaccel"', out.call_args[0][0])
@@ -624,7 +640,7 @@ class TestAccelBackend(unittest.TestCase):
 class TestMouseaccelUdevHelper(unittest.TestCase):
     """99-mouseaccel.rules helper on a fixture tree: saved values are parsed, never executed."""
 
-    HELPER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "mouseaccel_param_ownership_and_resets")
+    HELPER = os.path.join(REPO_DIR, "platform", "linux", "mouseaccel_param_ownership_and_resets")
 
     def test_rule_and_helper_names(self):
         with open(os.path.join(os.path.dirname(self.HELPER), "99-mouseaccel.rules")) as f:
@@ -734,9 +750,9 @@ class TestLocalApi(unittest.TestCase):
         fake_sys_mice = [{"id": "egg:1964:/dev/hidraw11", "driver": "egg", "name": "Endgame Gear OP1 8k", "configurable": True}]
         try:
             with mock.patch.dict(os.environ, {"MOUSETOOL_DESKTOP": "xfce"}), \
-                 mock.patch.object(mousetool, "maccel_state", return_value={"loaded": False}), \
-                 mock.patch.object(mousetool, "niri_state", return_value={"accel_profile": "flat", "accel_speed": 0.0}), \
-                 mock.patch.object(mousetool, "discover_system_mice", return_value=fake_sys_mice):
+                 mock.patch.object(linux_accel, "maccel_state", return_value={"loaded": False}), \
+                 mock.patch.object(desktop_mod, "niri_state", return_value={"accel_profile": "flat", "accel_speed": 0.0}), \
+                 mock.patch.object(hid_mod, "discover_system_mice", return_value=fake_sys_mice):
                 c = http.client.HTTPConnection("127.0.0.1", port, timeout=2)
                 c.request("GET", "/api/status", headers={"Origin": "null"})
                 r = c.getresponse()
@@ -792,7 +808,7 @@ class TestLocalApi(unittest.TestCase):
                 self.assertEqual(r.status, 403)
 
                 # Valid POST to /api/niri
-                with mock.patch.object(mousetool, "niri_set", return_value={"accel_profile": "adaptive", "accel_speed": 0.1}) as m_niri:
+                with mock.patch.object(desktop_mod, "niri_set", return_value={"accel_profile": "adaptive", "accel_speed": 0.1}) as m_niri:
                     c.request(
                         "POST",
                         "/api/niri",
@@ -923,20 +939,20 @@ class TestUniversalProtocols(unittest.TestCase):
             motion_jitter = glass_mode = force_max_fps = led_liftoff_disabled = None
             left_handed = angle_tuning = spdt = None
 
-        with mock.patch.object(mousetool, "select_mice", return_value=[bad_len_meta]), \
-             mock.patch.object(mousetool.os, "open", return_value=99), \
-             mock.patch.object(mousetool.os, "close"):
+        with mock.patch.object(hid_mod, "select_mice", return_value=[bad_len_meta]), \
+             mock.patch.object(os, "open", return_value=99), \
+             mock.patch.object(os, "close"):
             with self.assertRaises(OSError):
                 mousetool.dpi_cmd(_Args())
             with self.assertRaises(OSError):
                 mousetool.tune_cmd(_Args())
 
-        with mock.patch.object(mousetool, "select_mice", return_value=[core2_meta]), \
-             mock.patch.object(mousetool.os, "open", return_value=99), \
-             mock.patch.object(mousetool.os, "close"), \
-             mock.patch.object(mousetool.fcntl, "ioctl") as m_ioctl, \
-             mock.patch.object(mousetool, "_save_device_cache"), \
-             mock.patch.object(mousetool, "classic_read_status", return_value={"debounce_ms": 6}), \
+        with mock.patch.object(hid_mod, "select_mice", return_value=[core2_meta]), \
+             mock.patch.object(os, "open", return_value=99), \
+             mock.patch.object(os, "close"), \
+             mock.patch.object(fcntl, "ioctl") as m_ioctl, \
+             mock.patch.object(cli_mod, "_save_device_cache"), \
+             mock.patch.object(cli_mod, "classic_read_status", return_value={"debounce_ms": 6}), \
              mock.patch("sys.stdout"):
             with self.assertRaises(OSError):
                 mousetool.dpi_cmd(_Args())
@@ -997,8 +1013,8 @@ class TestUniversalProtocols(unittest.TestCase):
                     return [m0, m1]
                 return []
 
-            with mock.patch.object(mousetool.glob, "glob", side_effect=_fake_glob), \
-                 mock.patch.object(mousetool, "_sysfs_batteries", return_value=[]):
+            with mock.patch.object(glob, "glob", side_effect=_fake_glob), \
+                 mock.patch.object(hid_mod, "_sysfs_batteries", return_value=[]):
                 mice = mousetool.discover_mice()
                 self.assertEqual([m["driver"] for m in mice], ["egg8k", "egg_we", "egg_we"])
                 we_mice = [m for m in mice if m["driver"] == "egg_we"]
@@ -1186,7 +1202,7 @@ class TestMotionTelemetry(unittest.TestCase):
     def test_maccel_only_stable_value_has_unknown_freshness(self):
         with tempfile.NamedTemporaryFile() as dev:
             hub = mousetool.MotionHub(lambda: [], dev.name, lambda: 2000)
-            with mock.patch.object(mousetool, "_read_maccel_fd", return_value=(123, 20.0)):
+            with mock.patch.object(motion_mod, "_read_maccel_fd", return_value=(123, 20.0)):
                 hub.subscribe()
                 try:
                     deadline = time.monotonic() + 1
@@ -1280,7 +1296,7 @@ class TestMotionTelemetry(unittest.TestCase):
         t = threading.Thread(target=srv.serve_forever, daemon=True)
         t.start()
         try:
-            with mock.patch.object(mousetool, "MOTION_HUB", hub):
+            with mock.patch.object(motion_mod, "MOTION_HUB", hub):
                 # 1) Evil origin rejected
                 c = http.client.HTTPConnection("127.0.0.1", port, timeout=2)
                 c.request("GET", "/api/motion", headers={"Origin": "https://evil.example"})
@@ -1352,12 +1368,12 @@ class TestBatteryIndicator(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.cache = os.path.join(self.tmp.name, "cache", "battery.json")
         self.state = os.path.join(self.tmp.name, "cache", "battery_notify.json")
-        for patcher in (mock.patch.object(mousetool, "CACHE", self.cache),
-                        mock.patch.object(mousetool, "NOTIFY_STATE", self.state),
+        for patcher in (mock.patch.object(battery_mod, "CACHE", self.cache),
+                        mock.patch.object(battery_mod, "NOTIFY_STATE", self.state),
                         mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": os.path.join(self.tmp.name, "config")}),
                         # never reach the real session bus from a test
-                        mock.patch.object(mousetool.subprocess, "run", side_effect=AssertionError("real subprocess")),
-                        mock.patch.object(mousetool, "send_notification", side_effect=AssertionError("real bus"))):
+                        mock.patch.object(subprocess, "run", side_effect=AssertionError("real subprocess")),
+                        mock.patch.object(battery_mod, "send_notification", side_effect=AssertionError("real bus"))):
             patcher.start()
             self.addCleanup(patcher.stop)
 
@@ -1380,12 +1396,12 @@ class TestBatteryIndicator(unittest.TestCase):
                 return real_open(os.devnull, os.O_RDONLY)
             return real_open(path, flags, *args)
 
-        with mock.patch.object(mousetool.os, "open", side_effect=fixture_open), \
-             mock.patch.object(mousetool, "xfer", side_effect=self._razer_xfer(**kw)):
+        with mock.patch.object(os, "open", side_effect=fixture_open), \
+             mock.patch.object(battery_mod, "xfer", side_effect=self._razer_xfer(**kw)):
             return mousetool.battery_snapshot(dict(self.HYPER), now=1600, cache_path=self.cache)
 
     def test_hyperpolling_fresh_reading_is_cached(self):
-        with mock.patch.object(mousetool.time, "time", return_value=1000):
+        with mock.patch.object(time, "time", return_value=1000):
             b = self._read_hyper(battery_raw=128)
         self.assertEqual((b["percent"], b["charging"], b["stale"], b["age"]), (50, False, False, 0))
         self.assertEqual(b["link"], "HyperPolling dongle")
@@ -1563,20 +1579,20 @@ class TestBatteryIndicator(unittest.TestCase):
         port = self._server()
         w = mousetool.BatteryWatcher(snapshot=lambda: self.reading(39), notifier=None)
         w.poll_once()
-        with mousetool._battery_lock(".owner") as owner, mock.patch.object(mousetool, "BATTERY_WATCHER", w), \
-             mock.patch.object(mousetool, "read_battery", side_effect=AssertionError("second reader")):
-            mousetool.fcntl.flock(owner, mousetool.fcntl.LOCK_EX)
+        with mousetool._battery_lock(".owner") as owner, mock.patch.object(battery_mod, "BATTERY_WATCHER", w), \
+             mock.patch.object(battery_mod, "read_battery", side_effect=AssertionError("second reader")):
+            fcntl.flock(owner, fcntl.LOCK_EX)
             owner.write(str(port))
             owner.flush()
             self.assertEqual(mousetool._cli_sample()["percent"], 39)
-            with mock.patch.object(mousetool, "_service_battery", return_value=None):
+            with mock.patch.object(battery_mod, "_service_battery", return_value=None):
                 self.assertEqual(mousetool._cli_sample(direct=True)["source"], "cache")
 
     def test_notification_handle_scoped_to_owner_and_invalid_id_retry(self):
         n = mousetool.BatteryNotifier(state_path=self.state)
         owner = mock.Mock(side_effect=[("bus", ":1.2"), ("bus", ":1.3"), ("bus", ":1.3")])
         sender = mock.Mock(side_effect=[501, 501, mousetool.InvalidNotificationId("unknown replacement ID"), 502])
-        with mock.patch.object(mousetool, "notification_owner", owner), mock.patch.object(mousetool, "send_notification", sender):
+        with mock.patch.object(battery_mod, "notification_owner", owner), mock.patch.object(battery_mod, "send_notification", sender):
             self.feed(n, [self.reading(p) for p in (20, 10, 25, 20)])
         self.assertEqual([(c.kwargs["destination"], c.kwargs["replace_id"]) for c in sender.call_args_list],
                          [(":1.2", 0), (":1.3", 0), (":1.3", 501), (":1.3", 0)])
@@ -1609,11 +1625,11 @@ class TestBatteryIndicator(unittest.TestCase):
 
     def test_waybar_example_escapes_and_all_is_rejected(self):
         import contextlib, io, pathlib
-        readme = pathlib.Path(__file__).with_name("README.md").read_text()
+        readme = (pathlib.Path(REPO_DIR) / "README.md").read_text()
         snippet = readme.split("### Mouse battery in Waybar")[1].split("```json")[1].split("```")[0]
         self.assertTrue(json.loads("{" + snippet + "}")["custom/mouse-battery"]["escape"])
         errors = io.StringIO()
-        with mock.patch.object(mousetool.sys, "argv", ["mousetool", "battery", "--all", "--waybar"]), \
+        with mock.patch.object(sys, "argv", ["mousetool", "battery", "--all", "--waybar"]), \
              contextlib.redirect_stderr(errors), self.assertRaises(SystemExit) as caught:
             mousetool.main()
         self.assertEqual(caught.exception.code, 2)
@@ -1681,7 +1697,7 @@ class TestBatteryIndicator(unittest.TestCase):
         w = mousetool.BatteryWatcher(snapshot=lambda: dict(self.reading(9), time=int(time.time())),
                                      notifier=None)
         w.poll_once()
-        with mock.patch.object(mousetool, "BATTERY_WATCHER", w):
+        with mock.patch.object(battery_mod, "BATTERY_WATCHER", w):
             c = http.client.HTTPConnection("127.0.0.1", port, timeout=2)
             c.request("GET", "/api/battery", headers={"Origin": "null"})
             r = c.getresponse()
@@ -1712,8 +1728,8 @@ class TestBatteryIndicator(unittest.TestCase):
             c.close()
         # no watcher (serve --no-battery-watch): cached value, stale, and no hidraw access
         mousetool._write_battery_cache(self.reading(66))
-        with mock.patch.object(mousetool, "BATTERY_WATCHER", None), \
-             mock.patch.object(mousetool, "read_battery", side_effect=AssertionError("hidraw touched")):
+        with mock.patch.object(battery_mod, "BATTERY_WATCHER", None), \
+             mock.patch.object(battery_mod, "read_battery", side_effect=AssertionError("hidraw touched")):
             c = http.client.HTTPConnection("127.0.0.1", port, timeout=2)
             c.request("GET", "/api/battery")
             body = json.loads(c.getresponse().read())
@@ -1725,7 +1741,7 @@ class TestBatteryIndicator(unittest.TestCase):
         w = mousetool.BatteryWatcher(snapshot=lambda: dict(self.reading(33), time=int(time.time())),
                                      notifier=None)
         w.poll_once()
-        with mock.patch.object(mousetool, "BATTERY_WATCHER", w):
+        with mock.patch.object(battery_mod, "BATTERY_WATCHER", w):
             from_service = mousetool._service_battery(port=port)
         self.assertEqual((from_service["percent"], from_service["source"]), (33, "service"))
         self.assertIsNone(mousetool._service_battery(port=1))  # nothing listening
@@ -1733,21 +1749,21 @@ class TestBatteryIndicator(unittest.TestCase):
         def run(argv):
             import contextlib, io
             buf = io.StringIO()
-            with mock.patch.object(mousetool.sys, "argv", ["mousetool.py", *argv]), contextlib.redirect_stdout(buf):
+            with mock.patch.object(sys, "argv", ["mousetool.py", *argv]), contextlib.redirect_stdout(buf):
                 mousetool.main()
             return buf.getvalue().strip()
 
-        with mock.patch.object(mousetool, "_service_battery", return_value=dict(from_service)), \
-             mock.patch.object(mousetool, "read_battery", side_effect=AssertionError("hidraw touched")):
+        with mock.patch.object(battery_mod, "_service_battery", return_value=dict(from_service)), \
+             mock.patch.object(battery_mod, "read_battery", side_effect=AssertionError("hidraw touched")):
             out = json.loads(run(["battery", "--waybar"]))
             self.assertEqual((out["text"], out["class"], out["percentage"]), ("33%", "normal", 33))
             self.assertRegex(run(["battery"]), r"^33 0 0 \d+$")
-        with mock.patch.object(mousetool, "_service_battery", return_value=None), \
-             mock.patch.object(mousetool, "read_battery", side_effect=mousetool.Asleep("asleep")):
+        with mock.patch.object(battery_mod, "_service_battery", return_value=None), \
+             mock.patch.object(battery_mod, "read_battery", side_effect=mousetool.Asleep("asleep")):
             self.assertEqual(json.loads(run(["battery", "--waybar"]))["class"], "stale")
             self.assertEqual(run(["battery"]), "- 0 1 -")
-        with mock.patch.object(mousetool, "_service_battery", side_effect=AssertionError("asked service")), \
-             mock.patch.object(mousetool, "read_battery", return_value=self.reading(12)):
+        with mock.patch.object(battery_mod, "_service_battery", side_effect=AssertionError("asked service")), \
+             mock.patch.object(battery_mod, "read_battery", return_value=self.reading(12)):
             out = json.loads(run(["battery", "--direct", "--json"]))
             self.assertEqual((out["percent"], out["source"]), (12, "direct"))
         self.assertIn("notifications off", run(["battery", "--notifications", "off"]))

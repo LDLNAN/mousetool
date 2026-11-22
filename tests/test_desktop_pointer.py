@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-import desktop_pointer as pointer
+from mousetool import desktop_pointer as pointer
 
 
 class DesktopFixtures(unittest.TestCase):

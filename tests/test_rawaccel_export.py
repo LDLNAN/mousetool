@@ -19,9 +19,9 @@ import unittest
 from contextlib import redirect_stderr
 from unittest import mock
 
-import rawaccel_export as rx
+from mousetool.accel import rawaccel_export as rx
 
-REPO = os.path.dirname(os.path.abspath(__file__))
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TOL = rx.DEFAULT_TOLERANCE
 
 
@@ -78,7 +78,7 @@ class TestPurity(unittest.TestCase):
         code = ("import sys\n"
                 "for m in ('fcntl', 'grp', 'select', 'socket', 'termios'): sys.modules[m] = None\n"
                 f"sys.path.insert(0, {REPO!r})\n"
-                "import rawaccel_export as r\n"
+                "from mousetool.accel import rawaccel_export as r\n"
                 "print(r.export_document(r.DEFAULTS)['schema_version'])\n")
         res = subprocess.run([sys.executable, "-I", "-c", code], capture_output=True, text=True, timeout=30)
         self.assertEqual(res.returncode, 0, res.stderr)
@@ -88,9 +88,9 @@ class TestPurity(unittest.TestCase):
         import mousetool
         self.assertEqual(rx.MODES, mousetool.MODES)
         self.assertEqual(rx.PARAMS, mousetool.PARAMS)
-        with open(os.path.join(REPO, "index.html")) as f:
-            html = f.read()
-        block = re.search(r"const MACCEL_DEFAULTS = \{(.*?)\};", html, re.S).group(1)
+        with open(os.path.join(REPO, "web", "accel_graph.js")) as f:
+            js_src = f.read()
+        block = re.search(r"const MACCEL_DEFAULTS = \{(.*?)\};", js_src, re.S).group(1)
         ui = dict(re.findall(r"(\w+):\s*(\"?[\w.]+\"?)", block))
         ui = {k: (v.strip('"') if v.startswith('"') else float(v)) for k, v in ui.items()}
         self.assertEqual(ui, rx.DEFAULTS)
@@ -358,11 +358,11 @@ class TestAgainstAppJavaScript(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        with open(os.path.join(REPO, "index.html")) as f:
-            html = f.read()
-        m = re.search(r"^function maccelEval\(x, cfg\) \{.*?^\}$", html, re.S | re.M)
-        assert m, "maccelEval not found in index.html"
-        cls.js = m.group(0)
+        with open(os.path.join(REPO, "web", "accel_graph.js")) as f:
+            src = f.read()
+        m = re.search(r"^(?:export )?function maccelEval\(x, cfg\) \{.*?^\}$", src, re.S | re.M)
+        assert m, "maccelEval not found in web/accel_graph.js"
+        cls.js = m.group(0).removeprefix("export ")
 
     def run_js(self, cases):
         script = (self.js + "\nlet d='';process.stdin.on('data',c=>d+=c).on('end',()=>{"
@@ -630,27 +630,30 @@ class TestCli(unittest.TestCase):
         self.assertIn("GAMMA must be between", res.stderr)
 
     def test_maccel_live_config_reads_state_only(self):
-        import mousetool
+        from mousetool.accel import linux as linux_accel
         st = {"loaded": True, "mode": "linear", "params": {k: v for k, v in rx.DEFAULTS.items() if k != "MODE"}}
-        with mock.patch.object(mousetool, "maccel_state", return_value=st), \
-                mock.patch.object(mousetool, "_write_param") as w:
-            self.assertEqual(mousetool.maccel_live_config(), rx.DEFAULTS)
+        with mock.patch.object(linux_accel, "maccel_state", return_value=st), \
+                mock.patch.object(linux_accel, "_write_param") as w:
+            self.assertEqual(linux_accel.maccel_live_config(), rx.DEFAULTS)
             w.assert_not_called()
-        with mock.patch.object(mousetool, "maccel_state", return_value={"loaded": False, "mode": None, "params": {}}):
+        with mock.patch.object(linux_accel, "maccel_state", return_value={"loaded": False, "mode": None, "params": {}}):
             with self.assertRaisesRegex(PermissionError, "isn't loaded"):
-                mousetool.maccel_live_config()
+                linux_accel.maccel_live_config()
         st2 = {"loaded": True, "mode": "linear", "params": {"ACCEL": 0.1}}
-        with mock.patch.object(mousetool, "maccel_state", return_value=st2):
+        with mock.patch.object(linux_accel, "maccel_state", return_value=st2):
             with self.assertRaisesRegex(OSError, "could not read"):
-                mousetool.maccel_live_config()
+                linux_accel.maccel_live_config()
 
 
 class ScratchCli:
     """Mixin: run either CLI in a throwaway HOME/cwd and write input files there."""
 
     def cli(self, argv, prog="rawaccel_export.py"):
-        cmd = [sys.executable, os.path.join(REPO, prog)] + (["rawaccel"] if prog == "mousetool.py" else []) + argv
-        env = dict(os.environ, HOME=self.home, XDG_CONFIG_HOME=self.home)
+        if prog == "mousetool.py":
+            cmd = [sys.executable, os.path.join(REPO, "mousetool.py"), "rawaccel"] + argv
+        else:
+            cmd = [sys.executable, "-m", "mousetool.accel.rawaccel_export"] + argv
+        env = dict(os.environ, HOME=self.home, XDG_CONFIG_HOME=self.home, PYTHONPATH=REPO)
         return subprocess.run(cmd, capture_output=True, text=True, timeout=60, env=env, cwd=self.home)
 
     def setUp(self):
@@ -907,8 +910,8 @@ class TestVerifyRound2Regressions(ScratchCli, unittest.TestCase):
 
     @unittest.skipUnless(shutil.which("node"), "node not installed")
     def test_studio_javascript_really_differs_at_the_verifier_point(self):
-        with open(os.path.join(REPO, "index.html")) as f:
-            js = re.search(r"^function maccelEval\(x, cfg\) \{.*?^\}$", f.read(), re.S | re.M).group(0)
+        with open(os.path.join(REPO, "web", "accel_graph.js")) as f:
+            js = re.search(r"^(?:export )?function maccelEval\(x, cfg\) \{.*?^\}$", f.read(), re.S | re.M).group(0).removeprefix("export ")
         limit, decay, x, native, studio = self.NATURAL_EDGES[0]
         c = cfg(MODE="natural", LIMIT=limit, DECAY_RATE=decay, OFFSET=0)
         res = subprocess.run(["node", "-e", js + f"\nprocess.stdout.write(JSON.stringify(maccelEval({x!r}, "

@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
 """Regenerate the README screenshots in docs/screenshots/.
 
-Run from anywhere:  python3 docs/capture_screenshots.py [--out DIR] [--browser PATH]
+Run from anywhere:  python3 tools/capture_screenshots.py [--out DIR] [--browser PATH]
 
 Everything on screen is synthetic. The script never talks to the real helper
 (`mousetool.py serve`), never opens a real device and never reads maccel, the
 desktop configuration or sysfs:
 
-  * a throw-away HTTP server on a random 127.0.0.1 port serves a copy of
-    index.html whose helper URL points at itself, plus fixture responses for
-    /api/status, /api/maccel, /api/desktop and a /api/motion event stream;
+  * a throw-away HTTP server on a random 127.0.0.1 port serves web/ (and
+    /icon.svg) directly — web/helper_client.js targets location.origin on
+    loopback — plus fixture responses for /api/status, /api/maccel, /api/accel,
+    /api/desktop and a /api/motion event stream;
   * a small script injected before the page loads replaces `navigator.hid`
     with one synthetic Pulsar Pro (Pulsar 3710:5405 protocol, fake serial);
   * headless Chromium/Brave is driven over the DevTools pipe (stdlib only, no
@@ -39,6 +40,9 @@ from pathlib import Path
 from xml.sax.saxutils import escape
 
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+from mousetool.server import PathTraversalError, resolve_static_asset
+
 WIDTH, HEIGHT = 1600, 900
 MAX_BYTES = 400 * 1024
 
@@ -124,7 +128,7 @@ HID_MOCK = r"""
 # ---------------------------------------------------------------------------
 # fixture HTTP server
 # ---------------------------------------------------------------------------
-def make_handler(page):
+def make_handler():
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
 
@@ -144,14 +148,10 @@ def make_handler(page):
 
         def do_GET(self):
             path = self.path.split("?", 1)[0]
-            if path in ("/", "/index.html"):
-                return self._send(page, "text/html; charset=utf-8")
-            if path == "/icon.svg":
-                return self._send((ROOT / "icon.svg").read_bytes(), "image/svg+xml")
             if path == "/api/status":
-                return self._json({"version": 2, "maccel": MACCEL, "desktop": DESKTOP, "system_mice": SYSTEM_MICE})
-            if path == "/api/maccel":
-                return self._json({"maccel": MACCEL})
+                return self._json({"version": 2, "accel": MACCEL, "maccel": MACCEL, "desktop": DESKTOP, "system_mice": SYSTEM_MICE})
+            if path in ("/api/accel", "/api/maccel"):
+                return self._json({"accel": MACCEL, "maccel": MACCEL})
             if path == "/api/desktop":
                 return self._json({"desktop": DESKTOP})
             if path == "/api/devices":
@@ -172,20 +172,19 @@ def make_handler(page):
                     pass
                 self.close_connection = True
                 return
+            try:
+                found = resolve_static_asset(path)
+            except PathTraversalError:
+                return self.send_error(403)
+            if found is not None:
+                asset_path, ctype = found
+                return self._send(asset_path.read_bytes(), ctype)
             self.send_error(404)
 
         def do_POST(self):  # screenshots never write anything
             self.send_error(405)
 
     return Handler
-
-
-def build_page(port):
-    html = (ROOT / "index.html").read_text(encoding="utf-8")
-    old = 'const HELPER = "http://127.0.0.1:8766";'
-    if old not in html:
-        sys.exit("index.html no longer defines HELPER as expected; update capture_screenshots.py")
-    return html.replace(old, f'const HELPER = "http://127.0.0.1:{port}";').encode("utf-8")
 
 
 # ---------------------------------------------------------------------------
@@ -390,9 +389,8 @@ def main():
     with tempfile.TemporaryDirectory(prefix="mousetool-shots-") as profile:
         browser = Browser(exe, profile)  # start before any thread so fork stays simple
         try:
-            srv = ThreadingHTTPServer(("127.0.0.1", 0), BaseHTTPRequestHandler)
+            srv = ThreadingHTTPServer(("127.0.0.1", 0), make_handler())
             port = srv.server_address[1]
-            srv.RequestHandlerClass = make_handler(build_page(port))
             threading.Thread(target=srv.serve_forever, daemon=True).start()
             page = Page(browser)
             for name, scheme, tab, scroll, margin in SHOTS:

@@ -1,0 +1,499 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mouse Tool</title>
+<link rel="icon" href="icon.svg">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div class="brand">
+      <h1>mousetool</h1>
+    </div>
+    <span class="pill" id="conn"><i class="dot"></i><span id="connText">Not connected</span></span>
+    <div class="spacer"></div>
+    <span class="sync" id="sync"></span>
+    <button class="icon ghost" id="refresh" title="Read everything from the active mouse again" aria-label="Refresh" hidden>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v5h-5"/></svg>
+    </button>
+    <button class="ghost" id="connectAny" title="Pick any HID mouse / device (including generic or unlisted mice)">Any HID…</button>
+    <button id="connect" class="primary">Connect mouse</button>
+  </header>
+
+  <!-- live multi-mouse fleet switcher (shown when >=1 WebHID mouse or system mouse is present) -->
+  <section class="fleet" id="fleet" aria-label="Connected mice" hidden></section>
+
+  <!-- shown when nothing is connected -->
+  <section class="empty" id="empty">
+    <h2 id="emptyTitle">No mouse connected</h2>
+    <p id="emptyText">Grant WebHID access to configure Razer, Endgame Gear (8k &amp; -we), Logitech HID++, Pulsar, CompX (ATK / VXE / Scyrox / Teevolution / VGN / Lamzu), Glorious, or any generic HID mouse.</p>
+    <div class="empty-actions">
+      <button class="primary" id="connect2">Connect mouse</button>
+      <button id="connectAny2">Any HID device…</button>
+      <button id="openPowerOnly">Power settings</button>
+      <button id="openAccelOnly">Acceleration &amp; desktop</button>
+    </div>
+    <div class="banner" id="nohid" hidden>This browser does not support WebHID. Open this page in Chromium or Brave.</div>
+    <div class="banner" id="permhint" hidden>
+      Device detected, but permission was denied. Install the udev rules:
+      <code>sudo cp 60-mousetool.rules /etc/udev/rules.d/ &amp;&amp; sudo udevadm control --reload-rules &amp;&amp; sudo udevadm trigger</code>
+    </div>
+  </section>
+
+  <div id="app" hidden>
+    <section class="hero" id="hero" aria-label="Live status">
+      <div class="tile">
+        <div class="k">DPI<span class="kx" id="hStage"></span></div>
+        <div class="v big" id="hDpi">–</div>
+        <div class="pips" id="hPips"></div>
+      </div>
+      <div class="tile">
+        <div class="k">Polling rate</div>
+        <div class="v" id="hPoll">–</div>
+        <div class="bars" id="hPollBars"></div>
+      </div>
+      <div class="tile">
+        <div class="k">Battery<span class="kx" id="hBattS"></span></div>
+        <div class="v" id="hBatt">–</div>
+        <div class="cells" id="hBattCells"></div>
+      </div>
+      <div class="tile">
+        <div class="k">Device</div>
+        <div class="v txt" id="hLink">–</div>
+        <div class="s" id="hLinkS">&nbsp;</div>
+      </div>
+    </section>
+
+    <div class="tabsbar"><nav class="tabs" role="tablist">
+      <button class="tab" role="tab" data-tab="perf" aria-selected="true">Sensitivity</button>
+      <button class="tab" role="tab" data-tab="buttons">Buttons</button>
+      <button class="tab" role="tab" data-tab="power" id="powerTab">Power</button>
+      <button class="tab" role="tab" data-tab="dongle" id="dongleTab">Dongle</button>
+      <button class="tab" role="tab" data-tab="device">Device</button>
+      <button class="tab" role="tab" data-tab="accel">Acceleration</button>
+    </nav></div>
+
+    <!-- ===== sensitivity ===== -->
+    <div class="panel" data-panel="perf">
+      <div class="accelnotice" id="statusNote" hidden></div>
+
+      <section class="group" id="stagesGroup">
+        <div class="ghead">
+          <span class="idx">01.1</span><h2>DPI stages</h2>
+          <span class="note" id="stagesNote">The DPI button on the mouse cycles through these</span>
+          <div class="spacer"></div>
+          <label class="switch" id="splitXYWrap"><input type="checkbox" id="splitXY"> Separate X / Y</label>
+        </div>
+        <div class="track" id="track" aria-hidden="true"></div>
+        <div class="stagegrid" id="stages"></div>
+        <div class="stagefoot">
+          <span class="hint" id="stagesHint">Click a stage to make it active · up to 5 · 100–30,000</span>
+          <div class="spacer"></div>
+          <span class="state" data-for="stages"></span>
+          <span class="dirty" id="stagesDirty" hidden>Unsaved</span>
+          <button class="ghost" id="revertStages" hidden>Revert</button>
+          <button class="primary" id="applyStages" hidden>Save stages</button>
+        </div>
+      </section>
+
+      <section class="group" id="genericDpiGroup" hidden>
+        <div class="ghead">
+          <span class="idx">01.1</span><h2>DPI reference</h2>
+          <span class="note">For mice without onboard DPI read/write (stored locally for Acceleration)</span>
+        </div>
+        <div class="setting">
+          <div class="label"><b>Mouse DPI</b><p>Enter this mouse's current hardware DPI so the kernel acceleration's (<code>mouseaccel</code> or <code>maccel</code>) <em>Use mouse DPI</em> button matches it.</p></div>
+          <div class="control">
+            <input type="number" id="genericDpiIn" min="50" max="50000" step="50" value="800" aria-label="Known mouse DPI">
+            <button id="genericDpiSave">Save</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="group">
+        <div class="ghead"><span class="idx">01.2</span><h2>Tracking</h2></div>
+        <div class="setting" id="pollRow">
+          <div class="label"><b>Polling rate</b><p id="pollHint">How often the mouse reports its position.</p></div>
+          <div class="control"><span class="state" data-for="poll"></span><div class="seg" id="poll"></div></div>
+        </div>
+        <div class="setting" id="lodRow">
+          <div class="label"><b>Lift-off distance</b><p id="lodDesc">How high you can lift the mouse before it stops tracking. Asymmetric sets lift-off and landing separately (step 1–26, higher = taller distance, Lift-off &gt; Landing).</p></div>
+          <div class="control">
+            <span class="state" data-for="lod"></span>
+            <div class="seg" id="lodEgg" hidden></div>
+            <div class="seg" id="lodLevel" data-role="preset"><button data-l="0">Low</button><button data-l="1">Medium</button><button data-l="2">High</button></div>
+            <div class="seg" id="lodMode"><button data-mode="preset">Preset</button><button data-mode="async">Asymmetric</button></div>
+          </div>
+          <div class="control" id="lodAsync" style="grid-column:1/-1" hidden>
+            <div class="lodgrid">
+              <label for="lodLift">Lift-off</label><input type="range" id="lodLift" min="2" max="26" step="1"><span class="readout" id="lodLiftV">–</span>
+              <label for="lodLand">Landing</label><input type="range" id="lodLand" min="1" max="25" step="1"><span class="readout" id="lodLandV">–</span>
+            </div>
+            <button class="primary" id="lodApply">Apply</button>
+          </div>
+        </div>
+        <div class="setting" id="dpiNowRow">
+          <div class="label"><b>One-off DPI</b><p>Jump to a DPI right now without touching your stages. The DPI button goes back to the stages.</p></div>
+          <div class="control">
+            <span class="state" data-for="dpi"></span>
+            <input type="number" id="dpiNow" min="100" max="35000" step="50" placeholder="DPI" aria-label="One-off DPI">
+            <input type="number" id="dpiNowY" min="100" max="35000" step="50" placeholder="Y DPI" aria-label="One-off Y DPI" hidden>
+            <button id="dpiNowSet">Set</button>
+          </div>
+        </div>
+        <div class="setting" id="hzMeterRow">
+          <div class="label"><b>Live polling rate meter</b><p>Works with any connected mouse. Move the mouse continuously over the pad to measure real USB/wireless report Hz.</p></div>
+          <div class="control" style="width:100%; max-width:440px;">
+            <div class="hzbox" id="hzBox" tabindex="0">
+              <div class="hzval" id="hzVal">–<small>Hz</small></div>
+              <div class="hzstats" id="hzStats">Move pointer inside this pad · Peak: – Hz</div>
+              <button class="ghost" id="hzReset" type="button">Reset</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="group" id="tuneGroup" hidden>
+        <div class="ghead">
+          <span class="idx">01.3</span><h2>Sensor, click &amp; performance tuning</h2>
+          <span class="note" id="tuneNote">Onboard hardware filters</span>
+          <div class="spacer"></div>
+          <span class="state" data-for="tune"></span>
+        </div>
+        <div class="setting" id="tuneDebounceRow" hidden>
+          <div class="label"><b>Click debounce</b><p id="tuneDebounceDesc">Lower reduces click latency; increase if switches double-click.</p></div>
+          <div class="control">
+            <input type="range" id="tuneDebounce" min="0" max="30" step="1" aria-label="Click debounce ms">
+            <span class="readout" id="tuneDebounceVal">0 ms</span>
+          </div>
+        </div>
+        <div class="setting" id="tuneMotionSyncRow" hidden>
+          <div class="label"><b>Motion Sync</b><p>Synchronizes sensor reads with USB frames for consistent frame pacing.</p></div>
+          <div class="control"><label class="switch"><input type="checkbox" id="tuneMotionSync"> Enabled</label></div>
+        </div>
+        <div class="setting" id="tuneAngleSnapRow" hidden>
+          <div class="label"><b>Angle Snapping</b><p>Smooths nearly horizontal or vertical lines.</p></div>
+          <div class="control"><label class="switch"><input type="checkbox" id="tuneAngleSnap"> Enabled</label></div>
+        </div>
+        <div class="setting" id="tuneRippleRow" hidden>
+          <div class="label"><b>Ripple Control</b><p>Reduces high-CPI sensor jitter above 10,000 CPI.</p></div>
+          <div class="control"><label class="switch"><input type="checkbox" id="tuneRipple"> Enabled</label></div>
+        </div>
+        <div class="setting" id="tunePerfRow" hidden>
+          <div class="label"><b>Performance / Turbo mode</b><p>Enables high-speed wireless / max sensor scan mode (uses more battery).</p></div>
+          <div class="control"><label class="switch"><input type="checkbox" id="tunePerf"> Enabled</label></div>
+        </div>
+        <div class="setting" id="tuneScan20kRow" hidden>
+          <div class="label"><b>20K Scan Mode</b><p>Locks sensor framerate to 20,000 FPS (Scyrox V8S).</p></div>
+          <div class="control"><label class="switch"><input type="checkbox" id="tuneScan20k"> Enabled</label></div>
+        </div>
+        <div class="setting" id="tuneAntiMistouchRow" hidden>
+          <div class="label"><b>Anti-mistouch</b><p>Ignores spurious optical/mechanical double triggers.</p></div>
+          <div class="control"><label class="switch"><input type="checkbox" id="tuneAntiMistouch"> Enabled</label></div>
+        </div>
+        <div class="setting" id="tuneSlamRow" hidden>
+          <div class="label"><b>Slamclick Filter</b><p>Prevents accidental clicks when setting the mouse down hard.</p></div>
+          <div class="control"><label class="switch"><input type="checkbox" id="tuneSlam"> Enabled</label></div>
+        </div>
+        <div class="setting" id="tuneJitterRow" hidden>
+          <div class="label"><b>Motion Jitter Filter</b><p>Additional high-frequency sensor smoothing filter.</p></div>
+          <div class="control"><label class="switch"><input type="checkbox" id="tuneJitter"> Enabled</label></div>
+        </div>
+        <div class="setting" id="tuneGlassRow" hidden>
+          <div class="label"><b>Sensor Glass Mode</b><p>Optimizes tracking on glass mousepads (locks LOD to 1.0 / 2.0 mm).</p></div>
+          <div class="control"><label class="switch"><input type="checkbox" id="tuneGlass"> Enabled</label></div>
+        </div>
+        <div class="setting" id="tuneLedLiftRow" hidden>
+          <div class="label"><b>Disable LED on Lift-Off</b><p>Turns off the stage/scroll LED while the mouse is lifted (v2).</p></div>
+          <div class="control"><label class="switch"><input type="checkbox" id="tuneLedLift"> Enabled</label></div>
+        </div>
+        <div class="setting" id="tuneMaxFpsRow" hidden>
+          <div class="label"><b>Force Max Sensor FPS</b><p>Locks sensor framerate to maximum even when stationary (v2).</p></div>
+          <div class="control"><label class="switch"><input type="checkbox" id="tuneMaxFps"> Enabled</label></div>
+        </div>
+        <div class="setting" id="tuneAngleTuneRow" hidden>
+          <div class="label"><b>Sensor Angle Tuning</b><p id="tuneAngleTuneDesc">Hardware sensor rotation offset.</p></div>
+          <div class="control">
+            <input type="range" id="tuneAngleTune" min="-127" max="127" step="1" aria-label="Sensor angle tuning">
+            <span class="readout" id="tuneAngleTuneVal">0</span>
+          </div>
+        </div>
+        <div class="setting" id="eggSpdtRow" hidden>
+          <div class="label"><b>Left / Right SPDT &amp; multiclick filter</b><p>GX Safe or GX Speed uses Endgame Gear's SPDT switch contacts for zero-debounce latency; numeric values add 0–25 ms multiclick debounce.</p></div>
+          <div class="control" style="gap:14px;">
+            <label style="display:flex;align-items:center;gap:6px;font:12px var(--mono);color:var(--muted)">L
+              <select id="eggCtlL" aria-label="Left button switch mode"></select>
+            </label>
+            <label style="display:flex;align-items:center;gap:6px;font:12px var(--mono);color:var(--muted)">R
+              <select id="eggCtlR" aria-label="Right button switch mode"></select>
+            </label>
+          </div>
+        </div>
+        <div class="setting" id="eggSideMcRow" hidden>
+          <div class="label"><b>Middle / Side multiclick filter</b><p>Shared debounce delay (0–25 ms) for Middle, Forward, and Back buttons.</p></div>
+          <div class="control">
+            <input type="range" id="eggSideMc" min="0" max="25" step="1" aria-label="Side multiclick filter">
+            <span class="readout" id="eggSideMcVal">0 ms</span>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- ===== buttons ===== -->
+    <div class="panel" data-panel="buttons" hidden>
+      <section class="group">
+        <div class="ghead">
+          <span class="idx">02.1</span><h2 id="btnGroupTitle">Button mapping &amp; tester</h2>
+          <span class="note" id="btnGroupNote">Stored on the mouse, works without this page</span>
+          <div class="spacer"></div>
+          <label class="switch" id="eggHandedWrap" hidden><input type="checkbox" id="eggHanded"> Left-handed</label>
+          <div class="seg" id="btnLayer" aria-label="Button layer">
+            <button data-layer="0" class="sel">Normal</button>
+            <button data-layer="1">HyperShift</button>
+          </div>
+          <button class="ghost" id="btnResetAll">Reset layer</button>
+        </div>
+        <div class="btnlayout" id="btnLayout">
+          <div class="mousefig">
+            <svg viewBox="-44 0 288 336" role="img" aria-label="Mouse diagram">
+              <defs>
+                <linearGradient id="shell" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0" style="stop-color:var(--surface-2)"/><stop offset="1" style="stop-color:var(--inset)"/>
+                </linearGradient>
+              </defs>
+              <path class="body" d="M100 14C140 14 173 30 175 80C177 120 169 156 169 190C169 212 170 224 170 240C170 294 138 322 100 322C62 322 30 294 30 240C30 224 31 212 31 190C31 156 23 120 25 80C27 30 60 14 100 14Z"/>
+              <path class="hs" data-btn="1" d="M97 14C58.4 14.8 26.9 31.3 25 80C23.8 104 26.2 126.5 28.3 148Q60 160 97 161Z"/>
+              <path class="hs" data-btn="2" d="M103 14C141.6 14.8 173.1 31.3 175 80C176.2 104 173.8 126.5 171.7 148Q140 160 103 161Z"/>
+              <rect class="hs" data-btn="3" x="91" y="46" width="18" height="40" rx="9"/>
+              <path class="rib" d="M94 56h12M94 61h12M94 66h12M94 71h12M94 76h12"/>
+              <path class="hs" data-btn="9" d="M100 26L109 37H91Z"/>
+              <path class="hs" data-btn="10" d="M100 106L109 95H91Z"/>
+              <rect class="hs" data-btn="5" x="20" y="121" width="12" height="30" rx="5"/>
+              <rect class="hs" data-btn="4" x="24" y="156" width="12" height="30" rx="5"/>
+              <circle class="hs" data-btn="96" cx="100" cy="244" r="15" stroke-dasharray="3 3"/>
+              <path class="sensor" d="M93 244h14M100 237v14"/>
+              <path class="lead" d="M19 136H-4M23 171H-4"/>
+              <text x="-8" y="139" text-anchor="end">Forward</text>
+              <text x="-8" y="174" text-anchor="end">Back</text>
+              <path class="lead" d="M115 66h79"/>
+              <text x="198" y="69">Wheel</text>
+              <path class="lead" d="M160 100h34"/>
+              <text x="198" y="103">Right</text>
+              <path class="lead" d="M40 100H-4"/>
+              <text x="-8" y="103" text-anchor="end">Left</text>
+              <text x="100" y="276" text-anchor="middle">DPI · underside</text>
+            </svg>
+          </div>
+          <div>
+            <div class="btngrid-sub" id="btnUnavailable" hidden>
+              <span>Onboard button remapping isn't exposed on this protocol. Use the live input tester below to verify buttons and wheel events.</span>
+            </div>
+            <div class="blist" id="btns"></div>
+            <div class="tester" id="tester" tabindex="0">Press buttons or scroll here to see what your PC receives · <b id="testOut">–</b></div>
+          </div>
+        </div>
+        <div class="footnote" id="btnFootnote">Left click is locked on the Normal layer so you can't lose clicking. Every change is read back, so the list always shows what the mouse actually has.</div>
+      </section>
+    </div>
+
+    <!-- ===== power ===== -->
+    <div class="panel" data-panel="power" hidden>
+      <section class="group">
+        <div class="ghead"><span class="idx">03.1</span><h2>Power</h2><span class="note" id="powerNote">Wireless settings (saved on mouse even over cable)</span></div>
+        <div class="setting" id="idleRow">
+          <div class="label"><b>Sleep after</b><p>How long the mouse waits without movement before it goes to sleep on wireless.</p></div>
+          <div class="control">
+            <span class="state" data-for="idle"></span>
+            <input type="range" id="idle" min="1" max="15" step="1" aria-label="Sleep after (minutes)">
+            <span class="readout" id="idleVal">–</span>
+          </div>
+        </div>
+        <div class="setting" id="lowRow">
+          <div class="label"><b>Low battery warning</b><p>The mouse blinks its battery LED below this.</p></div>
+          <div class="control">
+            <span class="state" data-for="low"></span>
+            <input type="range" id="low" min="5" max="100" step="5" aria-label="Low battery warning (percent)">
+            <span class="readout" id="lowVal">–</span>
+          </div>
+        </div>
+        <div class="setting">
+          <div class="label"><b>Power source</b><p>Battery / charging status reported by the mouse or dongle.</p></div>
+          <div class="control"><span class="mono" id="chargeVal">–</span></div>
+        </div>
+        <div class="setting" id="notifyRow">
+          <div class="label"><b id="notifyTitle">Desktop notifications</b><p id="notifyDesc">The local helper warns you when the battery runs low, even with this window closed.</p></div>
+          <div class="control">
+            <span class="state" data-for="notify" role="status"></span>
+            <label class="switch"><input type="checkbox" id="batteryNotify" aria-labelledby="notifyTitle" aria-describedby="notifyDesc" disabled> Enabled</label>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- ===== dongle ===== -->
+    <div class="panel" data-panel="dongle" hidden>
+      <section class="group">
+        <div class="ghead"><span class="idx">04.1</span><h2>HyperPolling dongle</h2></div>
+        <div class="setting">
+          <div class="label"><b>Indicator LED</b><p>What the light on the HyperPolling dongle shows.</p></div>
+          <div class="control">
+            <span class="state" data-for="led"></span>
+            <div class="seg" id="dongleLed"><button data-m="1">Connection</button><button data-m="2">Battery</button><button data-m="3">Low battery only</button></div>
+          </div>
+        </div>
+        <div class="setting">
+          <div class="label"><b>Pairing</b><p>The dongle pairs with a mouse by its <em>wireless</em> USB ID (Viper V2 Pro is 00a6). Unpairing drops the wireless link until you pair again; the cable keeps working.</p></div>
+          <div class="control">
+            <span class="state" data-for="pair"></span>
+            <select id="pairPid" aria-label="Mouse to pair">
+              <option value="00a6">Viper V2 Pro (00a6)</option>
+              <option value="00b7">DeathAdder V3 Pro (00b7)</option>
+              <option value="00c1">Viper V3 Pro (00c1)</option>
+              <option value="00b0">Cobra Pro (00b0)</option>
+              <option value="00ab">Basilisk V3 Pro (00ab)</option>
+              <option value="custom">Other (USB ID)…</option>
+            </select>
+            <input type="text" id="pairCustom" placeholder="00a6" maxlength="4" hidden aria-label="USB product ID">
+            <button id="pairBtn">Pair</button>
+            <button class="ghost danger" id="unpairBtn">Unpair</button>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- ===== device ===== -->
+    <div class="panel" data-panel="device" hidden>
+      <section class="group">
+        <div class="ghead">
+          <span class="idx">05.1</span><h2>Device</h2>
+          <div class="spacer"></div>
+          <button class="ghost danger" id="factoryResetBtn" hidden>Factory reset…</button>
+        </div>
+        <dl class="kv">
+          <dt>Model</dt><dd id="model">–</dd>
+          <dt>Protocol</dt><dd id="protoName">–</dd>
+          <dt>Link</dt><dd id="link">–</dd>
+          <dt>USB ID</dt><dd id="usbid">–</dd>
+          <dt>Firmware</dt><dd id="fw">–</dd>
+          <dt>Serial</dt><dd id="serial">–</dd>
+          <dt>HID Interfaces</dt><dd id="hidCols">–</dd>
+        </dl>
+      </section>
+      <section class="group">
+        <div class="ghead">
+          <span class="idx">05.2</span><h2>Protocol log</h2>
+          <span class="note">Commands, replies, and optional live HID reports</span>
+          <div class="spacer"></div>
+          <label class="switch"><input type="checkbox" id="snoopToggle"> Snoop HID reports</label>
+          <button class="ghost" id="logCopy">Copy</button>
+          <button class="ghost" id="logClear">Clear</button>
+        </div>
+        <pre id="log"></pre>
+      </section>
+    </div>
+
+    <!-- ===== acceleration ===== -->
+    <div class="panel" data-panel="accel" hidden>
+      <section class="group">
+        <div class="ghead">
+          <span class="idx">06.1</span><h2 id="accelHeading">Kernel acceleration</h2>
+          <span class="accelbackend none" id="accelBackend" title="Kernel acceleration module"><i class="livedot"></i><span id="accelBackendName">mouseaccel / maccel</span></span>
+          <span class="note">Applies before libinput and games (including raw input)</span>
+          <div class="spacer"></div>
+          <span class="state" data-for="maccel"></span>
+          <button class="ghost" id="accelRefresh">Reload</button>
+        </div>
+        <div class="accelnotice bad" id="accelOffline" hidden>
+          <span>Local helper isn't running on <code>127.0.0.1:8766</code>. Start it with <code>./mousetool.py serve</code> (or enable <code>mousetool.service</code>).</span>
+          <div class="spacer"></div>
+          <button id="accelRetry">Retry</button>
+        </div>
+        <div class="accelnotice" id="accelPerm" hidden></div>
+
+        <div class="accelnotice" id="windowsAccel" hidden><span></span><div class="spacer"></div><button id="windowsReset">Reset to no acceleration</button></div>
+        <div id="accelBody" hidden>
+          <div class="setting">
+            <div class="label"><b>Curve mode</b><p id="accelModeDesc">Choose how mouse speed scales sensitivity.</p></div>
+            <div class="control">
+              <div class="seg" id="accelMode">
+                <button data-mode="linear">Linear</button>
+                <button data-mode="natural">Natural</button>
+                <button data-mode="synchronous">Synchronous</button>
+                <button data-mode="no_accel">No accel</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="curvewrap">
+            <div class="curvetop">
+              <span class="livebadge" id="accelLiveBadge" title="Live mouse motion telemetry"><i class="livedot"></i><span id="accelLiveSrc">Idle</span></span>
+              <div class="livereadout" id="accelLiveReadout">
+                <span class="lv-now">Now: <b>0.0</b> c/ms → <b>1.00×</b></span>
+                <span class="lv-sep">·</span>
+                <span class="lv-peak lv-dim">Peak: —</span>
+              </div>
+            </div>
+            <svg class="curvesvg" id="accelSvg" viewBox="0 0 640 240" role="img" aria-label="Acceleration sensitivity curve"></svg>
+            <div class="curvemeta">
+              <span class="legend"><i class="sw"></i> X sens</span>
+              <span class="legend" id="accelLegendY" hidden><i class="sw y"></i> Y sens</span>
+              <span class="legend"><i class="sw live"></i> Live</span>
+              <span class="legend"><i class="sw peak"></i> Swipe peak</span>
+              <span>X max:</span>
+              <div class="seg" id="accelXMax">
+                <button data-x="20">20</button>
+                <button data-x="40" class="sel">40</button>
+                <button data-x="80">80</button>
+              </div>
+              <span class="probe" id="accelProbe">Hover curve to inspect speed → multiplier</span>
+            </div>
+          </div>
+
+          <div id="accelParams"></div>
+
+          <div class="accelbar">
+            <button class="ghost" id="accelDefaults">Reset defaults</button>
+            <div class="spacer"></div>
+            <span class="dirty" id="accelDirty" hidden>Unsaved</span>
+            <button class="ghost" id="accelRevert" hidden>Revert</button>
+            <button class="primary" id="accelApply" hidden>Save curve</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="group" id="desktopGroup" hidden>
+        <div class="ghead">
+          <span class="idx">06.2</span><h2 id="desktopHeading">Desktop pointer settings</h2>
+          <span class="note" id="desktopNote" role="status"></span>
+        </div>
+        <div class="setting">
+          <div class="label"><b>Accel profile</b><p>Choose <em>Flat</em> to use your kernel acceleration curve without additional desktop acceleration.</p></div>
+          <div class="control">
+            <span class="state" data-for="desktop"></span>
+            <div class="seg" id="desktopProfile">
+              <button data-prof="flat">Flat</button>
+              <button data-prof="adaptive">Adaptive</button>
+            </div>
+          </div>
+        </div>
+        <div class="setting">
+          <div class="label"><b>Pointer speed</b><p>Adjust desktop sensitivity from −1 to 1. Zero is neutral.</p></div>
+          <div class="control">
+            <input type="range" id="desktopSpeed" min="-1" max="1" step="0.05" aria-label="Desktop pointer speed">
+            <span class="readout" id="desktopSpeedVal">0</span>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <div class="foot" id="appFoot">Changes are written to the mouse straight away and read back to confirm. Settings re-sync every 10 s and when you come back to the window.</div>
+  </div>
+</div>
+<div id="toast" role="status"></div>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>

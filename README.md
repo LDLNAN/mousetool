@@ -4,7 +4,7 @@ A lightweight, universal web and CLI suite for managing **multiple connected mic
 
 ## Screenshots
 
-These images come from a synthetic fixture, not from a real device or session: a made-up Pulsar Pro (fake serial) in the browser and a stubbed local helper. Regenerate them with `python3 docs/capture_screenshots.py`, using the browser and font versions recorded in the [capture script](docs/capture_screenshots.py). Select an image to open it at full resolution.
+These images come from a synthetic fixture, not from a real device or session: a made-up Pulsar Pro (fake serial) in the browser and a stubbed local helper. Regenerate them with `python3 tools/capture_screenshots.py`, using the browser and font versions recorded in the [capture script](tools/capture_screenshots.py). Select an image to open it at full resolution.
 
 [![Sensitivity tab in the dark theme: DPI stages, polling rate and lift-off distance for a connected mouse, with a second detected mouse in the fleet bar](docs/screenshots/sensitivity-dark.png)](docs/screenshots/sensitivity-dark.png)
 
@@ -59,7 +59,7 @@ These images come from a synthetic fixture, not from a real device or session: a
 
 ## Features
 
-- **Web Interface (`index.html`)**:
+- **Web Interface (`web/index.html`, served by `mousetool.py serve`)**:
   - **Multi-Mouse Fleet Switcher**: Connect and manage multiple simultaneous WebHID mice (**Connect mouse** for supported devices or **Any HID…** for eligible generic interfaces)—even multiple identical VID:PID mice side by side (1-to-1 split-endpoint pairing and instance badges)—while also showing passive system-detected mice from `mousetool.py serve`.
   - **Sensitivity & Sensor**: DPI/CPI stages (optional split X/Y), one-off DPI, polling rate selector (`125–8000 Hz`, or read-only badge where hardware-locked such as Pulsar XS-1), Razer preset/async LOD, EGG discrete/glass LOD, Scyrox 5-stop LOD, or Low/Med/High preset LOD.
   - **01.3 Sensor, click & performance tuning**: Capability-driven controls for Click Debounce (`ms`), Motion Sync, Angle Snapping, Ripple Control, Performance/Turbo mode, 20K Scan Mode (Scyrox V8S), Anti-mistouch (ATK F1 Ultimate 2.0), plus Endgame Gear Slamclick, Motion Jitter, Glass Mode, Lift-Off LED disable, Force Max FPS, Angle Tuning, and GX Speed/Safe SPDT.
@@ -74,13 +74,13 @@ These images come from a synthetic fixture, not from a real device or session: a
   - `accel [--set K=V ...]` (alias `maccel`): Inspect or update the kernel acceleration parameters and reboot-persistent reset scripts. Uses `mouseaccel` when it is loaded, otherwise `maccel` (legacy); see [Kernel acceleration module](#kernel-acceleration-module).
   - `rawaccel {preview|export|import}`: Offline preview/export of the current kernel acceleration curve as [Raw Accel](https://github.com/RawAccelOfficial/rawaccel) v1.7.1 settings for Windows (see below). Never applies anything.
   - `serve [--port N]`: Local HTTP API (`127.0.0.1:8766`) serving `/api/status` (with `system_mice` and the detected `accel_backend`), `/api/devices`, `/api/accel` (`/api/maccel` is kept as an alias), `/api/desktop`, and the `/api/motion` live-telemetry event stream. The original `/api/niri` write endpoint remains available.
-  - `open`: Launches `index.html` in a WebHID-capable browser (`brave`, `chromium`, or `google-chrome`), falling back to `xdg-open` if none is installed.
-- **Diagnostics (`probe.py`)**: Reads device state by default and scans all connected HID mice (`Razer`, `Endgame Gear 8k / -we`, `Logitech HID++`, `Pulsar`, `CompX ODM`, `Glorious`, and generic mice) by protocol. The opt-in `--roundtrip-stages` check writes the current Razer DPI stages back to the mouse and reads them again.
+  - `open`: Launches the local UI (`http://127.0.0.1:8766/`) in a WebHID-capable browser (`brave`, `chromium`, or `google-chrome`), falling back to `xdg-open` if none is installed.
+- **Diagnostics (`tools/probe.py`)**: Reads device state by default and scans all connected HID mice (`Razer`, `Endgame Gear 8k / -we`, `Logitech HID++`, `Pulsar`, `CompX ODM`, `Glorious`, and generic mice) by protocol. The opt-in `--roundtrip-stages` check writes the current Razer DPI stages back to the mouse and reads them again.
 
 ## Setup
 
 ### 1. Desktop launcher & background helper service
-Run `install.sh` to install `mousetool.desktop` (`~/.local/share/applications/`) and enable the `mousetool.service` systemd user service (`mousetool.py serve` on `127.0.0.1:8766`):
+Run `./install.sh` (or `./platform/linux/install.sh`) to install `platform/linux/mousetool.desktop` (`~/.local/share/applications/`) and enable the `platform/linux/mousetool.service` systemd user service (`mousetool.py serve` on `127.0.0.1:8766`):
 ```bash
 ./install.sh
 # Or also install/update udev rules (prompts for sudo):
@@ -88,9 +88,9 @@ Run `install.sh` to install `mousetool.desktop` (`~/.local/share/applications/`)
 ```
 
 ### 2. Udev rules (for WebHID & non-root hidraw access)
-If upgrading from an older version, reinstall `60-mousetool.rules` to pick up all newly supported vendor rules:
+If upgrading from an older version, reinstall `platform/linux/60-mousetool.rules` to pick up all newly supported vendor rules:
 ```bash
-sudo cp 60-mousetool.rules /etc/udev/rules.d/
+sudo cp platform/linux/60-mousetool.rules /etc/udev/rules.d/
 sudo udevadm control --reload-rules && sudo udevadm trigger
 ```
 
@@ -100,7 +100,7 @@ For `mouseaccel`, create its group and install its udev rule and helper, then ad
 ./install.sh --mouseaccel-perms
 sudo usermod -aG mouseaccel "$USER"
 ```
-`99-mouseaccel.rules` and `mouseaccel_param_ownership_and_resets` do for `mouseaccel` what the maccel package does for `maccel`. When the module loads, they give the `mouseaccel` group the parameters, `/dev/mouseaccel` and the saved value files under `/var/opt/mouseaccel/resets`, and restore the saved values. The helper only accepts `echo <integer> > …` lines from the reset files and writes the number itself. maccel's helper runs those files with `sh`.
+`platform/linux/99-mouseaccel.rules` and `platform/linux/mouseaccel_param_ownership_and_resets` do for `mouseaccel` what the maccel package does for `maccel`. When the module loads, they give the `mouseaccel` group the parameters, `/dev/mouseaccel` and the saved value files under `/var/opt/mouseaccel/resets`, and restore the saved values. The helper only accepts `echo <integer> > …` lines from the reset files and writes the number itself. maccel's helper runs those files with `sh`.
 
 For the legacy [`maccel`](https://www.maccel.org), its package already sets this up. Add yourself to the `maccel` group:
 ```bash
@@ -185,7 +185,7 @@ The helper sends a desktop warning at 20% and a critical warning at 10%. Chargin
 ```
 
 ### Raw Accel export (Windows, offline)
-`rawaccel_export.py` maps the four `maccel` modes and `SENS_MULT`, `YX_RATIO`, `ANGLE_ROTATION` and `INPUT_DPI` to a Raw Accel v1.7.1 `settings.json`, the file Raw Accel's `writer.exe` reads. It is pure Python with no Linux-only imports, so it also runs on Windows as `python rawaccel_export.py ...`. It only writes files you name; it never runs the writer or touches a driver.
+`mousetool/accel/rawaccel_export.py` maps the four `maccel` modes and `SENS_MULT`, `YX_RATIO`, `ANGLE_ROTATION` and `INPUT_DPI` to a Raw Accel v1.7.1 `settings.json`, the file Raw Accel's `writer.exe` reads. It is pure Python with no Linux-only imports, so it also runs on Windows as `python -m mousetool.accel.rawaccel_export ...`. It only writes files you name; it never runs the writer or touches a driver.
 
 | maccel | Raw Accel v1.7.1 |
 | --- | --- |
@@ -216,7 +216,7 @@ The curve check samples about 460 speeds from 1e-6 to 1e6 counts/ms, including p
 
 ## Tests
 ```bash
-python3 -m unittest -v test_mousetool.py test_desktop_pointer.py test_rawaccel_export.py
+python3 -m unittest discover -s tests -v
 ```
 The suite requires no third-party Python packages. The JavaScript curve comparison skips when Node.js is unavailable. The Plasma command-line parser check skips when `busctl` is unavailable.
 
@@ -225,7 +225,7 @@ The suite requires no third-party Python packages. The JavaScript curve comparis
 Use 64-bit Python 3.10 or newer and Edge. Install the signed driver manually using the [Raw Accel release instructions](https://github.com/RawAccelOfficial/rawaccel/releases), reboot as instructed, and extract the 1.7.x application files. From the mousetool checkout run Windows PowerShell as your normal user:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -RawAccelDir "$env:USERPROFILE\Downloads\RawAccel_v1.7.1\RawAccel"
+powershell -NoProfile -ExecutionPolicy Bypass -File .\platform\windows\install.ps1 -RawAccelDir "$env:USERPROFILE\Downloads\RawAccel_v1.7.1\RawAccel"
 ```
 
 Open **mousetool** from Start, or run `python "$env:LOCALAPPDATA\mousetool\app\mousetool.py" serve`. Edge opens the localhost UI on port 8766. Use Connect to grant WebHID access to a supported mouse, or choose **Acceleration & desktop** to edit the driver curve without connecting a mouse.
@@ -235,9 +235,9 @@ Saving replaces the default Raw Accel configuration. Mousetool checks the export
 To remove the app, select **Reset to no acceleration** if desired, close the server, and run:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\mousetool\app\install.ps1" -Uninstall
+powershell -NoProfile -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\mousetool\app\platform\windows\install.ps1" -Uninstall
 ```
 
 This removes the per-user shortcuts, app files and saved curve. Manage the driver separately using Raw Accel's instructions.
 
-For the hardware smoke test, use a separate app copy under `%USERPROFILE%\mousetool-test-scratch` with the three unblocked Raw Accel files in its `rawaccel` subdirectory. Close any server on port 8766, then run `python test-windows.py` from that copy. The script uses temporary per-user settings, tests apply and logon replay, then restores no acceleration and checks the complete driver readback. A successful run ends with `FINAL no acceleration verified`.
+For the hardware smoke test, use a separate app copy under `%USERPROFILE%\mousetool-test-scratch` with the three unblocked Raw Accel files in its `rawaccel` subdirectory. Close any server on port 8766, then run `python tools/test-windows.py` from that copy. The script uses temporary per-user settings, tests apply and logon replay, then restores no acceleration and checks the complete driver readback. A successful run ends with `FINAL no acceleration verified`.
