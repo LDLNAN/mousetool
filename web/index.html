@@ -14,6 +14,7 @@
       <h1>mousetool</h1>
     </div>
     <span class="pill" id="conn"><i class="dot"></i><span id="connText">Not connected</span></span>
+    <span class="tierbadge" id="tierBadge" hidden><i class="tdot"></i><span id="tierBadgeText"></span></span>
     <div class="spacer"></div>
     <span class="sync" id="sync"></span>
     <button class="icon ghost" id="refresh" title="Read everything from the active mouse again" aria-label="Refresh" hidden>
@@ -96,6 +97,21 @@
           <span class="dirty" id="stagesDirty" hidden>Unsaved</span>
           <button class="ghost" id="revertStages" hidden>Revert</button>
           <button class="primary" id="applyStages" hidden>Save stages</button>
+        </div>
+      </section>
+
+      <section class="group" id="readonlyDpiGroup" hidden>
+        <div class="ghead">
+          <span class="idx">01.1</span><h2>Hardware DPI (read-only)</h2>
+          <span class="note" id="roDpiNote">Live X/Y sensor readout via reviewed 0xff getter — writes blocked at dispatch</span>
+          <div class="spacer"></div>
+          <button class="ghost" id="roDpiRefresh" type="button">Read now</button>
+        </div>
+        <div class="setting">
+          <div class="label"><b>Current sensor DPI</b><p id="roDpiDesc">Read directly from the mouse without writing onboard memory. Stages, polling, lift-off, lighting, and button remapping stay disabled until hardware-verified.</p></div>
+          <div class="control">
+            <span class="readout ro-dpi" id="roDpiVal">–</span>
+          </div>
         </div>
       </section>
 
@@ -375,6 +391,7 @@
         <dl class="kv">
           <dt>Model</dt><dd id="model">–</dd>
           <dt>Protocol</dt><dd id="protoName">–</dd>
+          <dt>Support tier</dt><dd id="supportTier">–</dd>
           <dt>Link</dt><dd id="link">–</dd>
           <dt>USB ID</dt><dd id="usbid">–</dd>
           <dt>Firmware</dt><dd id="fw">–</dd>

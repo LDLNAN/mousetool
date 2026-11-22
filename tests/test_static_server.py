@@ -21,11 +21,15 @@ EXPECTED_ASSETS = [
     ("/accel_graph.js", "text/javascript; charset=utf-8"),
     ("/helper_client.js", "text/javascript; charset=utf-8"),
     ("/drivers/common.js", "text/javascript; charset=utf-8"),
+    ("/drivers/registry.js", "text/javascript; charset=utf-8"),
+    ("/drivers/classifier.js", "text/javascript; charset=utf-8"),
     ("/drivers/razer.js", "text/javascript; charset=utf-8"),
     ("/drivers/egg.js", "text/javascript; charset=utf-8"),
     ("/drivers/logitech.js", "text/javascript; charset=utf-8"),
     ("/drivers/pulsar.js", "text/javascript; charset=utf-8"),
     ("/drivers/glorious.js", "text/javascript; charset=utf-8"),
+    ("/devices/devices.json", "application/json; charset=utf-8"),
+    ("/devices/schema.json", "application/json; charset=utf-8"),
     ("/icon.svg", "image/svg+xml"),
 ]
 
@@ -38,6 +42,10 @@ TRAVERSAL_PATHS = [
     "/%252e%252e%252fmousetool.py",
     "/drivers/../../mousetool.py",
     "/drivers/%2e%2e/%2e%2e/README.md",
+    "/devices/../mousetool.py",
+    "/devices/%2e%2e/mousetool.py",
+    "/devices/%252e%252e/mousetool.py",
+    "/devices/..%5cmousetool.py",
     "/..%5cmousetool.py",
     "/drivers/..%5c..%5cmousetool.py",
     "/app.js%00.png",
@@ -173,6 +181,15 @@ class StaticAssetServingTests(unittest.TestCase):
             (nested_repo / "icon.svg").symlink_to(outside_svg)
             with self.assertRaises(PathTraversalError):
                 resolve_static_asset("/icon.svg", web_dir=nested_web, repo_root=nested_repo)
+
+            # Symlink escaping devices root must also be rejected
+            dev_dir = nested_repo / "devices"
+            dev_dir.mkdir()
+            outside_json = root / "secret.json"
+            outside_json.write_text('{"secret":true}', encoding="utf-8")
+            (dev_dir / "escape.json").symlink_to(outside_json)
+            with self.assertRaises(PathTraversalError):
+                resolve_static_asset("/devices/escape.json", web_dir=nested_web, repo_root=nested_repo, devices_dir=dev_dir)
 
 
 if __name__ == "__main__":

@@ -1,74 +1,36 @@
-// Protocols 4-6: CompX Report 0x08 / Pulsar XS-1 / Pulsar Pro / Areson / ATK / Scyrox / Teevolution / VGN / Lamzu
+// Protocols 4-6: CompX Report 0x08 / Pulsar XS-1 / Pulsar Pro / Areson / ATK / Scyrox / Teevolution / VGN / Lamzu (registry-backed)
 import { DevErr, calcReportBytes, findCollection, hex, sleep, unwrapReport, vpKey } from "./common.js";
+import {
+  getAresonDevices,
+  getAtkProducts,
+  getCompxDevices,
+  getPulsarProDevices,
+  getPulsarXs1Devices,
+  tierMetaFromProfile,
+} from "./registry.js";
 
 const PULSAR_VID = 0x3710;
-const PULSAR_XS1_DEVICES = {
-  0x3404: { name: "Pulsar X2A v3", link: "USB cable", wireless: false, maxPoll: 1000 },
-  0x3409: { name: "Pulsar XS-1 Mouse", link: "USB cable", wireless: false, maxPoll: 1000 },
-  0x3410: { name: "Pulsar XS-1 Mouse", link: "USB cable", wireless: false, maxPoll: 1000 },
-  0x5402: { name: "Pulsar X3 M", link: "Wireless", wireless: true, maxPoll: 1000 },
-  0x5403: { name: "Pulsar 8K Dongle", link: "8K dongle", wireless: true, maxPoll: 8000 },
-};
-const PULSAR_PRO_DEVICES = {
-  0x5405: { name: "Pulsar Pro", link: "8K dongle", wireless: true, maxPoll: 8000 },
-};
-
 const ARESON_VID = 0x25a7;
-const ARESON_DEVICES = {
-  0xfa7b: { name: "Pulsar Areson (X2 v2 / X2H / Xlite v3)", link: "USB cable", wireless: false },
-  0xfa7c: { name: "Pulsar Areson (X2 v2 / X2H / Xlite v3)", link: "Wireless dongle", wireless: true },
-};
-
 const COMPX_VID = 0x3554;
 const ATK_VID = 0x373b;
-const COMPX_DEVICES = {
-  "3554:f507": { brand: "pulsar_4k", name: "Pulsar 4K Receiver", link: "4K dongle", wireless: true, dpiMax: 26000, rates: [125, 250, 500, 1000, 2000, 4000] },
-  "3554:f508": { brand: "pulsar_4k", name: "Pulsar 4K Receiver", link: "4K dongle", wireless: true, dpiMax: 26000, rates: [125, 250, 500, 1000, 2000, 4000] },
-  "3554:f509": { brand: "pulsar_4k", name: "Pulsar 4K Receiver", link: "4K dongle", wireless: true, dpiMax: 26000, rates: [125, 250, 500, 1000, 2000, 4000] },
-  "3554:f515": { brand: "scyrox", model: "v8s", name: "Scyrox V8S", link: "USB cable", wireless: false, dpiMax: 50000, rates: [125, 250, 500, 1000, 2000, 4000, 8000] },
-  "3554:f517": { brand: "scyrox", model: "v8s", name: "Scyrox V8S Turbo", link: "8K dongle", wireless: true, dpiMax: 50000, rates: [125, 250, 500, 1000, 2000, 4000, 8000] },
-  "3554:f5f7": { brand: "scyrox", model: "v8", name: "Scyrox V8", link: "8K dongle", wireless: true, dpiMax: 30000, rates: [125, 250, 500, 1000, 2000, 4000, 8000] },
-  "3554:f520": { brand: "teevolution", name: "Teevolution Terra Pro", link: "Wireless", wireless: true, dpiMax: 42000, rates: [125, 250, 500, 1000, 2000, 4000, 8000] },
-  "3554:f522": { brand: "teevolution", name: "Teevolution Terra Pro", link: "USB cable", wireless: false, dpiMax: 42000, rates: [125, 250, 500, 1000, 2000, 4000, 8000] },
-  "3554:f523": { brand: "teevolution", name: "Teevolution Terra Pro", link: "8K dongle", wireless: true, dpiMax: 42000, rates: [125, 250, 500, 1000, 2000, 4000, 8000] },
-  "3554:f5bb": { brand: "teevolution", name: "Teevolution Terra Pro", link: "Wireless dongle", wireless: true, dpiMax: 42000, rates: [125, 250, 500, 1000, 2000, 4000, 8000] },
-  "3554:fb56": { brand: "vgn", name: "VGN F2 Master+", link: "8K dongle", wireless: true, dpiMax: 26000, rates: [125, 250, 500, 1000, 2000, 4000, 8000] },
-  "3554:fb57": { brand: "vgn", name: "VGN F2 Master+", link: "USB cable", wireless: false, dpiMax: 26000, rates: [125, 250, 500, 1000, 2000, 4000, 8000] },
-  "3554:f50d": { brand: "lamzu", name: "Lamzu Atlantis", link: "1K dongle", wireless: true, dpiMax: 26000, rates: [125, 250, 500, 1000] },
-  "3554:f50f": { brand: "lamzu", name: "Lamzu Atlantis", link: "USB cable", wireless: false, dpiMax: 26000, rates: [125, 250, 500, 1000] },
-  "3554:f510": { brand: "lamzu", name: "Lamzu Atlantis 4K", link: "4K dongle", wireless: true, dpiMax: 26000, rates: [125, 250, 500, 1000, 2000, 4000] },
-  "3554:f58a": { brand: "atk", name: "ATK / VXE Mouse", link: "Wireless dongle", wireless: true, dpiMax: 30000, rates: [125, 250, 500, 1000, 2000, 4000, 8000] },
-  "3554:f58c": { brand: "atk", name: "ATK / VXE Mouse", link: "USB cable", wireless: false, dpiMax: 30000, rates: [125, 250, 500, 1000, 2000, 4000, 8000] },
-  "3554:f58e": { brand: "atk", name: "ATK / VXE Mouse", link: "Wireless dongle", wireless: true, dpiMax: 30000, rates: [125, 250, 500, 1000, 2000, 4000, 8000] },
-  "3554:f58f": { brand: "atk", name: "ATK / VXE Mouse", link: "8K dongle", wireless: true, dpiMax: 30000, rates: [125, 250, 500, 1000, 2000, 4000, 8000] },
-  "373b:1085": { brand: "atk", name: "VXE R1 SE+ (Beken)", link: "1K dongle", wireless: true, dpiMax: 18000, rates: [250, 500, 1000] },
-  "373b:10c9": { brand: "atk", name: "ATK NearLink Mouse", link: "NearLink dongle", wireless: true, dpiMax: 30000, rates: [125, 250, 500, 1000, 2000, 4000, 8000] },
-  "373b:11d9": { brand: "atk", name: "ATK F1 Ultimate 2.0", link: "8K dongle", wireless: true, dpiMax: 42000, rates: [125, 250, 500, 1000, 2000, 4000, 8000] },
-};
-const ATK_PRODUCTS = {
-  "1:8":  { name: "ATK Blazing Sky F1 Ultimate 2.0", sensor: "PAW3950Ultra", dpiMax: 42000, rates: [125, 250, 500, 1000, 2000, 4000, 8000], maxStages: 6, isR1: false, antiMistouch: true },
-  "1:31": { name: "ATK A9 Mini+", sensor: "PAW3955Master", dpiMax: 50000, rates: [125, 250, 500, 1000, 2000, 4000, 8000], maxStages: 6, isR1: false, dpi6: true },
-  "1:52": { name: "ATK A9 Mini+", sensor: "PAW3955Master", dpiMax: 50000, rates: [125, 250, 500, 1000, 2000, 4000, 8000], maxStages: 6, isR1: false, dpi6: true },
-  "2:11": { name: "VXE R1", sensor: "PAW3395", dpiMax: 26000, rates: [125, 250, 500, 1000, 2000, 4000], maxStages: 4, isR1: true },
-  "2:12": { name: "VXE R1", sensor: "PAW3395", dpiMax: 26000, rates: [125, 250, 500, 1000, 2000, 4000], maxStages: 4, isR1: true },
-  "2:27": { name: "VXE R1 Pro Max", sensor: "PAW3395", dpiMax: 26000, rates: [125, 250, 500, 1000, 2000, 4000], maxStages: 4, isR1: true },
-  "2:32": { name: "VXE R1 SE+", sensor: "PAW3395SE", dpiMax: 18000, rates: [250, 500, 1000], maxStages: 4, isR1: true },
-  "2:39": { name: "ATK Blazing Sky X1 Pro Max", sensor: "PAW3950", dpiMax: 42000, rates: [125, 250, 500, 1000, 2000, 4000, 8000], maxStages: 6, isR1: false },
-  "2:83": { name: "ATK A9 Plus NearLink", sensor: "PAW3395", dpiMax: 26000, rates: [125, 250, 500, 1000], maxStages: 6, isR1: false },
-};
 
 function classifyPulsar(d) {
   const vid = d.vendorId, pid = d.productId;
   const vp = vpKey(vid, pid);
+  const pulsarProDevices = getPulsarProDevices();
+  const pulsarXs1Devices = getPulsarXs1Devices();
+  const aresonDevices = getAresonDevices();
+  const compxDevices = getCompxDevices();
 
-  if (vid === PULSAR_VID && PULSAR_PRO_DEVICES[pid]) {
+  if (vid === PULSAR_VID && pulsarProDevices[pid]) {
     if (!findCollection(d, { page: 0x0001, inId: 0, outId: 0 })) return null;
-    const prof = PULSAR_PRO_DEVICES[pid];
+    const prof = pulsarProDevices[pid];
     return {
       driver: "pulsar_pro", protoLabel: "Pulsar Pro HID", protoTag: "Pulsar",
+      ...tierMetaFromProfile(prof.profileId || "pulsar_pro"),
       info: { ...prof, prio: 1, hyper: true, dpiMax: 32000 },
       caps: {
-        stages: true, dpi: true, maxStages: 6, dpiMin: 50, dpiMax: 32000, dpiStepLo: 50, dpiStepHi: 50,
+        stages: true, dpi: true, dpiRead: true, dpiWrite: true, maxStages: 6, dpiMin: 50, dpiMax: 32000, dpiStepLo: 50, dpiStepHi: 50,
         splitXY: true, pollRates: [125, 250, 500, 1000, 2000, 4000, 8000], lodMode: "preset", lodAsync: false, buttons: false, layers: false,
         wireless: true, powerTune: true, lowBatt: true, lowMin: 5, lowMax: 30, lowStep: 5, idleMaxMin: 30, batteryRead: true,
         hyper: false, dongle: false, factoryReset: false,
@@ -81,12 +43,13 @@ function classifyPulsar(d) {
     const xs1Col = findCollection(d, { page: 0xffff, usage: 0x0001, featId: 0 });
     const xs1Rep = xs1Col && (xs1Col.featureReports || []).find((r) => r.reportId === 0);
     if (xs1Col && calcReportBytes(xs1Rep) >= 64 && !findCollection(d, { inId: 0x08 })) {
-      const prof = PULSAR_XS1_DEVICES[pid] ?? { name: d.productName || "Pulsar XS-1 Mouse", link: "USB / Dongle", wireless: false, maxPoll: 8000 };
+      const prof = pulsarXs1Devices[pid] ?? { name: d.productName || "Pulsar XS-1 Mouse", link: "USB / Dongle", wireless: false, maxPoll: 8000 };
       return {
         driver: "pulsar_xs1", protoLabel: "Pulsar XS-1 HID", protoTag: "Pulsar",
+        ...tierMetaFromProfile(prof.profileId || "pulsar_xs1"),
         info: { ...prof, prio: prof.wireless ? 1 : 0, hyper: (prof.maxPoll || 1000) > 1000, dpiMax: 26000 },
         caps: {
-          stages: false, dpi: true, maxStages: 1, dpiMin: 50, dpiMax: 26000, dpiStepLo: 50, dpiStepHi: 50,
+          stages: false, dpi: true, dpiRead: true, dpiWrite: true, maxStages: 1, dpiMin: 50, dpiMax: 26000, dpiStepLo: 50, dpiStepHi: 50,
           splitXY: true, pollRates: [125, 250, 500, 1000, 2000, 4000, 8000], pollReadonly: true, lodMode: "preset", lodAsync: false, buttons: false, layers: false,
           wireless: prof.wireless, powerTune: false, batteryRead: prof.wireless, hyper: false, dongle: false, factoryReset: false,
           tune: { debounce: true, debMin: 0, debMax: 15, debStep: 1, motionSync: true, angleSnapping: true, rippleControl: true },
@@ -97,9 +60,10 @@ function classifyPulsar(d) {
       const rates = [125, 250, 500, 1000, 2000, 4000, 8000];
       return {
         driver: "compx", protoLabel: "Pulsar CompX 0x08", protoTag: "Pulsar",
+        ...tierMetaFromProfile("compx_odm"),
         info: { brand: "pulsar_compx", name: d.productName || "Pulsar Wireless Mouse", link: "USB / Dongle", wireless: true, prio: 1, hyper: true, dpiMax: 32000, rates },
         caps: {
-          stages: true, dpi: true, maxStages: 6, dpiMin: 50, dpiMax: 32000, dpiStepLo: 10, dpiStepHi: 50,
+          stages: true, dpi: true, dpiRead: true, dpiWrite: true, maxStages: 6, dpiMin: 50, dpiMax: 32000, dpiStepLo: 10, dpiStepHi: 50,
           splitXY: true, pollRates: rates, lodMode: "preset", lodAsync: false, buttons: false, layers: false,
           wireless: true, powerTune: true, lowBatt: false, idleMaxMin: 30, batteryRead: true, hyper: false, dongle: false, factoryReset: false,
           tune: { debounce: true, debMin: 0, debMax: 30, debStep: 1, motionSync: true, angleSnapping: true, rippleControl: true },
@@ -108,14 +72,15 @@ function classifyPulsar(d) {
     }
   }
 
-  if (vid === ARESON_VID && ARESON_DEVICES[pid]) {
+  if (vid === ARESON_VID && aresonDevices[pid]) {
     if (!findCollection(d, { featId: 0x08 }) || findCollection(d, { page: 0xffff, usage: 0x0002 })) return null;
-    const prof = ARESON_DEVICES[pid];
+    const prof = aresonDevices[pid];
     return {
       driver: "compx", protoLabel: "Pulsar Areson (CompX 0x08)", protoTag: "Pulsar",
+      ...tierMetaFromProfile(prof.profileId || "pulsar_areson_compx"),
       info: { ...prof, brand: "areson", prio: prof.wireless ? 2 : 0, hyper: false, dpiMax: 26000, rates: [125, 250, 500, 1000] },
       caps: {
-        stages: true, dpi: true, maxStages: 4, dpiMin: 50, dpiMax: 26000, dpiStepLo: 50, dpiStepHi: 50,
+        stages: true, dpi: true, dpiRead: true, dpiWrite: true, maxStages: 4, dpiMin: 50, dpiMax: 26000, dpiStepLo: 50, dpiStepHi: 50,
         splitXY: true, pollRates: [125, 250, 500, 1000], lodMode: "preset", lodAsync: false, buttons: false, layers: false,
         wireless: prof.wireless, powerTune: prof.wireless, lowBatt: false, idleMaxMin: 30, batteryRead: prof.wireless,
         hyper: false, dongle: false, factoryReset: false,
@@ -124,7 +89,7 @@ function classifyPulsar(d) {
     };
   }
 
-  const cxKnown = COMPX_DEVICES[vp];
+  const cxKnown = compxDevices[vp];
   const cxVendor = (vid === COMPX_VID || vid === ATK_VID) && findCollection(d, { page: 0xff02, usage: 0x02 });
   if ((cxKnown || cxVendor) && findCollection(d, { outId: 0x08, inId: 0x08 })) {
     const info = cxKnown
@@ -133,9 +98,11 @@ function classifyPulsar(d) {
     const isV8s = info.brand === "scyrox" && info.model === "v8s";
     if (isV8s) info.lodOptions = ["0.7 mm", "0.9 mm", "1.2 mm", "1.4 mm", "1.6 mm"];
     return {
-      driver: "compx", protoLabel: "CompX Report 0x08", protoTag: info.brand.toUpperCase(), info,
+      driver: "compx", protoLabel: "CompX Report 0x08", protoTag: info.brand.toUpperCase(),
+      ...tierMetaFromProfile(cxKnown?.profileId || "compx_odm"),
+      info,
       caps: {
-        stages: true, dpi: true, maxStages: 6, dpiMin: 50, dpiMax: info.dpiMax, dpiStepLo: 50, dpiStepHi: 50,
+        stages: true, dpi: true, dpiRead: true, dpiWrite: true, maxStages: 6, dpiMin: 50, dpiMax: info.dpiMax, dpiStepLo: 50, dpiStepHi: 50,
         splitXY: true, pollRates: info.rates, lodMode: isV8s ? "egg" : "preset", lodAsync: false, buttons: false, layers: false,
         wireless: info.wireless, powerTune: info.wireless, lowBatt: false, idleMaxMin: 30, batteryRead: info.wireless,
         hyper: false, dongle: false, factoryReset: false,
@@ -371,7 +338,7 @@ function makeCompxApi(sess, { isConnected, log }) {
       if (sess.driver === "compx" && brand === "atk") {
         try {
           const id = await xfer(0x10, [], 300);
-          const prod = ATK_PRODUCTS[`${id[5]}:${id[6]}`];
+          const prod = getAtkProducts()[`${id[5]}:${id[6]}`];
           if (prod) {
             sess.name = prod.name; sess.shortName = prod.name;
             sess.caps.dpiMax = prod.dpiMax;
@@ -671,14 +638,14 @@ function makePulsarProApi(sess, { isConnected, log }) {
 
 export {
   PULSAR_VID,
-  PULSAR_XS1_DEVICES,
-  PULSAR_PRO_DEVICES,
+  getPulsarXs1Devices,
+  getPulsarProDevices,
   ARESON_VID,
-  ARESON_DEVICES,
+  getAresonDevices,
   COMPX_VID,
   ATK_VID,
-  COMPX_DEVICES,
-  ATK_PRODUCTS,
+  getCompxDevices,
+  getAtkProducts,
   classifyPulsar,
   makeCompxApi,
   makePulsarXs1Api,

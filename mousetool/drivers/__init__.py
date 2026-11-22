@@ -12,6 +12,7 @@ from .base import (
     LOD_NAMES,
     LOD_PRESETS,
     Asleep,
+    ReadOnlyTierError,
     _cache_key,
     _ioc,
     _load_device_cache,

@@ -13,6 +13,7 @@ from . import battery as battery_mod
 from . import hid_discovery
 from . import server as server_mod
 from .accel import linux as linux_accel
+from .registry import assert_operation_allowed
 from .drivers import (
     COMPX_RATES_INV,
     CORE2_RATES,
@@ -207,14 +208,15 @@ def status_cmd(args):
 def dpi_cmd(args):
     meta = hid_discovery.select_mice(args.device)[0]
     drv = meta["driver"]
+    assert_operation_allowed(meta, "dpi", write=(args.x is not None))
     fd = os.open(meta["hidraw"], os.O_RDWR)
     nfd = _open_notify(meta)
     try:
         if drv == "razer":
             if args.x is not None:
                 y = args.y if args.y is not None else args.x
-                set_dpi(fd, args.x, y, meta["dpi_max"])
-            x, y = get_dpi(fd)
+                set_dpi(fd, args.x, y, meta["dpi_max"], meta=meta)
+            x, y = get_dpi(fd, meta=meta)
             print(f"{x}" if x == y else f"{x} {y}")
         elif drv == "egg8k":
             prof = meta["profile"]
@@ -332,16 +334,17 @@ def _parse_stage(token):
 def stages_cmd(args):
     meta = hid_discovery.select_mice(args.device)[0]
     drv = meta["driver"]
+    assert_operation_allowed(meta, "stages", write=bool(args.set or args.active is not None))
     fd = os.open(meta["hidraw"], os.O_RDWR)
     nfd = _open_notify(meta)
     try:
         if drv == "razer":
-            cur = get_stages(fd)
+            cur = get_stages(fd, meta=meta)
             if args.set or args.active is not None:
                 stages = [_parse_stage(s.strip()) for s in args.set.split(",") if s.strip()] if args.set else cur["stages"]
                 active = args.active if args.active is not None else min(cur["active"], len(stages))
-                set_stages(fd, active, stages, meta["dpi_max"])
-                cur = get_stages(fd)
+                set_stages(fd, active, stages, meta["dpi_max"], meta=meta)
+                cur = get_stages(fd, meta=meta)
             print(json.dumps(cur))
         elif drv == "egg8k":
             prof = meta["profile"]
@@ -394,13 +397,14 @@ def stages_cmd(args):
 def poll_cmd(args):
     meta = hid_discovery.select_mice(args.device)[0]
     drv = meta["driver"]
+    assert_operation_allowed(meta, "polling", write=(args.hz is not None))
     fd = os.open(meta["hidraw"], os.O_RDWR)
     nfd = _open_notify(meta)
     try:
         if drv == "razer":
             if args.hz is not None:
-                set_poll(fd, args.hz, meta["hyper"])
-            print(f"{get_poll(fd, meta['hyper'])} Hz")
+                set_poll(fd, args.hz, meta["hyper"], meta=meta)
+            print(f"{get_poll(fd, meta['hyper'], meta=meta)} Hz")
         elif drv == "egg8k":
             prof = meta["profile"]
             if args.hz is not None:
@@ -469,15 +473,16 @@ def poll_cmd(args):
 def lod_cmd(args):
     meta = hid_discovery.select_mice(args.device)[0]
     drv = meta["driver"]
+    assert_operation_allowed(meta, "lod", write=bool(args.preset or args.index is not None or args.async_vals))
     fd = os.open(meta["hidraw"], os.O_RDWR)
     nfd = _open_notify(meta)
     try:
         if drv == "razer":
             if args.preset:
-                set_lod_preset(fd, args.preset)
+                set_lod_preset(fd, args.preset, meta=meta)
             elif args.async_vals:
-                set_lod_async(fd, args.async_vals[0], args.async_vals[1])
-            print(json.dumps(get_lod(fd)))
+                set_lod_async(fd, args.async_vals[0], args.async_vals[1], meta=meta)
+            print(json.dumps(get_lod(fd, meta=meta)))
         elif drv == "egg8k":
             prof = meta["profile"]
             cur = egg_parse_config(egg_read_config(fd), prof)
@@ -535,6 +540,7 @@ def lod_cmd(args):
 def power_cmd(args):
     meta = hid_discovery.select_mice(args.device)[0]
     drv = meta["driver"]
+    assert_operation_allowed(meta, "power", write=bool(args.idle is not None or args.low is not None))
     if not meta.get("wireless"):
         sys.exit("selected device is wired (no wireless power settings)")
     fd = os.open(meta["hidraw"], os.O_RDWR)
@@ -542,10 +548,10 @@ def power_cmd(args):
     try:
         if drv == "razer":
             if args.idle is not None:
-                set_idle(fd, args.idle * 60)
+                set_idle(fd, args.idle * 60, meta=meta)
             if args.low is not None:
-                set_low(fd, args.low)
-            print(json.dumps({"idle_minutes": round(get_idle(fd) / 60), "low_battery_percent": get_low(fd)}))
+                set_low(fd, args.low, meta=meta)
+            print(json.dumps({"idle_minutes": round(get_idle(fd, meta=meta) / 60), "low_battery_percent": get_low(fd, meta=meta)}))
         elif drv in ("compx", "egg_we"):
             feat_mode, _, brand = _compx_ctx(meta)
             if args.idle is not None:
@@ -597,6 +603,7 @@ def tune_cmd(args):
     if args.spdt is not None:
         updates["spdt"] = args.spdt
     deb = getattr(args, "debounce", None)
+    assert_operation_allowed(meta, "tuning", write=bool(updates or deb is not None))
 
     fd = os.open(meta["hidraw"], os.O_RDWR)
     nfd = _open_notify(meta)

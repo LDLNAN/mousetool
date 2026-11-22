@@ -1,0 +1,6475 @@
+{
+  "schema_version": 1,
+  "tiers": {
+    "0": {
+      "label": "Tier 0 · Pointer only",
+      "short": "Tier 0",
+      "description": "Descriptor/OS metadata only. Zero vendor HID reports are sent."
+    },
+    "1": {
+      "label": "Tier 1 · Read-only",
+      "short": "Tier 1",
+      "description": "Reviewed read-only getters on a matched control interface. All mutating commands are blocked at dispatch."
+    },
+    "2": {
+      "label": "Tier 2 · Verified",
+      "short": "Tier 2",
+      "description": "Documented or hardware-verified controls with explicit per-operation capability flags."
+    }
+  },
+  "sources": {
+    "mousetool_baseline": {
+      "url": "https://github.com/LDLNAN/mousetool",
+      "revision": "a134edcd0f84ba5da5d0df94950f94280e7fd652",
+      "path": "mousetool.py, index.html, 60-mousetool.rules",
+      "licence": "Repository baseline (no top-level licence declared)",
+      "extraction_rule": "Migrated existing pre-MT-016 device tables and capabilities verbatim without silent hardware-verification promotion"
+    },
+    "openrazer": {
+      "url": "https://github.com/openrazer/openrazer",
+      "revision": "ab2452847d12f4c789af040b17599012a0dd80b9",
+      "path": "driver/razermouse_driver.h, driver/razermouse_driver.c, daemon/openrazer_daemon/hardware/mouse.py",
+      "licence": "GPL-2.0-or-later (consulted as factual reference only; no upstream code copied)",
+      "extraction_rule": "Independently recorded wired USB PID 1532:008a, 8500 DPI max, and 0xff transaction byte for firmware and non-storing XY DPI getters"
+    },
+    "libratbag": {
+      "url": "https://github.com/libratbag/libratbag",
+      "revision": "8235b5bb6032dea15901ab58a8218956f4494d08",
+      "path": "data/devices/",
+      "licence": "MIT",
+      "extraction_rule": "Reference for bus-qualified match semantics and HID++ 2.0 classification boundaries"
+    },
+    "logitech_cpg": {
+      "url": "https://github.com/Logitech/cpg-docs",
+      "revision": "f9107a4e3190d798f9be8c5d596f255f5e5741d2",
+      "path": "hidpp20/features/0x0000-IRoot.rst",
+      "licence": "Public vendor documentation (semantics implemented independently)",
+      "extraction_rule": "IRoot ping/version and feature index discovery semantics"
+    },
+    "solaar": {
+      "url": "https://github.com/pwr-Solaar/Solaar",
+      "revision": "e7304c4c451cc9bb4f206a914844525e67856a28",
+      "path": "lib/logitech_receiver/descriptors.py",
+      "licence": "GPL-2.0-or-later (consulted as factual reference only; no upstream code copied)",
+      "extraction_rule": "Recorded distinct USB receiver PID vs paired wireless child WPID namespace (e.g. G Pro Wireless WPID 4079)"
+    }
+  },
+  "models": [
+    {
+      "key": "atk-f1-ultimate-2-0",
+      "name": "ATK F1 Ultimate 2.0",
+      "brand": "atk",
+      "aliases": [],
+      "kind": "mouse",
+      "source": "mousetool_baseline"
+    },
+    {
+      "key": "atk-nearlink-mouse",
+      "name": "ATK NearLink Mouse",
+      "brand": "atk",
+      "aliases": [],
+      "kind": "mouse",
+      "source": "mousetool_baseline"
+    },
+    {
+      "key": "atk-vxe-mouse",
+      "name": "ATK / VXE Mouse",
+      "brand": "atk",
+      "aliases": [],
+      "kind": "mouse",
+      "source": "mousetool_baseline"
+    },
+    {
+      "key": "endgame-gear-op1-8k",
+      "name": "Endgame Gear OP1 8k",
+      "brand": "egg",
+      "aliases": [],
+      "kind": "mouse",
+      "source": "mousetool_baseline"
+    },
+    {
+      "key": "endgame-gear-op1-8k-purple-frost",
+      "name": "Endgame Gear OP1 8k Purple Frost",
+      "brand": "egg",
+      "aliases": [],
+      "kind": "mouse",
+      "source": "mousetool_baseline"
+    },
+    {
+      "key": "endgame-gear-op1-8k-v2",
+      "name": "Endgame Gear OP1 8k v2",
+      "brand": "egg",
+      "aliases": [],
+      "kind": "mouse",
+      "source": "mousetool_baseline"
+    },
+    {
+      "key": "endgame-gear-op1we",
+      "name": "Endgame Gear OP1we",
+      "brand": "egg",
+      "aliases": [],
+      "kind": "mouse",
+      "source": "mousetool_baseline"
+    },
+    {
+      "key": "endgame-gear-xm2-8k",
+      "name": "Endgame Gear XM2 8k",
+      "brand": "egg",
+      "aliases": [],
+      "kind": "mouse",
+      "source": "mousetool_baseline"
+    },
+    {
+      "key": "endgame-gear-xm2-8k-v2",
+      "name": "Endgame Gear XM2 8k v2",
+      "brand": "egg",
+      "aliases": [],
+      "kind": "mouse",
+      "source": "mousetool_baseline"
+    },
+    {
+      "key": "endgame-gear-xm2we",
+      "name": "Endgame Gear XM2we",
+      "brand": "egg",
+      "aliases": [],
+      "kind": "mouse",
+      "source": "mousetool_baseline"
+    },
+    {
+      "key": "glorious-classic-core-2",
+      "name": "Glorious Classic (CORE 2)",
+      "brand": "glorious",
+      "aliases": [],
+      "kind": "mouse",
+      "source": "mousetool_baseline"
+    },
+    {
+      "key": "glorious-forge-mouse",
+      "name": "Glorious Forge Mouse",
+      "brand": "glorious",
+      "aliases": [],
+      "kind": "mouse",
+      "source": "mousetool_baseline"
+    },
+    {
+      "key": "glorious-model-d-2",
+      "name": "Glorious Model D 2",
+      "brand": "glorious",
+      "aliases": [],
+      "kind": "mouse",
+      "source": "mousetool_baseline"
+    },
+    {
+      "key": "glorious-model-d-2-mini",
+      "name": "Glorious Model D 2 Mini",
+      "brand": "glorious",
+      "aliases": [],
+      "kind": "mouse",
+      "source": "mousetool_baseline"
+    },
+    {
+      "key": "glorious-model-d-2-mini-wireless",
+      "name": "Glorious Model D 2 Mini Wireless",
+      "brand": "glorious",
+      "aliases": [],
+      "kind": "mouse",
+      "source": "mousetool_baseline"
+    },
+    {
+      "key": "glorious-model-d-2-pro",
+      "name": "Glorious Model D 2 Pro",
+      "brand": "glorious",
+      "aliases": [],
+      "kind": "mouse",
+      "source": "mousetool_baseline"
+    },
+    {
+      "key": "glorious-model-d-2-pro-4k-8k",
+      "name": "Glorious Model D 2 Pro 4K/8K",
+      "brand": "glorious",
+      "aliases": [],
+      "kind": "mouse",
+      "source": "mousetool_baseline"
+    },
+    {
+      "key": "glorious-model-d-2-wireless",
+      "name": "Glorious Model D 2 Wireless",
+      "brand": "glorious",
+      "aliases": [],
+      "kind": "mouse",
+      "source": "mousetool_baseline"
+    },
+    {
+      "key": "glorious-model-d-3-wireless",
+      "name": "Glorious Model D 3 Wireless",
+      "brand": "glorious",
+      "aliases": [],
+      "kind": "mouse",
+      "source": "mousetool_baseline"
+    },
+    {
+      "key": "glorious-model-d-d",
+      "name": "Glorious Model D / D-",
+      "brand": "glorious",
+      "aliases": [],
+      "kind": "mouse",
+      "source": "mousetool_baseline"
+    },
+    {
+      "key": "glorious-model-d-wireless",
+      "name": "Glorious Model D Wireless",
+      "brand": "glorious",
+      "aliases": [],
+      "kind": "mouse",
+      "source": "mousetool_baseline"
+    },
+    {
+      "key": "glorious-model-i",
+      "name": "Glorious Model I",
+      "brand": "glorious",
+      "aliases": [],
+      "kind": "mouse",
+      "source": "mousetool_baseline"
+    },
+    {
+      "key": "glorious-model-i-2-wireless",
+      "name": "Glorious Model I 2 Wireless",
+      "brand": "glorious",
+      "aliases": [],
+      "kind": "mouse",
+      "source": "mousetool_baseline"
+    },
+    {
+      "key": "glorious-model-o-2",
+      "name": "Glorious Model O 2",
+      "brand": "glorious",
+      "aliases": [],
+      "kind": "mouse",
+      "source": "mousetool_baseline"
+    },
+    {
+      "key": "glorious-model-o-2-mini",
+      "name": "Glorious Model O 2 Mini",
+      "brand": "glorious",
+      "aliases": [],
+      "kind": "mouse",
+      "source": "mousetool_baseline"
+    },
+    {
+      "key": "glorious-model-o-2-mini-wireless",
+      "name": "Glorious Model O 2 Mini Wireless",
+      "brand": "glorious",
+      "aliases": [],
+      "kind": "mouse",
+      "source": "mousetool_baseline"
+    },
+    {
+      "key": "glorious-model-o-2-pro",
+      "name": "Glorious Model O 2 Pro",
+      "brand": "glorious",
+      "aliases": [],
+      "kind": "mouse",
+      "source": "mousetool_baseline"
+    },
+    {
+      "key": "glorious-model-o-2-pro-4k-8k",
+      "name": "Glorious Model O 2 Pro 4K/8K",
+      "brand": "glorious",
+      "aliases": [],
+      "kind": "mouse",
+      "source": "mousetool_baseline"
+    },
+    {
+      "key": "glorious-model-o-2-v2",
+      "name": "Glorious Model O 2 (v2)",
+      "brand": "glorious",
+      "aliases": [],
+      "kind": "mouse",
+      "source": "mousetool_baseline"
+    },
+    {
+      "key": "glorious-model-o-2-wireless",
+      "name": "Glorious Model O 2 Wireless",
+      "brand": "glorious",
+      "aliases": [],
+      "kind": "mouse",
+      "source": "mousetool_baseline"
+    },
+    {
+      "key": "glorious-model-o-3",
+      "name": "Glorious Model O 3",
+      "brand": "glorious",
+      "aliases": [],
+      "kind": "mouse",
+      "source": "mousetool_baseline"
+    },
+    {
+      "key": "glorious-model-o-3-wireless",
+      "name": "Glorious Model O 3 Wireless",
+      "brand": "glorious",
+      "aliases": [],
+      "kind": "mouse",
+      "source": "mousetool_baseline"
+    },
+    {
+      "key": "glorious-model-o-eternal",
+      "name": "Glorious Model O Eternal",
+      "brand": "glorious",
+      "aliases": [],
+      "kind": "mouse",
+      "source": "mousetool_baseline"
+    },
+    {
+      "key": "glorious-model-o-o",
+      "name": "Glorious Model O / O-",
+      "brand": "glorious",
+      "aliases": [],
+      "kind": "mouse",
+      "source": "mousetool_baseline"
+    },
+    {
+      "key": "glorious-model-o-wireless",
+      "name": "Glorious Model O Wireless",
+      "brand": "glorious",
+      "aliases": [],
+      "kind": "mouse",
+      "source": "mousetool_baseline"
+    },
+    {
+      "key": "glorious-pixart-mouse",
+      "name": "Glorious Pixart Mouse",
+      "brand": "glorious",
+      "aliases": [],
+      "kind": "mouse",
+      "source": "mousetool_baseline"
+    },
+    {
+      "key": "glorious-series-2-pro",
+      "name": "Glorious Series 2 Pro",
+      "brand": "glorious",
+      "aliases": [],
+      "kind": "mouse",
+      "source": "mousetool_baseline"
+    },
+    {
+      "key": "glorious-series-one-pro",
+      "name": "Glorious Series One Pro",
+      "brand": "glorious",
+      "aliases": [],
+      "kind": "mouse",
+      "source": "mousetool_baseline"
+    },
+    {
+      "key": "lamzu-atlantis",
+      "name": "Lamzu Atlantis",
+      "brand": "lamzu",
+      "aliases": [],
+      "kind": "mouse",
+      "source": "mousetool_baseline"
+    },
+    {
+      "key": "lamzu-atlantis-4k",
+      "name": "Lamzu Atlantis 4K",
+      "brand": "lamzu",
+      "aliases": [],
+      "kind": "mouse",
+      "source": "mousetool_baseline"
+    },
+    {
+      "key": "logitech-bolt-receiver",
+      "name": "Logitech Bolt Receiver",
+      "brand": "logitech",
+      "aliases": [],
+      "kind": "receiver",
+      "source": "mousetool_baseline"
+    },
+    {
+      "key": "logitech-g-pro-wireless",
+      "name": "Logitech G Pro Wireless",
+      "brand": "logitech",
+      "aliases": [],
+      "kind": "mouse",
+      "source": "mousetool_baseline"
+    },
+    {
+      "key": "logitech-g-pro-x-superlight",
+      "name": "Logitech G Pro X Superlight",
+      "brand": "logitech",
+      "aliases": [],
+      "kind": "mouse",
+      "source": "mousetool_baseline"
+    },
+    {
+      "key": "logitech-g-pro-x-superlight-2",
+      "name": "Logitech G Pro X Superlight 2",
+      "brand": "logitech",
+      "aliases": [],
+      "kind": "mouse",
+      "source": "mousetool_baseline"
+    },
+    {
+      "key": "logitech-g305",
+      "name": "Logitech G305",
+      "brand": "logitech",
+      "aliases": [],
+      "kind": "mouse",
+      "source": "mousetool_baseline"
+    },
+    {
+      "key": "logitech-g502-hero",
+      "name": "Logitech G502 Hero",
+      "brand": "logitech",
+      "aliases": [],
+      "kind": "mouse",
+      "source": "mousetool_baseline"
+    },
+    {
+      "key": "logitech-g502-lightspeed",
+      "name": "Logitech G502 Lightspeed",
+      "brand": "logitech",
+      "aliases": [],
+      "kind": "mouse",
+      "source": "mousetool_baseline"
+    },
+    {
+      "key": "logitech-g502-x-lightspeed",
+      "name": "Logitech G502 X Lightspeed",
+      "brand": "logitech",
+      "aliases": [],
+      "kind": "mouse",
+      "source": "mousetool_baseline"
+    },
+    {
+      "key": "logitech-g502-x-plus",
+      "name": "Logitech G502 X Plus",
+      "brand": "logitech",
+      "aliases": [],
+      "kind": "mouse",
+      "source": "mousetool_baseline"
+    },
+    {
+      "key": "logitech-lightspeed-receiver",
+      "name": "Logitech Lightspeed Receiver",
+      "brand": "logitech",
+      "aliases": [],
+      "kind": "receiver",
+      "source": "mousetool_baseline"
+    },
+    {
+      "key": "logitech-mx-master-3",
+      "name": "Logitech MX Master 3",
+      "brand": "logitech",
+      "aliases": [],
+      "kind": "mouse",
+      "source": "mousetool_baseline"
+    },
+    {
+      "key": "logitech-mx-master-3s",
+      "name": "Logitech MX Master 3S",
+      "brand": "logitech",
+      "aliases": [],
+      "kind": "mouse",
+      "source": "mousetool_baseline"
+    },
+    {
+      "key": "logitech-superlight-2-receiver",
+      "name": "Logitech Superlight 2 Receiver",
+      "brand": "logitech",
+      "aliases": [],
+      "kind": "receiver",
+      "source": "mousetool_baseline"
+    },
+    {
+      "key": "logitech-superlight-receiver",
+      "name": "Logitech Superlight Receiver",
+      "brand": "logitech",
+      "aliases": [],
+      "kind": "receiver",
+      "source": "mousetool_baseline"
+    },
+    {
+      "key": "logitech-unifying-receiver",
+      "name": "Logitech Unifying Receiver",
+      "brand": "logitech",
+      "aliases": [],
+      "kind": "receiver",
+      "source": "mousetool_baseline"
+    },
+    {
+      "key": "pulsar-4k-receiver",
+      "name": "Pulsar 4K Receiver",
+      "brand": "pulsar_4k",
+      "aliases": [],
+      "kind": "receiver",
+      "source": "mousetool_baseline"
+    },
+    {
+      "key": "pulsar-8k-dongle",
+      "name": "Pulsar 8K Dongle",
+      "brand": "pulsar",
+      "aliases": [],
+      "kind": "receiver",
+      "source": "mousetool_baseline"
+    },
+    {
+      "key": "pulsar-areson",
+      "name": "Pulsar Areson (X2 v2 / X2H / Xlite v3)",
+      "brand": "areson",
+      "aliases": [],
+      "kind": "mouse",
+      "source": "mousetool_baseline"
+    },
+    {
+      "key": "pulsar-pro",
+      "name": "Pulsar Pro",
+      "brand": "pulsar",
+      "aliases": [],
+      "kind": "mouse",
+      "source": "mousetool_baseline"
+    },
+    {
+      "key": "pulsar-x2a-v3",
+      "name": "Pulsar X2A v3",
+      "brand": "pulsar",
+      "aliases": [],
+      "kind": "mouse",
+      "source": "mousetool_baseline"
+    },
+    {
+      "key": "pulsar-x3-m",
+      "name": "Pulsar X3 M",
+      "brand": "pulsar",
+      "aliases": [],
+      "kind": "mouse",
+      "source": "mousetool_baseline"
+    },
+    {
+      "key": "pulsar-xs-1-mouse",
+      "name": "Pulsar XS-1 Mouse",
+      "brand": "pulsar",
+      "aliases": [],
+      "kind": "mouse",
+      "source": "mousetool_baseline"
+    },
+    {
+      "key": "razer-basilisk-v3-pro",
+      "name": "Razer Basilisk V3 Pro",
+      "brand": "razer",
+      "aliases": [],
+      "kind": "mouse",
+      "source": "mousetool_baseline"
+    },
+    {
+      "key": "razer-basilisk-v3-pro-35k",
+      "name": "Razer Basilisk V3 Pro 35K",
+      "brand": "razer",
+      "aliases": [],
+      "kind": "mouse",
+      "source": "mousetool_baseline"
+    },
+    {
+      "key": "razer-cobra-pro",
+      "name": "Razer Cobra Pro",
+      "brand": "razer",
+      "aliases": [],
+      "kind": "mouse",
+      "source": "mousetool_baseline"
+    },
+    {
+      "key": "razer-deathadder-elite",
+      "name": "Razer DeathAdder Elite",
+      "brand": "razer",
+      "aliases": [
+        "DeathAdder Elite"
+      ],
+      "kind": "mouse",
+      "source": "openrazer"
+    },
+    {
+      "key": "razer-deathadder-v3",
+      "name": "Razer DeathAdder V3",
+      "brand": "razer",
+      "aliases": [],
+      "kind": "mouse",
+      "source": "mousetool_baseline"
+    },
+    {
+      "key": "razer-deathadder-v3-hyperspeed",
+      "name": "Razer DeathAdder V3 HyperSpeed",
+      "brand": "razer",
+      "aliases": [],
+      "kind": "mouse",
+      "source": "mousetool_baseline"
+    },
+    {
+      "key": "razer-deathadder-v3-pro",
+      "name": "Razer DeathAdder V3 Pro",
+      "brand": "razer",
+      "aliases": [],
+      "kind": "mouse",
+      "source": "mousetool_baseline"
+    },
+    {
+      "key": "razer-hyperpolling-dongle",
+      "name": "Razer HyperPolling Dongle",
+      "brand": "razer",
+      "aliases": [],
+      "kind": "receiver",
+      "source": "mousetool_baseline"
+    },
+    {
+      "key": "razer-viper-mini",
+      "name": "Razer Viper Mini",
+      "brand": "razer",
+      "aliases": [
+        "Viper Mini"
+      ],
+      "kind": "mouse",
+      "source": "openrazer"
+    },
+    {
+      "key": "razer-viper-v2-pro",
+      "name": "Razer Viper V2 Pro",
+      "brand": "razer",
+      "aliases": [],
+      "kind": "mouse",
+      "source": "mousetool_baseline"
+    },
+    {
+      "key": "razer-viper-v3-hyperspeed",
+      "name": "Razer Viper V3 HyperSpeed",
+      "brand": "razer",
+      "aliases": [],
+      "kind": "mouse",
+      "source": "mousetool_baseline"
+    },
+    {
+      "key": "razer-viper-v3-pro",
+      "name": "Razer Viper V3 Pro",
+      "brand": "razer",
+      "aliases": [],
+      "kind": "mouse",
+      "source": "mousetool_baseline"
+    },
+    {
+      "key": "scyrox-v8",
+      "name": "Scyrox V8",
+      "brand": "scyrox",
+      "aliases": [],
+      "kind": "mouse",
+      "source": "mousetool_baseline"
+    },
+    {
+      "key": "scyrox-v8s",
+      "name": "Scyrox V8S",
+      "brand": "scyrox",
+      "aliases": [],
+      "kind": "mouse",
+      "source": "mousetool_baseline"
+    },
+    {
+      "key": "scyrox-v8s-turbo",
+      "name": "Scyrox V8S Turbo",
+      "brand": "scyrox",
+      "aliases": [],
+      "kind": "mouse",
+      "source": "mousetool_baseline"
+    },
+    {
+      "key": "teevolution-terra-pro",
+      "name": "Teevolution Terra Pro",
+      "brand": "teevolution",
+      "aliases": [],
+      "kind": "mouse",
+      "source": "mousetool_baseline"
+    },
+    {
+      "key": "vgn-f2-master",
+      "name": "VGN F2 Master+",
+      "brand": "vgn",
+      "aliases": [],
+      "kind": "mouse",
+      "source": "mousetool_baseline"
+    },
+    {
+      "key": "vxe-r1-se-beken",
+      "name": "VXE R1 SE+ (Beken)",
+      "brand": "atk",
+      "aliases": [],
+      "kind": "mouse",
+      "source": "mousetool_baseline"
+    },
+    {
+      "key": "wooting-60he",
+      "name": "Wooting 60HE",
+      "brand": "wooting",
+      "aliases": [],
+      "kind": "keyboard",
+      "source": "mousetool_baseline"
+    }
+  ],
+  "profiles": {
+    "generic_tier0": {
+      "driver": "generic",
+      "proto_label": "Generic USB / HID Mouse",
+      "proto_tag": "HID",
+      "tier": 0,
+      "write_enabled": false,
+      "legacy_migrated": false,
+      "evidence_status": "none",
+      "evidence": null,
+      "source": "mousetool_baseline",
+      "status_note": "Tier 0 · Pointer only: no vendor HID commands are sent to this device. Use local DPI reference, live polling meter, input tester, or host Acceleration & desktop settings.",
+      "operations": {
+        "firmware": {
+          "read": false,
+          "write": false
+        },
+        "serial": {
+          "read": false,
+          "write": false
+        },
+        "dpi": {
+          "read": false,
+          "write": false
+        },
+        "stages": {
+          "read": false,
+          "write": false
+        },
+        "polling": {
+          "read": false,
+          "write": false
+        },
+        "lod": {
+          "read": false,
+          "write": false
+        },
+        "battery": {
+          "read": false,
+          "write": false
+        },
+        "power": {
+          "read": false,
+          "write": false
+        },
+        "buttons": {
+          "read": false,
+          "write": false
+        },
+        "layers": {
+          "read": false,
+          "write": false
+        },
+        "dongle": {
+          "read": false,
+          "write": false
+        },
+        "lighting": {
+          "read": false,
+          "write": false
+        },
+        "tuning": {
+          "read": false,
+          "write": false
+        }
+      }
+    },
+    "razer_viper_mini_ro": {
+      "driver": "razer",
+      "proto_label": "Razer 90-byte HID (Tier 1 Read-only)",
+      "proto_tag": "Razer",
+      "tier": 1,
+      "write_enabled": false,
+      "legacy_migrated": false,
+      "evidence_status": "upstream_claim",
+      "evidence": null,
+      "source": "openrazer",
+      "status_note": "Tier 1 · Read-only (Razer Viper Mini · 1532:008a): only firmware and current X/Y DPI getters (0xff) are active. Writes, stages, polling, lift-off, lighting, and button remapping are disabled and blocked at dispatch pending physical hardware trial.",
+      "operations": {
+        "firmware": {
+          "read": true,
+          "write": false,
+          "txn": "0xff",
+          "cmd_class": "0x00",
+          "cmd_id": "0x81",
+          "data_size": 2,
+          "claim_source": "openrazer",
+          "evidence": null
+        },
+        "serial": {
+          "read": false,
+          "write": false
+        },
+        "dpi": {
+          "read": true,
+          "write": false,
+          "txn": "0xff",
+          "storage": "0x00",
+          "cmd_class": "0x04",
+          "cmd_id": "0x85",
+          "data_size": 7,
+          "dpi_min": 100,
+          "dpi_max": 8500,
+          "dpi_step_lo": 100,
+          "dpi_step_hi": 100,
+          "split_xy": true,
+          "claim_source": "openrazer",
+          "evidence": null
+        },
+        "stages": {
+          "read": false,
+          "write": false
+        },
+        "polling": {
+          "read": false,
+          "write": false
+        },
+        "lod": {
+          "read": false,
+          "write": false
+        },
+        "battery": {
+          "read": false,
+          "write": false
+        },
+        "power": {
+          "read": false,
+          "write": false
+        },
+        "buttons": {
+          "read": false,
+          "write": false
+        },
+        "layers": {
+          "read": false,
+          "write": false
+        },
+        "dongle": {
+          "read": false,
+          "write": false
+        },
+        "lighting": {
+          "read": false,
+          "write": false
+        },
+        "tuning": {
+          "read": false,
+          "write": false
+        }
+      }
+    },
+    "razer_legacy_wired": {
+      "driver": "razer",
+      "proto_label": "Razer 90-byte HID",
+      "proto_tag": "Razer",
+      "tier": 2,
+      "write_enabled": true,
+      "legacy_migrated": true,
+      "evidence_status": "legacy_documented",
+      "evidence": null,
+      "source": "mousetool_baseline",
+      "status_note": null,
+      "operations": {
+        "firmware": {
+          "read": true,
+          "write": false,
+          "txn": "0x1f",
+          "cmd_class": "0x00",
+          "cmd_id": "0x81",
+          "data_size": 2,
+          "claim_source": "mousetool_baseline"
+        },
+        "serial": {
+          "read": true,
+          "write": false,
+          "txn": "0x1f",
+          "cmd_class": "0x00",
+          "cmd_id": "0x82",
+          "data_size": 22,
+          "claim_source": "mousetool_baseline"
+        },
+        "dpi": {
+          "read": true,
+          "write": true,
+          "txn": "0x1f",
+          "storage": "0x00",
+          "dpi_min": 100,
+          "dpi_step_lo": 50,
+          "dpi_step_hi": 50,
+          "split_xy": true,
+          "claim_source": "mousetool_baseline"
+        },
+        "stages": {
+          "read": true,
+          "write": true,
+          "txn": "0x1f",
+          "max_stages": 5,
+          "claim_source": "mousetool_baseline"
+        },
+        "polling": {
+          "read": true,
+          "write": true,
+          "txn": "0x1f",
+          "rates": [
+            125,
+            500,
+            1000
+          ],
+          "claim_source": "mousetool_baseline"
+        },
+        "lod": {
+          "read": true,
+          "write": true,
+          "txn": "0x1f",
+          "mode": "razer",
+          "async": true,
+          "claim_source": "mousetool_baseline"
+        },
+        "battery": {
+          "read": false,
+          "write": false
+        },
+        "power": {
+          "read": false,
+          "write": false
+        },
+        "buttons": {
+          "read": true,
+          "write": true,
+          "txn": "0x1f",
+          "claim_source": "mousetool_baseline"
+        },
+        "layers": {
+          "read": true,
+          "write": true,
+          "txn": "0x1f",
+          "claim_source": "mousetool_baseline"
+        },
+        "dongle": {
+          "read": false,
+          "write": false
+        },
+        "lighting": {
+          "read": false,
+          "write": false
+        },
+        "tuning": {
+          "read": false,
+          "write": false
+        }
+      }
+    },
+    "razer_legacy_wireless": {
+      "driver": "razer",
+      "proto_label": "Razer 90-byte HID",
+      "proto_tag": "Razer",
+      "tier": 2,
+      "write_enabled": true,
+      "legacy_migrated": true,
+      "evidence_status": "legacy_documented",
+      "evidence": null,
+      "source": "mousetool_baseline",
+      "status_note": null,
+      "operations": {
+        "firmware": {
+          "read": true,
+          "write": false,
+          "txn": "0x1f",
+          "cmd_class": "0x00",
+          "cmd_id": "0x81",
+          "data_size": 2,
+          "claim_source": "mousetool_baseline"
+        },
+        "serial": {
+          "read": true,
+          "write": false,
+          "txn": "0x1f",
+          "cmd_class": "0x00",
+          "cmd_id": "0x82",
+          "data_size": 22,
+          "claim_source": "mousetool_baseline"
+        },
+        "dpi": {
+          "read": true,
+          "write": true,
+          "txn": "0x1f",
+          "storage": "0x00",
+          "dpi_min": 100,
+          "dpi_step_lo": 50,
+          "dpi_step_hi": 50,
+          "split_xy": true,
+          "claim_source": "mousetool_baseline"
+        },
+        "stages": {
+          "read": true,
+          "write": true,
+          "txn": "0x1f",
+          "max_stages": 5,
+          "claim_source": "mousetool_baseline"
+        },
+        "polling": {
+          "read": true,
+          "write": true,
+          "txn": "0x1f",
+          "rates": [
+            125,
+            500,
+            1000
+          ],
+          "claim_source": "mousetool_baseline"
+        },
+        "lod": {
+          "read": true,
+          "write": true,
+          "txn": "0x1f",
+          "mode": "razer",
+          "async": true,
+          "claim_source": "mousetool_baseline"
+        },
+        "battery": {
+          "read": true,
+          "write": false,
+          "txn": "0x1f",
+          "claim_source": "mousetool_baseline"
+        },
+        "power": {
+          "read": true,
+          "write": true,
+          "txn": "0x1f",
+          "claim_source": "mousetool_baseline"
+        },
+        "buttons": {
+          "read": true,
+          "write": true,
+          "txn": "0x1f",
+          "claim_source": "mousetool_baseline"
+        },
+        "layers": {
+          "read": true,
+          "write": true,
+          "txn": "0x1f",
+          "claim_source": "mousetool_baseline"
+        },
+        "dongle": {
+          "read": false,
+          "write": false
+        },
+        "lighting": {
+          "read": false,
+          "write": false
+        },
+        "tuning": {
+          "read": false,
+          "write": false
+        }
+      }
+    },
+    "razer_legacy_hyperpolling": {
+      "driver": "razer",
+      "proto_label": "Razer 90-byte HID",
+      "proto_tag": "Razer",
+      "tier": 2,
+      "write_enabled": true,
+      "legacy_migrated": true,
+      "evidence_status": "legacy_documented",
+      "evidence": null,
+      "source": "mousetool_baseline",
+      "status_note": null,
+      "operations": {
+        "firmware": {
+          "read": true,
+          "write": false,
+          "txn": "0x1f",
+          "cmd_class": "0x00",
+          "cmd_id": "0x81",
+          "data_size": 2,
+          "claim_source": "mousetool_baseline"
+        },
+        "serial": {
+          "read": true,
+          "write": false,
+          "txn": "0x1f",
+          "cmd_class": "0x00",
+          "cmd_id": "0x82",
+          "data_size": 22,
+          "claim_source": "mousetool_baseline"
+        },
+        "dpi": {
+          "read": true,
+          "write": true,
+          "txn": "0x1f",
+          "storage": "0x00",
+          "dpi_min": 100,
+          "dpi_step_lo": 50,
+          "dpi_step_hi": 50,
+          "split_xy": true,
+          "claim_source": "mousetool_baseline"
+        },
+        "stages": {
+          "read": true,
+          "write": true,
+          "txn": "0x1f",
+          "max_stages": 5,
+          "claim_source": "mousetool_baseline"
+        },
+        "polling": {
+          "read": true,
+          "write": true,
+          "txn": "0x1f",
+          "rates": [
+            125,
+            250,
+            500,
+            1000,
+            2000,
+            4000,
+            8000
+          ],
+          "hyper": true,
+          "claim_source": "mousetool_baseline"
+        },
+        "lod": {
+          "read": true,
+          "write": true,
+          "txn": "0x1f",
+          "mode": "razer",
+          "async": true,
+          "claim_source": "mousetool_baseline"
+        },
+        "battery": {
+          "read": true,
+          "write": false,
+          "txn": "0x1f",
+          "claim_source": "mousetool_baseline"
+        },
+        "power": {
+          "read": true,
+          "write": true,
+          "txn": "0x1f",
+          "claim_source": "mousetool_baseline"
+        },
+        "buttons": {
+          "read": true,
+          "write": true,
+          "txn": "0x1f",
+          "claim_source": "mousetool_baseline"
+        },
+        "layers": {
+          "read": true,
+          "write": true,
+          "txn": "0x1f",
+          "claim_source": "mousetool_baseline"
+        },
+        "dongle": {
+          "read": true,
+          "write": true,
+          "txn": "0xff",
+          "claim_source": "mousetool_baseline"
+        },
+        "lighting": {
+          "read": false,
+          "write": false
+        },
+        "tuning": {
+          "read": false,
+          "write": false
+        }
+      }
+    },
+    "egg8k_v1": {
+      "driver": "egg8k",
+      "proto_label": "Endgame Gear 8k (V1)",
+      "proto_tag": "EGG 8k",
+      "tier": 2,
+      "write_enabled": true,
+      "legacy_migrated": true,
+      "evidence_status": "legacy_documented",
+      "evidence": null,
+      "source": "mousetool_baseline",
+      "status_note": null,
+      "operations": {
+        "firmware": {
+          "read": true,
+          "write": false,
+          "claim_source": "mousetool_baseline"
+        },
+        "serial": {
+          "read": false,
+          "write": false
+        },
+        "dpi": {
+          "read": true,
+          "write": true,
+          "split_xy": true,
+          "claim_source": "mousetool_baseline"
+        },
+        "stages": {
+          "read": true,
+          "write": true,
+          "max_stages": 4,
+          "claim_source": "mousetool_baseline"
+        },
+        "polling": {
+          "read": true,
+          "write": true,
+          "rates": [
+            1000,
+            2000,
+            4000,
+            8000
+          ],
+          "claim_source": "mousetool_baseline"
+        },
+        "lod": {
+          "read": true,
+          "write": true,
+          "mode": "egg",
+          "claim_source": "mousetool_baseline"
+        },
+        "battery": {
+          "read": false,
+          "write": false
+        },
+        "power": {
+          "read": false,
+          "write": false
+        },
+        "buttons": {
+          "read": true,
+          "write": true,
+          "claim_source": "mousetool_baseline"
+        },
+        "layers": {
+          "read": false,
+          "write": false
+        },
+        "dongle": {
+          "read": false,
+          "write": false
+        },
+        "lighting": {
+          "read": false,
+          "write": false
+        },
+        "tuning": {
+          "read": true,
+          "write": true,
+          "claim_source": "mousetool_baseline"
+        }
+      }
+    },
+    "egg8k_v2": {
+      "driver": "egg8k",
+      "proto_label": "Endgame Gear 8k (V2)",
+      "proto_tag": "EGG 8k",
+      "tier": 2,
+      "write_enabled": true,
+      "legacy_migrated": true,
+      "evidence_status": "legacy_documented",
+      "evidence": null,
+      "source": "mousetool_baseline",
+      "status_note": null,
+      "operations": {
+        "firmware": {
+          "read": true,
+          "write": false,
+          "claim_source": "mousetool_baseline"
+        },
+        "serial": {
+          "read": false,
+          "write": false
+        },
+        "dpi": {
+          "read": true,
+          "write": true,
+          "split_xy": true,
+          "claim_source": "mousetool_baseline"
+        },
+        "stages": {
+          "read": true,
+          "write": true,
+          "max_stages": 4,
+          "claim_source": "mousetool_baseline"
+        },
+        "polling": {
+          "read": true,
+          "write": true,
+          "rates": [
+            1000,
+            2000,
+            4000,
+            8000
+          ],
+          "claim_source": "mousetool_baseline"
+        },
+        "lod": {
+          "read": true,
+          "write": true,
+          "mode": "egg",
+          "claim_source": "mousetool_baseline"
+        },
+        "battery": {
+          "read": false,
+          "write": false
+        },
+        "power": {
+          "read": false,
+          "write": false
+        },
+        "buttons": {
+          "read": true,
+          "write": true,
+          "claim_source": "mousetool_baseline"
+        },
+        "layers": {
+          "read": false,
+          "write": false
+        },
+        "dongle": {
+          "read": false,
+          "write": false
+        },
+        "lighting": {
+          "read": false,
+          "write": false
+        },
+        "tuning": {
+          "read": true,
+          "write": true,
+          "claim_source": "mousetool_baseline"
+        }
+      }
+    },
+    "egg_we_compx": {
+      "driver": "egg_we",
+      "proto_label": "Endgame Gear -we (CompX 0x08)",
+      "proto_tag": "EGG -we",
+      "tier": 2,
+      "write_enabled": true,
+      "legacy_migrated": true,
+      "evidence_status": "legacy_documented",
+      "evidence": null,
+      "source": "mousetool_baseline",
+      "status_note": null,
+      "operations": {
+        "firmware": {
+          "read": false,
+          "write": false
+        },
+        "serial": {
+          "read": false,
+          "write": false
+        },
+        "dpi": {
+          "read": true,
+          "write": true,
+          "dpi_min": 50,
+          "dpi_max": 12800,
+          "split_xy": true,
+          "claim_source": "mousetool_baseline"
+        },
+        "stages": {
+          "read": true,
+          "write": true,
+          "max_stages": 4,
+          "claim_source": "mousetool_baseline"
+        },
+        "polling": {
+          "read": true,
+          "write": true,
+          "rates": [
+            125,
+            250,
+            500,
+            1000
+          ],
+          "claim_source": "mousetool_baseline"
+        },
+        "lod": {
+          "read": true,
+          "write": true,
+          "mode": "preset",
+          "claim_source": "mousetool_baseline"
+        },
+        "battery": {
+          "read": true,
+          "write": false,
+          "claim_source": "mousetool_baseline"
+        },
+        "power": {
+          "read": true,
+          "write": true,
+          "claim_source": "mousetool_baseline"
+        },
+        "buttons": {
+          "read": false,
+          "write": false
+        },
+        "layers": {
+          "read": false,
+          "write": false
+        },
+        "dongle": {
+          "read": false,
+          "write": false
+        },
+        "lighting": {
+          "read": false,
+          "write": false
+        },
+        "tuning": {
+          "read": true,
+          "write": true,
+          "claim_source": "mousetool_baseline"
+        }
+      }
+    },
+    "logitech_hidpp20": {
+      "driver": "hidpp",
+      "proto_label": "Logitech HID++ 2.0",
+      "proto_tag": "HID++",
+      "tier": 2,
+      "write_enabled": true,
+      "legacy_migrated": true,
+      "evidence_status": "legacy_documented",
+      "evidence": null,
+      "source": "logitech_cpg",
+      "status_note": null,
+      "operations": {
+        "firmware": {
+          "read": true,
+          "write": false,
+          "claim_source": "logitech_cpg"
+        },
+        "serial": {
+          "read": false,
+          "write": false
+        },
+        "dpi": {
+          "read": true,
+          "write": true,
+          "dpi_min": 100,
+          "dpi_max": 32000,
+          "claim_source": "mousetool_baseline"
+        },
+        "stages": {
+          "read": false,
+          "write": false
+        },
+        "polling": {
+          "read": true,
+          "write": true,
+          "claim_source": "mousetool_baseline"
+        },
+        "lod": {
+          "read": false,
+          "write": false
+        },
+        "battery": {
+          "read": true,
+          "write": false,
+          "claim_source": "mousetool_baseline"
+        },
+        "power": {
+          "read": false,
+          "write": false
+        },
+        "buttons": {
+          "read": false,
+          "write": false
+        },
+        "layers": {
+          "read": false,
+          "write": false
+        },
+        "dongle": {
+          "read": false,
+          "write": false
+        },
+        "lighting": {
+          "read": false,
+          "write": false
+        },
+        "tuning": {
+          "read": false,
+          "write": false
+        }
+      }
+    },
+    "pulsar_xs1": {
+      "driver": "pulsar_xs1",
+      "proto_label": "Pulsar XS-1 HID",
+      "proto_tag": "Pulsar",
+      "tier": 2,
+      "write_enabled": true,
+      "legacy_migrated": true,
+      "evidence_status": "legacy_documented",
+      "evidence": null,
+      "source": "mousetool_baseline",
+      "status_note": null,
+      "operations": {
+        "firmware": {
+          "read": true,
+          "write": false,
+          "claim_source": "mousetool_baseline"
+        },
+        "serial": {
+          "read": false,
+          "write": false
+        },
+        "dpi": {
+          "read": true,
+          "write": true,
+          "dpi_min": 50,
+          "dpi_max": 26000,
+          "split_xy": true,
+          "claim_source": "mousetool_baseline"
+        },
+        "stages": {
+          "read": false,
+          "write": false
+        },
+        "polling": {
+          "read": true,
+          "write": false,
+          "rates": [
+            125,
+            250,
+            500,
+            1000,
+            2000,
+            4000,
+            8000
+          ],
+          "claim_source": "mousetool_baseline"
+        },
+        "lod": {
+          "read": true,
+          "write": true,
+          "mode": "preset",
+          "claim_source": "mousetool_baseline"
+        },
+        "battery": {
+          "read": true,
+          "write": false,
+          "claim_source": "mousetool_baseline"
+        },
+        "power": {
+          "read": false,
+          "write": false
+        },
+        "buttons": {
+          "read": false,
+          "write": false
+        },
+        "layers": {
+          "read": false,
+          "write": false
+        },
+        "dongle": {
+          "read": false,
+          "write": false
+        },
+        "lighting": {
+          "read": false,
+          "write": false
+        },
+        "tuning": {
+          "read": true,
+          "write": true,
+          "claim_source": "mousetool_baseline"
+        }
+      }
+    },
+    "pulsar_pro": {
+      "driver": "pulsar_pro",
+      "proto_label": "Pulsar Pro HID",
+      "proto_tag": "Pulsar",
+      "tier": 2,
+      "write_enabled": true,
+      "legacy_migrated": true,
+      "evidence_status": "legacy_documented",
+      "evidence": null,
+      "source": "mousetool_baseline",
+      "status_note": null,
+      "operations": {
+        "firmware": {
+          "read": true,
+          "write": false,
+          "claim_source": "mousetool_baseline"
+        },
+        "serial": {
+          "read": false,
+          "write": false
+        },
+        "dpi": {
+          "read": true,
+          "write": true,
+          "dpi_min": 50,
+          "dpi_max": 32000,
+          "split_xy": true,
+          "claim_source": "mousetool_baseline"
+        },
+        "stages": {
+          "read": true,
+          "write": true,
+          "max_stages": 6,
+          "claim_source": "mousetool_baseline"
+        },
+        "polling": {
+          "read": true,
+          "write": true,
+          "rates": [
+            125,
+            250,
+            500,
+            1000,
+            2000,
+            4000,
+            8000
+          ],
+          "claim_source": "mousetool_baseline"
+        },
+        "lod": {
+          "read": true,
+          "write": true,
+          "mode": "preset",
+          "claim_source": "mousetool_baseline"
+        },
+        "battery": {
+          "read": true,
+          "write": false,
+          "claim_source": "mousetool_baseline"
+        },
+        "power": {
+          "read": true,
+          "write": true,
+          "claim_source": "mousetool_baseline"
+        },
+        "buttons": {
+          "read": false,
+          "write": false
+        },
+        "layers": {
+          "read": false,
+          "write": false
+        },
+        "dongle": {
+          "read": false,
+          "write": false
+        },
+        "lighting": {
+          "read": false,
+          "write": false
+        },
+        "tuning": {
+          "read": true,
+          "write": true,
+          "claim_source": "mousetool_baseline"
+        }
+      }
+    },
+    "pulsar_areson_compx": {
+      "driver": "compx",
+      "proto_label": "Pulsar Areson (CompX 0x08)",
+      "proto_tag": "Pulsar",
+      "tier": 2,
+      "write_enabled": true,
+      "legacy_migrated": true,
+      "evidence_status": "legacy_documented",
+      "evidence": null,
+      "source": "mousetool_baseline",
+      "status_note": null,
+      "operations": {
+        "firmware": {
+          "read": false,
+          "write": false
+        },
+        "serial": {
+          "read": false,
+          "write": false
+        },
+        "dpi": {
+          "read": true,
+          "write": true,
+          "dpi_min": 50,
+          "dpi_max": 26000,
+          "split_xy": true,
+          "claim_source": "mousetool_baseline"
+        },
+        "stages": {
+          "read": true,
+          "write": true,
+          "max_stages": 4,
+          "claim_source": "mousetool_baseline"
+        },
+        "polling": {
+          "read": true,
+          "write": true,
+          "rates": [
+            125,
+            250,
+            500,
+            1000
+          ],
+          "claim_source": "mousetool_baseline"
+        },
+        "lod": {
+          "read": true,
+          "write": true,
+          "mode": "preset",
+          "claim_source": "mousetool_baseline"
+        },
+        "battery": {
+          "read": true,
+          "write": false,
+          "claim_source": "mousetool_baseline"
+        },
+        "power": {
+          "read": true,
+          "write": true,
+          "claim_source": "mousetool_baseline"
+        },
+        "buttons": {
+          "read": false,
+          "write": false
+        },
+        "layers": {
+          "read": false,
+          "write": false
+        },
+        "dongle": {
+          "read": false,
+          "write": false
+        },
+        "lighting": {
+          "read": false,
+          "write": false
+        },
+        "tuning": {
+          "read": true,
+          "write": true,
+          "claim_source": "mousetool_baseline"
+        }
+      }
+    },
+    "compx_odm": {
+      "driver": "compx",
+      "proto_label": "CompX Report 0x08",
+      "proto_tag": "COMPX",
+      "tier": 2,
+      "write_enabled": true,
+      "legacy_migrated": true,
+      "evidence_status": "legacy_documented",
+      "evidence": null,
+      "source": "mousetool_baseline",
+      "status_note": null,
+      "operations": {
+        "firmware": {
+          "read": true,
+          "write": false,
+          "claim_source": "mousetool_baseline"
+        },
+        "serial": {
+          "read": false,
+          "write": false
+        },
+        "dpi": {
+          "read": true,
+          "write": true,
+          "dpi_min": 50,
+          "split_xy": true,
+          "claim_source": "mousetool_baseline"
+        },
+        "stages": {
+          "read": true,
+          "write": true,
+          "max_stages": 6,
+          "claim_source": "mousetool_baseline"
+        },
+        "polling": {
+          "read": true,
+          "write": true,
+          "claim_source": "mousetool_baseline"
+        },
+        "lod": {
+          "read": true,
+          "write": true,
+          "mode": "preset",
+          "claim_source": "mousetool_baseline"
+        },
+        "battery": {
+          "read": true,
+          "write": false,
+          "claim_source": "mousetool_baseline"
+        },
+        "power": {
+          "read": true,
+          "write": true,
+          "claim_source": "mousetool_baseline"
+        },
+        "buttons": {
+          "read": false,
+          "write": false
+        },
+        "layers": {
+          "read": false,
+          "write": false
+        },
+        "dongle": {
+          "read": false,
+          "write": false
+        },
+        "lighting": {
+          "read": false,
+          "write": false
+        },
+        "tuning": {
+          "read": true,
+          "write": true,
+          "claim_source": "mousetool_baseline"
+        }
+      }
+    },
+    "glorious_sinowealth": {
+      "driver": "glorious_sinowealth",
+      "proto_label": "Glorious Sinowealth HID",
+      "proto_tag": "Glorious",
+      "tier": 2,
+      "write_enabled": true,
+      "legacy_migrated": true,
+      "evidence_status": "legacy_documented",
+      "evidence": null,
+      "source": "mousetool_baseline",
+      "status_note": null,
+      "operations": {
+        "firmware": {
+          "read": false,
+          "write": false
+        },
+        "serial": {
+          "read": false,
+          "write": false
+        },
+        "dpi": {
+          "read": true,
+          "write": true,
+          "dpi_min": 100,
+          "dpi_max": 16000,
+          "split_xy": true,
+          "claim_source": "mousetool_baseline"
+        },
+        "stages": {
+          "read": true,
+          "write": true,
+          "max_stages": 6,
+          "claim_source": "mousetool_baseline"
+        },
+        "polling": {
+          "read": true,
+          "write": true,
+          "rates": [
+            125,
+            250,
+            500,
+            1000
+          ],
+          "claim_source": "mousetool_baseline"
+        },
+        "lod": {
+          "read": false,
+          "write": false
+        },
+        "battery": {
+          "read": false,
+          "write": false
+        },
+        "power": {
+          "read": false,
+          "write": false
+        },
+        "buttons": {
+          "read": false,
+          "write": false
+        },
+        "layers": {
+          "read": false,
+          "write": false
+        },
+        "dongle": {
+          "read": false,
+          "write": false
+        },
+        "lighting": {
+          "read": false,
+          "write": false
+        },
+        "tuning": {
+          "read": false,
+          "write": false
+        }
+      }
+    },
+    "glorious_core2": {
+      "driver": "glorious_core2",
+      "proto_label": "Glorious CORE 2 HID",
+      "proto_tag": "Glorious",
+      "tier": 2,
+      "write_enabled": true,
+      "legacy_migrated": true,
+      "evidence_status": "legacy_documented",
+      "evidence": null,
+      "source": "mousetool_baseline",
+      "status_note": null,
+      "operations": {
+        "firmware": {
+          "read": true,
+          "write": false,
+          "claim_source": "mousetool_baseline"
+        },
+        "serial": {
+          "read": false,
+          "write": false
+        },
+        "dpi": {
+          "read": false,
+          "write": true,
+          "dpi_min": 100,
+          "dpi_max": 26000,
+          "split_xy": true,
+          "claim_source": "mousetool_baseline"
+        },
+        "stages": {
+          "read": false,
+          "write": true,
+          "max_stages": 6,
+          "claim_source": "mousetool_baseline"
+        },
+        "polling": {
+          "read": false,
+          "write": true,
+          "claim_source": "mousetool_baseline"
+        },
+        "lod": {
+          "read": false,
+          "write": false
+        },
+        "battery": {
+          "read": true,
+          "write": false,
+          "claim_source": "mousetool_baseline"
+        },
+        "power": {
+          "read": false,
+          "write": false
+        },
+        "buttons": {
+          "read": false,
+          "write": false
+        },
+        "layers": {
+          "read": false,
+          "write": false
+        },
+        "dongle": {
+          "read": false,
+          "write": false
+        },
+        "lighting": {
+          "read": false,
+          "write": false
+        },
+        "tuning": {
+          "read": false,
+          "write": true,
+          "claim_source": "mousetool_baseline"
+        }
+      }
+    },
+    "glorious_classic": {
+      "driver": "glorious_classic",
+      "proto_label": "Glorious Classic HID",
+      "proto_tag": "Glorious",
+      "tier": 2,
+      "write_enabled": true,
+      "legacy_migrated": true,
+      "evidence_status": "legacy_documented",
+      "evidence": null,
+      "source": "mousetool_baseline",
+      "status_note": null,
+      "operations": {
+        "firmware": {
+          "read": false,
+          "write": false
+        },
+        "serial": {
+          "read": false,
+          "write": false
+        },
+        "dpi": {
+          "read": false,
+          "write": true,
+          "dpi_min": 100,
+          "dpi_max": 19000,
+          "split_xy": true,
+          "claim_source": "mousetool_baseline"
+        },
+        "stages": {
+          "read": false,
+          "write": true,
+          "max_stages": 4,
+          "claim_source": "mousetool_baseline"
+        },
+        "polling": {
+          "read": false,
+          "write": true,
+          "rates": [
+            125,
+            250,
+            500,
+            1000
+          ],
+          "claim_source": "mousetool_baseline"
+        },
+        "lod": {
+          "read": false,
+          "write": true,
+          "mode": "preset",
+          "claim_source": "mousetool_baseline"
+        },
+        "battery": {
+          "read": true,
+          "write": false,
+          "claim_source": "mousetool_baseline"
+        },
+        "power": {
+          "read": false,
+          "write": false
+        },
+        "buttons": {
+          "read": false,
+          "write": false
+        },
+        "layers": {
+          "read": false,
+          "write": false
+        },
+        "dongle": {
+          "read": false,
+          "write": false
+        },
+        "lighting": {
+          "read": false,
+          "write": false
+        },
+        "tuning": {
+          "read": false,
+          "write": true,
+          "claim_source": "mousetool_baseline"
+        }
+      }
+    },
+    "glorious_pixart": {
+      "driver": "glorious_pixart",
+      "proto_label": "Glorious Pixart HID",
+      "proto_tag": "Glorious",
+      "tier": 2,
+      "write_enabled": true,
+      "legacy_migrated": true,
+      "evidence_status": "legacy_documented",
+      "evidence": null,
+      "source": "mousetool_baseline",
+      "status_note": null,
+      "operations": {
+        "firmware": {
+          "read": false,
+          "write": false
+        },
+        "serial": {
+          "read": false,
+          "write": false
+        },
+        "dpi": {
+          "read": false,
+          "write": true,
+          "dpi_min": 100,
+          "dpi_max": 26000,
+          "split_xy": true,
+          "claim_source": "mousetool_baseline"
+        },
+        "stages": {
+          "read": false,
+          "write": true,
+          "max_stages": 6,
+          "claim_source": "mousetool_baseline"
+        },
+        "polling": {
+          "read": false,
+          "write": true,
+          "rates": [
+            125,
+            250,
+            500,
+            1000
+          ],
+          "claim_source": "mousetool_baseline"
+        },
+        "lod": {
+          "read": false,
+          "write": true,
+          "mode": "preset",
+          "claim_source": "mousetool_baseline"
+        },
+        "battery": {
+          "read": false,
+          "write": false
+        },
+        "power": {
+          "read": false,
+          "write": false
+        },
+        "buttons": {
+          "read": false,
+          "write": false
+        },
+        "layers": {
+          "read": false,
+          "write": false
+        },
+        "dongle": {
+          "read": false,
+          "write": false
+        },
+        "lighting": {
+          "read": false,
+          "write": false
+        },
+        "tuning": {
+          "read": false,
+          "write": true,
+          "claim_source": "mousetool_baseline"
+        }
+      }
+    }
+  },
+  "matches": [
+    {
+      "id": "usb:1532:008a",
+      "model_key": "razer-viper-mini",
+      "profile_id": "razer_viper_mini_ro",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "1532",
+      "pid": "008a",
+      "wpid": null,
+      "role": "wired",
+      "link": "USB cable",
+      "prio": 0,
+      "wireless": false,
+      "hyper": false,
+      "udev_eligible": true,
+      "udev_group": "Razer (VID 1532)",
+      "interface": {
+        "feature_report_bytes": 90
+      },
+      "meta": {
+        "dpi_max": 8500
+      },
+      "source": "openrazer"
+    },
+    {
+      "id": "usb:1532:005c",
+      "model_key": "razer-deathadder-elite",
+      "profile_id": "generic_tier0",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "1532",
+      "pid": "005c",
+      "wpid": null,
+      "role": "wired",
+      "link": "USB cable",
+      "prio": 9,
+      "wireless": false,
+      "hyper": false,
+      "udev_eligible": false,
+      "udev_group": "Razer (VID 1532)",
+      "interface": {},
+      "meta": {},
+      "source": "openrazer"
+    },
+    {
+      "id": "usb:1532:00a5",
+      "model_key": "razer-viper-v2-pro",
+      "profile_id": "razer_legacy_wireless",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "1532",
+      "pid": "00a5",
+      "wpid": null,
+      "role": "wired",
+      "link": "USB cable",
+      "prio": 0,
+      "wireless": true,
+      "hyper": false,
+      "udev_eligible": true,
+      "udev_group": "Razer (VID 1532)",
+      "interface": {
+        "feature_report_bytes": 90
+      },
+      "meta": {
+        "dpi_max": 30000
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:1532:00a6",
+      "model_key": "razer-viper-v2-pro",
+      "profile_id": "razer_legacy_wireless",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "1532",
+      "pid": "00a6",
+      "wpid": null,
+      "role": "dongle",
+      "link": "HyperSpeed dongle",
+      "prio": 2,
+      "wireless": true,
+      "hyper": false,
+      "udev_eligible": true,
+      "udev_group": "Razer (VID 1532)",
+      "interface": {
+        "feature_report_bytes": 90
+      },
+      "meta": {
+        "dpi_max": 30000
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:1532:00aa",
+      "model_key": "razer-basilisk-v3-pro",
+      "profile_id": "razer_legacy_wireless",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "1532",
+      "pid": "00aa",
+      "wpid": null,
+      "role": "wired",
+      "link": "USB cable",
+      "prio": 0,
+      "wireless": true,
+      "hyper": false,
+      "udev_eligible": true,
+      "udev_group": "Razer (VID 1532)",
+      "interface": {
+        "feature_report_bytes": 90
+      },
+      "meta": {
+        "dpi_max": 30000
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:1532:00ab",
+      "model_key": "razer-basilisk-v3-pro",
+      "profile_id": "razer_legacy_wireless",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "1532",
+      "pid": "00ab",
+      "wpid": null,
+      "role": "dongle",
+      "link": "HyperSpeed dongle",
+      "prio": 2,
+      "wireless": true,
+      "hyper": false,
+      "udev_eligible": true,
+      "udev_group": "Razer (VID 1532)",
+      "interface": {
+        "feature_report_bytes": 90
+      },
+      "meta": {
+        "dpi_max": 30000
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:1532:00af",
+      "model_key": "razer-cobra-pro",
+      "profile_id": "razer_legacy_wireless",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "1532",
+      "pid": "00af",
+      "wpid": null,
+      "role": "wired",
+      "link": "USB cable",
+      "prio": 0,
+      "wireless": true,
+      "hyper": false,
+      "udev_eligible": true,
+      "udev_group": "Razer (VID 1532)",
+      "interface": {
+        "feature_report_bytes": 90
+      },
+      "meta": {
+        "dpi_max": 30000
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:1532:00b0",
+      "model_key": "razer-cobra-pro",
+      "profile_id": "razer_legacy_wireless",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "1532",
+      "pid": "00b0",
+      "wpid": null,
+      "role": "dongle",
+      "link": "HyperSpeed dongle",
+      "prio": 2,
+      "wireless": true,
+      "hyper": false,
+      "udev_eligible": true,
+      "udev_group": "Razer (VID 1532)",
+      "interface": {
+        "feature_report_bytes": 90
+      },
+      "meta": {
+        "dpi_max": 30000
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:1532:00b2",
+      "model_key": "razer-deathadder-v3",
+      "profile_id": "razer_legacy_wired",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "1532",
+      "pid": "00b2",
+      "wpid": null,
+      "role": "wired",
+      "link": "USB cable",
+      "prio": 0,
+      "wireless": false,
+      "hyper": false,
+      "udev_eligible": true,
+      "udev_group": "Razer (VID 1532)",
+      "interface": {
+        "feature_report_bytes": 90
+      },
+      "meta": {
+        "dpi_max": 30000
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:1532:00b3",
+      "model_key": "razer-hyperpolling-dongle",
+      "profile_id": "razer_legacy_hyperpolling",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "1532",
+      "pid": "00b3",
+      "wpid": null,
+      "role": "dongle",
+      "link": "HyperPolling dongle",
+      "prio": 1,
+      "wireless": true,
+      "hyper": true,
+      "udev_eligible": true,
+      "udev_group": "Razer (VID 1532)",
+      "interface": {
+        "feature_report_bytes": 90
+      },
+      "meta": {
+        "dpi_max": 35000
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:1532:00b6",
+      "model_key": "razer-deathadder-v3-pro",
+      "profile_id": "razer_legacy_wireless",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "1532",
+      "pid": "00b6",
+      "wpid": null,
+      "role": "wired",
+      "link": "USB cable",
+      "prio": 0,
+      "wireless": true,
+      "hyper": false,
+      "udev_eligible": true,
+      "udev_group": "Razer (VID 1532)",
+      "interface": {
+        "feature_report_bytes": 90
+      },
+      "meta": {
+        "dpi_max": 35000
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:1532:00b7",
+      "model_key": "razer-deathadder-v3-pro",
+      "profile_id": "razer_legacy_wireless",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "1532",
+      "pid": "00b7",
+      "wpid": null,
+      "role": "dongle",
+      "link": "HyperSpeed dongle",
+      "prio": 2,
+      "wireless": true,
+      "hyper": false,
+      "udev_eligible": true,
+      "udev_group": "Razer (VID 1532)",
+      "interface": {
+        "feature_report_bytes": 90
+      },
+      "meta": {
+        "dpi_max": 35000
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:1532:00b8",
+      "model_key": "razer-viper-v3-hyperspeed",
+      "profile_id": "razer_legacy_wireless",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "1532",
+      "pid": "00b8",
+      "wpid": null,
+      "role": "dongle",
+      "link": "HyperSpeed dongle",
+      "prio": 2,
+      "wireless": true,
+      "hyper": false,
+      "udev_eligible": true,
+      "udev_group": "Razer (VID 1532)",
+      "interface": {
+        "feature_report_bytes": 90
+      },
+      "meta": {
+        "dpi_max": 30000
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:1532:00c0",
+      "model_key": "razer-viper-v3-pro",
+      "profile_id": "razer_legacy_wireless",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "1532",
+      "pid": "00c0",
+      "wpid": null,
+      "role": "wired",
+      "link": "USB cable",
+      "prio": 0,
+      "wireless": true,
+      "hyper": false,
+      "udev_eligible": true,
+      "udev_group": "Razer (VID 1532)",
+      "interface": {
+        "feature_report_bytes": 90
+      },
+      "meta": {
+        "dpi_max": 35000
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:1532:00c1",
+      "model_key": "razer-viper-v3-pro",
+      "profile_id": "razer_legacy_wireless",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "1532",
+      "pid": "00c1",
+      "wpid": null,
+      "role": "dongle",
+      "link": "HyperSpeed dongle",
+      "prio": 2,
+      "wireless": true,
+      "hyper": false,
+      "udev_eligible": true,
+      "udev_group": "Razer (VID 1532)",
+      "interface": {
+        "feature_report_bytes": 90
+      },
+      "meta": {
+        "dpi_max": 35000
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:1532:00c2",
+      "model_key": "razer-deathadder-v3-pro",
+      "profile_id": "razer_legacy_wireless",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "1532",
+      "pid": "00c2",
+      "wpid": null,
+      "role": "wired",
+      "link": "USB cable",
+      "prio": 0,
+      "wireless": true,
+      "hyper": false,
+      "udev_eligible": true,
+      "udev_group": "Razer (VID 1532)",
+      "interface": {
+        "feature_report_bytes": 90
+      },
+      "meta": {
+        "dpi_max": 35000
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:1532:00c3",
+      "model_key": "razer-deathadder-v3-pro",
+      "profile_id": "razer_legacy_wireless",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "1532",
+      "pid": "00c3",
+      "wpid": null,
+      "role": "dongle",
+      "link": "HyperSpeed dongle",
+      "prio": 2,
+      "wireless": true,
+      "hyper": false,
+      "udev_eligible": true,
+      "udev_group": "Razer (VID 1532)",
+      "interface": {
+        "feature_report_bytes": 90
+      },
+      "meta": {
+        "dpi_max": 35000
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:1532:00c4",
+      "model_key": "razer-deathadder-v3-hyperspeed",
+      "profile_id": "razer_legacy_wireless",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "1532",
+      "pid": "00c4",
+      "wpid": null,
+      "role": "wired",
+      "link": "USB cable",
+      "prio": 0,
+      "wireless": true,
+      "hyper": false,
+      "udev_eligible": true,
+      "udev_group": "Razer (VID 1532)",
+      "interface": {
+        "feature_report_bytes": 90
+      },
+      "meta": {
+        "dpi_max": 26000
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:1532:00c5",
+      "model_key": "razer-deathadder-v3-hyperspeed",
+      "profile_id": "razer_legacy_wireless",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "1532",
+      "pid": "00c5",
+      "wpid": null,
+      "role": "dongle",
+      "link": "HyperSpeed dongle",
+      "prio": 2,
+      "wireless": true,
+      "hyper": false,
+      "udev_eligible": true,
+      "udev_group": "Razer (VID 1532)",
+      "interface": {
+        "feature_report_bytes": 90
+      },
+      "meta": {
+        "dpi_max": 26000
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:1532:00cc",
+      "model_key": "razer-basilisk-v3-pro-35k",
+      "profile_id": "razer_legacy_wireless",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "1532",
+      "pid": "00cc",
+      "wpid": null,
+      "role": "wired",
+      "link": "USB cable",
+      "prio": 0,
+      "wireless": true,
+      "hyper": false,
+      "udev_eligible": true,
+      "udev_group": "Razer (VID 1532)",
+      "interface": {
+        "feature_report_bytes": 90
+      },
+      "meta": {
+        "dpi_max": 35000
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:1532:00cd",
+      "model_key": "razer-basilisk-v3-pro-35k",
+      "profile_id": "razer_legacy_wireless",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "1532",
+      "pid": "00cd",
+      "wpid": null,
+      "role": "dongle",
+      "link": "HyperSpeed dongle",
+      "prio": 2,
+      "wireless": true,
+      "hyper": false,
+      "udev_eligible": true,
+      "udev_group": "Razer (VID 1532)",
+      "interface": {
+        "feature_report_bytes": 90
+      },
+      "meta": {
+        "dpi_max": 35000
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:1532:00d6",
+      "model_key": "razer-basilisk-v3-pro-35k",
+      "profile_id": "razer_legacy_wireless",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "1532",
+      "pid": "00d6",
+      "wpid": null,
+      "role": "wired",
+      "link": "USB cable",
+      "prio": 0,
+      "wireless": true,
+      "hyper": false,
+      "udev_eligible": true,
+      "udev_group": "Razer (VID 1532)",
+      "interface": {
+        "feature_report_bytes": 90
+      },
+      "meta": {
+        "dpi_max": 35000
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:1532:00d7",
+      "model_key": "razer-basilisk-v3-pro-35k",
+      "profile_id": "razer_legacy_wireless",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "1532",
+      "pid": "00d7",
+      "wpid": null,
+      "role": "dongle",
+      "link": "HyperSpeed dongle",
+      "prio": 2,
+      "wireless": true,
+      "hyper": false,
+      "udev_eligible": true,
+      "udev_group": "Razer (VID 1532)",
+      "interface": {
+        "feature_report_bytes": 90
+      },
+      "meta": {
+        "dpi_max": 35000
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:3367:1964",
+      "model_key": "endgame-gear-op1-8k",
+      "profile_id": "egg8k_v1",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "3367",
+      "pid": "1964",
+      "wpid": null,
+      "role": "wired",
+      "link": "USB 8K",
+      "prio": 0,
+      "wireless": false,
+      "hyper": true,
+      "udev_eligible": true,
+      "udev_group": "Endgame Gear 8k (VID 3367)",
+      "interface": {
+        "usage_page": "0xff01",
+        "usage": "0x0002",
+        "feature_report_ids": [
+          "0xa0",
+          "0xa1"
+        ]
+      },
+      "meta": {
+        "family": "v1",
+        "cpi_min": 50,
+        "cpi_max": 26000,
+        "cpi_step_lo": 50,
+        "cpi_step_hi": 50,
+        "lod_options": [
+          "0.7 mm",
+          "1 mm",
+          "2 mm"
+        ],
+        "lod_glass": false,
+        "angle_tuning": false,
+        "force_max_fps": false,
+        "led_liftoff": false,
+        "motion_jitter": true
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:3367:1966",
+      "model_key": "endgame-gear-xm2-8k",
+      "profile_id": "egg8k_v1",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "3367",
+      "pid": "1966",
+      "wpid": null,
+      "role": "wired",
+      "link": "USB 8K",
+      "prio": 0,
+      "wireless": false,
+      "hyper": true,
+      "udev_eligible": true,
+      "udev_group": "Endgame Gear 8k (VID 3367)",
+      "interface": {
+        "usage_page": "0xff01",
+        "usage": "0x0002",
+        "feature_report_ids": [
+          "0xa0",
+          "0xa1"
+        ]
+      },
+      "meta": {
+        "family": "v1",
+        "cpi_min": 50,
+        "cpi_max": 26000,
+        "cpi_step_lo": 50,
+        "cpi_step_hi": 50,
+        "lod_options": [
+          "0.7 mm",
+          "1 mm",
+          "2 mm"
+        ],
+        "lod_glass": false,
+        "angle_tuning": false,
+        "force_max_fps": false,
+        "led_liftoff": false,
+        "motion_jitter": true
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:3367:1976",
+      "model_key": "endgame-gear-op1-8k-purple-frost",
+      "profile_id": "egg8k_v1",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "3367",
+      "pid": "1976",
+      "wpid": null,
+      "role": "wired",
+      "link": "USB 8K",
+      "prio": 0,
+      "wireless": false,
+      "hyper": true,
+      "udev_eligible": true,
+      "udev_group": "Endgame Gear 8k (VID 3367)",
+      "interface": {
+        "usage_page": "0xff01",
+        "usage": "0x0002",
+        "feature_report_ids": [
+          "0xa0",
+          "0xa1"
+        ]
+      },
+      "meta": {
+        "family": "v1",
+        "cpi_min": 50,
+        "cpi_max": 30000,
+        "cpi_step_lo": 50,
+        "cpi_step_hi": 50,
+        "lod_options": [
+          "0.7 mm",
+          "1 mm",
+          "2 mm"
+        ],
+        "lod_glass": true,
+        "angle_tuning": false,
+        "force_max_fps": false,
+        "led_liftoff": false,
+        "motion_jitter": true
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:3367:1978",
+      "model_key": "endgame-gear-op1-8k-v2",
+      "profile_id": "egg8k_v2",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "3367",
+      "pid": "1978",
+      "wpid": null,
+      "role": "wired",
+      "link": "USB 8K",
+      "prio": 0,
+      "wireless": false,
+      "hyper": true,
+      "udev_eligible": true,
+      "udev_group": "Endgame Gear 8k (VID 3367)",
+      "interface": {
+        "usage_page": "0xff01",
+        "usage": "0x0002",
+        "feature_report_ids": [
+          "0xa0",
+          "0xa1"
+        ]
+      },
+      "meta": {
+        "family": "v2",
+        "cpi_min": 10,
+        "cpi_max": 30000,
+        "cpi_step_lo": 10,
+        "cpi_step_hi": 50,
+        "lod_options": [
+          "0.7 mm",
+          "0.8 mm",
+          "0.9 mm",
+          "1.0 mm",
+          "1.1 mm",
+          "1.2 mm",
+          "1.3 mm",
+          "1.4 mm",
+          "1.5 mm",
+          "1.6 mm",
+          "1.7 mm"
+        ],
+        "lod_glass": true,
+        "angle_tuning": true,
+        "force_max_fps": true,
+        "led_liftoff": true,
+        "motion_jitter": true
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:3367:1980",
+      "model_key": "endgame-gear-xm2-8k-v2",
+      "profile_id": "egg8k_v2",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "3367",
+      "pid": "1980",
+      "wpid": null,
+      "role": "wired",
+      "link": "USB 8K",
+      "prio": 0,
+      "wireless": false,
+      "hyper": true,
+      "udev_eligible": true,
+      "udev_group": "Endgame Gear 8k (VID 3367)",
+      "interface": {
+        "usage_page": "0xff01",
+        "usage": "0x0002",
+        "feature_report_ids": [
+          "0xa0",
+          "0xa1"
+        ]
+      },
+      "meta": {
+        "family": "v2",
+        "cpi_min": 10,
+        "cpi_max": 30000,
+        "cpi_step_lo": 10,
+        "cpi_step_hi": 50,
+        "lod_options": [
+          "0.7 mm",
+          "0.8 mm",
+          "0.9 mm",
+          "1.0 mm",
+          "1.1 mm",
+          "1.2 mm",
+          "1.3 mm",
+          "1.4 mm",
+          "1.5 mm",
+          "1.6 mm",
+          "1.7 mm"
+        ],
+        "lod_glass": true,
+        "angle_tuning": true,
+        "force_max_fps": true,
+        "led_liftoff": true,
+        "motion_jitter": true
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:3367:1960",
+      "model_key": "endgame-gear-xm2we",
+      "profile_id": "egg_we_compx",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "3367",
+      "pid": "1960",
+      "wpid": null,
+      "role": "dongle",
+      "link": "Wireless dongle",
+      "prio": 2,
+      "wireless": true,
+      "hyper": false,
+      "udev_eligible": true,
+      "udev_group": "Endgame Gear -we (VID 3367)",
+      "interface": {
+        "feature_report_ids": [
+          "0x08"
+        ],
+        "companion_input_report_ids": [
+          "0x09"
+        ],
+        "exclude_sibling_feature_report_ids": [
+          "0xa1"
+        ]
+      },
+      "meta": {
+        "brand": "egg_we",
+        "dpi_min": 50,
+        "dpi_max": 12800,
+        "rates": [
+          125,
+          250,
+          500,
+          1000
+        ]
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:3367:1961",
+      "model_key": "endgame-gear-op1we",
+      "profile_id": "egg_we_compx",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "3367",
+      "pid": "1961",
+      "wpid": null,
+      "role": "dongle",
+      "link": "Wireless dongle",
+      "prio": 2,
+      "wireless": true,
+      "hyper": false,
+      "udev_eligible": true,
+      "udev_group": "Endgame Gear -we (VID 3367)",
+      "interface": {
+        "feature_report_ids": [
+          "0x08"
+        ],
+        "companion_input_report_ids": [
+          "0x09"
+        ],
+        "exclude_sibling_feature_report_ids": [
+          "0xa1"
+        ]
+      },
+      "meta": {
+        "brand": "egg_we",
+        "dpi_min": 50,
+        "dpi_max": 12800,
+        "rates": [
+          125,
+          250,
+          500,
+          1000
+        ]
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:3367:1962",
+      "model_key": "endgame-gear-op1we",
+      "profile_id": "egg_we_compx",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "3367",
+      "pid": "1962",
+      "wpid": null,
+      "role": "wired",
+      "link": "USB cable",
+      "prio": 0,
+      "wireless": false,
+      "hyper": false,
+      "udev_eligible": true,
+      "udev_group": "Endgame Gear -we (VID 3367)",
+      "interface": {
+        "feature_report_ids": [
+          "0x08"
+        ],
+        "companion_input_report_ids": [
+          "0x09"
+        ],
+        "exclude_sibling_feature_report_ids": [
+          "0xa1"
+        ]
+      },
+      "meta": {
+        "brand": "egg_we",
+        "dpi_min": 50,
+        "dpi_max": 12800,
+        "rates": [
+          125,
+          250,
+          500,
+          1000
+        ]
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:3367:1968",
+      "model_key": "endgame-gear-xm2we",
+      "profile_id": "egg_we_compx",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "3367",
+      "pid": "1968",
+      "wpid": null,
+      "role": "dongle",
+      "link": "Wireless dongle",
+      "prio": 2,
+      "wireless": true,
+      "hyper": false,
+      "udev_eligible": true,
+      "udev_group": "Endgame Gear -we (VID 3367)",
+      "interface": {
+        "feature_report_ids": [
+          "0x08"
+        ],
+        "companion_input_report_ids": [
+          "0x09"
+        ],
+        "exclude_sibling_feature_report_ids": [
+          "0xa1"
+        ]
+      },
+      "meta": {
+        "brand": "egg_we",
+        "dpi_min": 50,
+        "dpi_max": 12800,
+        "rates": [
+          125,
+          250,
+          500,
+          1000
+        ]
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:3367:1970",
+      "model_key": "endgame-gear-op1we",
+      "profile_id": "egg_we_compx",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "3367",
+      "pid": "1970",
+      "wpid": null,
+      "role": "dongle",
+      "link": "Wireless dongle",
+      "prio": 2,
+      "wireless": true,
+      "hyper": false,
+      "udev_eligible": true,
+      "udev_group": "Endgame Gear -we (VID 3367)",
+      "interface": {
+        "feature_report_ids": [
+          "0x08"
+        ],
+        "companion_input_report_ids": [
+          "0x09"
+        ],
+        "exclude_sibling_feature_report_ids": [
+          "0xa1"
+        ]
+      },
+      "meta": {
+        "brand": "egg_we",
+        "dpi_min": 50,
+        "dpi_max": 12800,
+        "rates": [
+          125,
+          250,
+          500,
+          1000
+        ]
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:3367:1972",
+      "model_key": "endgame-gear-op1we",
+      "profile_id": "egg_we_compx",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "3367",
+      "pid": "1972",
+      "wpid": null,
+      "role": "wired",
+      "link": "USB cable",
+      "prio": 0,
+      "wireless": false,
+      "hyper": false,
+      "udev_eligible": true,
+      "udev_group": "Endgame Gear -we (VID 3367)",
+      "interface": {
+        "feature_report_ids": [
+          "0x08"
+        ],
+        "companion_input_report_ids": [
+          "0x09"
+        ],
+        "exclude_sibling_feature_report_ids": [
+          "0xa1"
+        ]
+      },
+      "meta": {
+        "brand": "egg_we",
+        "dpi_min": 50,
+        "dpi_max": 12800,
+        "rates": [
+          125,
+          250,
+          500,
+          1000
+        ]
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:3367:1982",
+      "model_key": "endgame-gear-xm2we",
+      "profile_id": "egg_we_compx",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "3367",
+      "pid": "1982",
+      "wpid": null,
+      "role": "dongle",
+      "link": "Wireless dongle",
+      "prio": 2,
+      "wireless": true,
+      "hyper": false,
+      "udev_eligible": true,
+      "udev_group": "Endgame Gear -we (VID 3367)",
+      "interface": {
+        "feature_report_ids": [
+          "0x08"
+        ],
+        "companion_input_report_ids": [
+          "0x09"
+        ],
+        "exclude_sibling_feature_report_ids": [
+          "0xa1"
+        ]
+      },
+      "meta": {
+        "brand": "egg_we",
+        "dpi_min": 50,
+        "dpi_max": 12800,
+        "rates": [
+          125,
+          250,
+          500,
+          1000
+        ]
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "bt:046d:b023",
+      "model_key": "logitech-mx-master-3",
+      "profile_id": "logitech_hidpp20",
+      "bus": "bluetooth",
+      "id_namespace": "bluetooth_pid",
+      "vid": "046d",
+      "pid": "b023",
+      "wpid": null,
+      "role": "bluetooth",
+      "link": "Bluetooth",
+      "prio": 3,
+      "wireless": true,
+      "hyper": false,
+      "udev_eligible": false,
+      "udev_group": "Logitech HID++ USB mice & receivers (VID 046d)",
+      "interface": {
+        "usage_pages": [
+          "0xff00",
+          "0xff43"
+        ],
+        "output_report_ids_any": [
+          "0x10",
+          "0x11"
+        ]
+      },
+      "meta": {
+        "dpi_max": 32000
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "bt:046d:b034",
+      "model_key": "logitech-mx-master-3s",
+      "profile_id": "logitech_hidpp20",
+      "bus": "bluetooth",
+      "id_namespace": "bluetooth_pid",
+      "vid": "046d",
+      "pid": "b034",
+      "wpid": null,
+      "role": "bluetooth",
+      "link": "Bluetooth",
+      "prio": 3,
+      "wireless": true,
+      "hyper": false,
+      "udev_eligible": false,
+      "udev_group": "Logitech HID++ USB mice & receivers (VID 046d)",
+      "interface": {
+        "usage_pages": [
+          "0xff00",
+          "0xff43"
+        ],
+        "output_report_ids_any": [
+          "0x10",
+          "0x11"
+        ]
+      },
+      "meta": {
+        "dpi_max": 32000
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:046d:c088",
+      "model_key": "logitech-g-pro-wireless",
+      "profile_id": "logitech_hidpp20",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "046d",
+      "pid": "c088",
+      "wpid": null,
+      "role": "wired",
+      "link": "USB cable",
+      "prio": 1,
+      "wireless": false,
+      "hyper": false,
+      "udev_eligible": true,
+      "udev_group": "Logitech HID++ USB mice & receivers (VID 046d)",
+      "interface": {
+        "usage_pages": [
+          "0xff00",
+          "0xff43"
+        ],
+        "output_report_ids_any": [
+          "0x10",
+          "0x11"
+        ]
+      },
+      "meta": {
+        "dpi_max": 32000
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:046d:c08b",
+      "model_key": "logitech-g502-hero",
+      "profile_id": "logitech_hidpp20",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "046d",
+      "pid": "c08b",
+      "wpid": null,
+      "role": "wired",
+      "link": "USB cable",
+      "prio": 1,
+      "wireless": false,
+      "hyper": false,
+      "udev_eligible": true,
+      "udev_group": "Logitech HID++ USB mice & receivers (VID 046d)",
+      "interface": {
+        "usage_pages": [
+          "0xff00",
+          "0xff43"
+        ],
+        "output_report_ids_any": [
+          "0x10",
+          "0x11"
+        ]
+      },
+      "meta": {
+        "dpi_max": 32000
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:046d:c092",
+      "model_key": "logitech-g-pro-x-superlight",
+      "profile_id": "logitech_hidpp20",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "046d",
+      "pid": "c092",
+      "wpid": null,
+      "role": "wired",
+      "link": "USB cable",
+      "prio": 1,
+      "wireless": false,
+      "hyper": false,
+      "udev_eligible": true,
+      "udev_group": "Logitech HID++ USB mice & receivers (VID 046d)",
+      "interface": {
+        "usage_pages": [
+          "0xff00",
+          "0xff43"
+        ],
+        "output_report_ids_any": [
+          "0x10",
+          "0x11"
+        ]
+      },
+      "meta": {
+        "dpi_max": 32000
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:046d:c093",
+      "model_key": "logitech-g502-lightspeed",
+      "profile_id": "logitech_hidpp20",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "046d",
+      "pid": "c093",
+      "wpid": null,
+      "role": "wired",
+      "link": "USB cable",
+      "prio": 1,
+      "wireless": false,
+      "hyper": false,
+      "udev_eligible": true,
+      "udev_group": "Logitech HID++ USB mice & receivers (VID 046d)",
+      "interface": {
+        "usage_pages": [
+          "0xff00",
+          "0xff43"
+        ],
+        "output_report_ids_any": [
+          "0x10",
+          "0x11"
+        ]
+      },
+      "meta": {
+        "dpi_max": 32000
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:046d:c094",
+      "model_key": "logitech-g-pro-wireless",
+      "profile_id": "logitech_hidpp20",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "046d",
+      "pid": "c094",
+      "wpid": null,
+      "role": "wired",
+      "link": "USB cable",
+      "prio": 1,
+      "wireless": false,
+      "hyper": false,
+      "udev_eligible": true,
+      "udev_group": "Logitech HID++ USB mice & receivers (VID 046d)",
+      "interface": {
+        "usage_pages": [
+          "0xff00",
+          "0xff43"
+        ],
+        "output_report_ids_any": [
+          "0x10",
+          "0x11"
+        ]
+      },
+      "meta": {
+        "dpi_max": 32000
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:046d:c095",
+      "model_key": "logitech-g305",
+      "profile_id": "logitech_hidpp20",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "046d",
+      "pid": "c095",
+      "wpid": null,
+      "role": "wired",
+      "link": "USB",
+      "prio": 1,
+      "wireless": false,
+      "hyper": false,
+      "udev_eligible": true,
+      "udev_group": "Logitech HID++ USB mice & receivers (VID 046d)",
+      "interface": {
+        "usage_pages": [
+          "0xff00",
+          "0xff43"
+        ],
+        "output_report_ids_any": [
+          "0x10",
+          "0x11"
+        ]
+      },
+      "meta": {
+        "dpi_max": 32000
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:046d:c099",
+      "model_key": "logitech-g-pro-x-superlight-2",
+      "profile_id": "logitech_hidpp20",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "046d",
+      "pid": "c099",
+      "wpid": null,
+      "role": "wired",
+      "link": "USB cable",
+      "prio": 1,
+      "wireless": false,
+      "hyper": false,
+      "udev_eligible": true,
+      "udev_group": "Logitech HID++ USB mice & receivers (VID 046d)",
+      "interface": {
+        "usage_pages": [
+          "0xff00",
+          "0xff43"
+        ],
+        "output_report_ids_any": [
+          "0x10",
+          "0x11"
+        ]
+      },
+      "meta": {
+        "dpi_max": 32000
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:046d:c09d",
+      "model_key": "logitech-g502-x-plus",
+      "profile_id": "logitech_hidpp20",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "046d",
+      "pid": "c09d",
+      "wpid": null,
+      "role": "wired",
+      "link": "USB cable",
+      "prio": 1,
+      "wireless": false,
+      "hyper": false,
+      "udev_eligible": true,
+      "udev_group": "Logitech HID++ USB mice & receivers (VID 046d)",
+      "interface": {
+        "usage_pages": [
+          "0xff00",
+          "0xff43"
+        ],
+        "output_report_ids_any": [
+          "0x10",
+          "0x11"
+        ]
+      },
+      "meta": {
+        "dpi_max": 32000
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:046d:c09e",
+      "model_key": "logitech-g502-x-lightspeed",
+      "profile_id": "logitech_hidpp20",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "046d",
+      "pid": "c09e",
+      "wpid": null,
+      "role": "wired",
+      "link": "USB cable",
+      "prio": 1,
+      "wireless": false,
+      "hyper": false,
+      "udev_eligible": true,
+      "udev_group": "Logitech HID++ USB mice & receivers (VID 046d)",
+      "interface": {
+        "usage_pages": [
+          "0xff00",
+          "0xff43"
+        ],
+        "output_report_ids_any": [
+          "0x10",
+          "0x11"
+        ]
+      },
+      "meta": {
+        "dpi_max": 32000
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:046d:c52b",
+      "model_key": "logitech-unifying-receiver",
+      "profile_id": "logitech_hidpp20",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "046d",
+      "pid": "c52b",
+      "wpid": null,
+      "role": "receiver",
+      "link": "Unifying receiver",
+      "prio": 3,
+      "wireless": true,
+      "hyper": false,
+      "udev_eligible": true,
+      "udev_group": "Logitech HID++ USB mice & receivers (VID 046d)",
+      "interface": {
+        "usage_pages": [
+          "0xff00",
+          "0xff43"
+        ],
+        "output_report_ids_any": [
+          "0x10",
+          "0x11"
+        ]
+      },
+      "meta": {
+        "dpi_max": 32000
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:046d:c539",
+      "model_key": "logitech-lightspeed-receiver",
+      "profile_id": "logitech_hidpp20",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "046d",
+      "pid": "c539",
+      "wpid": null,
+      "role": "receiver",
+      "link": "Lightspeed dongle",
+      "prio": 3,
+      "wireless": true,
+      "hyper": false,
+      "udev_eligible": true,
+      "udev_group": "Logitech HID++ USB mice & receivers (VID 046d)",
+      "interface": {
+        "usage_pages": [
+          "0xff00",
+          "0xff43"
+        ],
+        "output_report_ids_any": [
+          "0x10",
+          "0x11"
+        ]
+      },
+      "meta": {
+        "dpi_max": 32000
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:046d:c53f",
+      "model_key": "logitech-lightspeed-receiver",
+      "profile_id": "logitech_hidpp20",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "046d",
+      "pid": "c53f",
+      "wpid": null,
+      "role": "receiver",
+      "link": "Lightspeed dongle",
+      "prio": 3,
+      "wireless": true,
+      "hyper": false,
+      "udev_eligible": true,
+      "udev_group": "Logitech HID++ USB mice & receivers (VID 046d)",
+      "interface": {
+        "usage_pages": [
+          "0xff00",
+          "0xff43"
+        ],
+        "output_report_ids_any": [
+          "0x10",
+          "0x11"
+        ]
+      },
+      "meta": {
+        "dpi_max": 32000
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:046d:c547",
+      "model_key": "logitech-superlight-receiver",
+      "profile_id": "logitech_hidpp20",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "046d",
+      "pid": "c547",
+      "wpid": null,
+      "role": "receiver",
+      "link": "Lightspeed dongle",
+      "prio": 3,
+      "wireless": true,
+      "hyper": false,
+      "udev_eligible": true,
+      "udev_group": "Logitech HID++ USB mice & receivers (VID 046d)",
+      "interface": {
+        "usage_pages": [
+          "0xff00",
+          "0xff43"
+        ],
+        "output_report_ids_any": [
+          "0x10",
+          "0x11"
+        ]
+      },
+      "meta": {
+        "dpi_max": 32000
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:046d:c548",
+      "model_key": "logitech-bolt-receiver",
+      "profile_id": "logitech_hidpp20",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "046d",
+      "pid": "c548",
+      "wpid": null,
+      "role": "receiver",
+      "link": "Bolt receiver",
+      "prio": 3,
+      "wireless": true,
+      "hyper": false,
+      "udev_eligible": true,
+      "udev_group": "Logitech HID++ USB mice & receivers (VID 046d)",
+      "interface": {
+        "usage_pages": [
+          "0xff00",
+          "0xff43"
+        ],
+        "output_report_ids_any": [
+          "0x10",
+          "0x11"
+        ]
+      },
+      "meta": {
+        "dpi_max": 32000
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:046d:c54d",
+      "model_key": "logitech-superlight-2-receiver",
+      "profile_id": "logitech_hidpp20",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "046d",
+      "pid": "c54d",
+      "wpid": null,
+      "role": "receiver",
+      "link": "Lightspeed 2 dongle",
+      "prio": 3,
+      "wireless": true,
+      "hyper": false,
+      "udev_eligible": true,
+      "udev_group": "Logitech HID++ USB mice & receivers (VID 046d)",
+      "interface": {
+        "usage_pages": [
+          "0xff00",
+          "0xff43"
+        ],
+        "output_report_ids_any": [
+          "0x10",
+          "0x11"
+        ]
+      },
+      "meta": {
+        "dpi_max": 32000
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "wpid:046d:4079",
+      "model_key": "logitech-g-pro-wireless",
+      "profile_id": "generic_tier0",
+      "bus": "receiver_child",
+      "id_namespace": "logitech_wpid",
+      "vid": "046d",
+      "pid": null,
+      "wpid": "4079",
+      "receiver_pids": [
+        "c539",
+        "c53f",
+        "c547"
+      ],
+      "role": "dongle",
+      "link": "Lightspeed paired child (WPID)",
+      "prio": 9,
+      "wireless": true,
+      "hyper": false,
+      "udev_eligible": false,
+      "udev_group": "Logitech HID++ USB mice & receivers (VID 046d)",
+      "interface": {},
+      "meta": {},
+      "source": "solaar"
+    },
+    {
+      "id": "usb:3710:3404",
+      "model_key": "pulsar-x2a-v3",
+      "profile_id": "pulsar_xs1",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "3710",
+      "pid": "3404",
+      "wpid": null,
+      "role": "wired",
+      "link": "USB cable",
+      "prio": 1,
+      "wireless": false,
+      "hyper": false,
+      "udev_eligible": true,
+      "udev_group": "Pulsar (VID 3710, 25a7, 3554)",
+      "interface": {
+        "usage_page": "0xffff",
+        "usage": "0x0001",
+        "feature_report_ids": [
+          "0x00"
+        ],
+        "min_feature_bytes": 64,
+        "exclude_input_report_ids": [
+          "0x08"
+        ]
+      },
+      "meta": {
+        "max_poll": 1000,
+        "dpi_min": 50,
+        "dpi_max": 26000
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:3710:3409",
+      "model_key": "pulsar-xs-1-mouse",
+      "profile_id": "pulsar_xs1",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "3710",
+      "pid": "3409",
+      "wpid": null,
+      "role": "wired",
+      "link": "USB cable",
+      "prio": 1,
+      "wireless": false,
+      "hyper": false,
+      "udev_eligible": true,
+      "udev_group": "Pulsar (VID 3710, 25a7, 3554)",
+      "interface": {
+        "usage_page": "0xffff",
+        "usage": "0x0001",
+        "feature_report_ids": [
+          "0x00"
+        ],
+        "min_feature_bytes": 64,
+        "exclude_input_report_ids": [
+          "0x08"
+        ]
+      },
+      "meta": {
+        "max_poll": 1000,
+        "dpi_min": 50,
+        "dpi_max": 26000
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:3710:3410",
+      "model_key": "pulsar-xs-1-mouse",
+      "profile_id": "pulsar_xs1",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "3710",
+      "pid": "3410",
+      "wpid": null,
+      "role": "wired",
+      "link": "USB cable",
+      "prio": 1,
+      "wireless": false,
+      "hyper": false,
+      "udev_eligible": true,
+      "udev_group": "Pulsar (VID 3710, 25a7, 3554)",
+      "interface": {
+        "usage_page": "0xffff",
+        "usage": "0x0001",
+        "feature_report_ids": [
+          "0x00"
+        ],
+        "min_feature_bytes": 64,
+        "exclude_input_report_ids": [
+          "0x08"
+        ]
+      },
+      "meta": {
+        "max_poll": 1000,
+        "dpi_min": 50,
+        "dpi_max": 26000
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:3710:5402",
+      "model_key": "pulsar-x3-m",
+      "profile_id": "pulsar_xs1",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "3710",
+      "pid": "5402",
+      "wpid": null,
+      "role": "dual",
+      "link": "Wireless",
+      "prio": 2,
+      "wireless": true,
+      "hyper": false,
+      "udev_eligible": true,
+      "udev_group": "Pulsar (VID 3710, 25a7, 3554)",
+      "interface": {
+        "usage_page": "0xffff",
+        "usage": "0x0001",
+        "feature_report_ids": [
+          "0x00"
+        ],
+        "min_feature_bytes": 64,
+        "exclude_input_report_ids": [
+          "0x08"
+        ]
+      },
+      "meta": {
+        "max_poll": 1000,
+        "dpi_min": 50,
+        "dpi_max": 26000
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:3710:5403",
+      "model_key": "pulsar-8k-dongle",
+      "profile_id": "pulsar_xs1",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "3710",
+      "pid": "5403",
+      "wpid": null,
+      "role": "dongle",
+      "link": "8K dongle",
+      "prio": 2,
+      "wireless": true,
+      "hyper": true,
+      "udev_eligible": true,
+      "udev_group": "Pulsar (VID 3710, 25a7, 3554)",
+      "interface": {
+        "usage_page": "0xffff",
+        "usage": "0x0001",
+        "feature_report_ids": [
+          "0x00"
+        ],
+        "min_feature_bytes": 64,
+        "exclude_input_report_ids": [
+          "0x08"
+        ]
+      },
+      "meta": {
+        "max_poll": 8000,
+        "dpi_min": 50,
+        "dpi_max": 26000
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:3710:5405",
+      "model_key": "pulsar-pro",
+      "profile_id": "pulsar_pro",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "3710",
+      "pid": "5405",
+      "wpid": null,
+      "role": "dongle",
+      "link": "8K dongle",
+      "prio": 2,
+      "wireless": true,
+      "hyper": true,
+      "udev_eligible": true,
+      "udev_group": "Pulsar (VID 3710, 25a7, 3554)",
+      "interface": {
+        "usage_page": "0x0001",
+        "input_report_ids": [
+          "0x00"
+        ],
+        "output_report_ids": [
+          "0x00"
+        ]
+      },
+      "meta": {
+        "max_poll": 8000,
+        "dpi_min": 50,
+        "dpi_max": 32000
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:25a7:fa7b",
+      "model_key": "pulsar-areson",
+      "profile_id": "pulsar_areson_compx",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "25a7",
+      "pid": "fa7b",
+      "wpid": null,
+      "role": "wired",
+      "link": "USB cable",
+      "prio": 0,
+      "wireless": false,
+      "hyper": false,
+      "udev_eligible": true,
+      "udev_group": "Pulsar (VID 3710, 25a7, 3554)",
+      "interface": {
+        "feature_report_ids": [
+          "0x08"
+        ],
+        "companion_input_report_ids": [
+          "0x09"
+        ],
+        "exclude_collection": {
+          "usage_page": "0xffff",
+          "usage": "0x0002"
+        }
+      },
+      "meta": {
+        "brand": "areson",
+        "dpi_min": 50,
+        "dpi_max": 26000,
+        "rates": [
+          125,
+          250,
+          500,
+          1000
+        ]
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:25a7:fa7c",
+      "model_key": "pulsar-areson",
+      "profile_id": "pulsar_areson_compx",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "25a7",
+      "pid": "fa7c",
+      "wpid": null,
+      "role": "dongle",
+      "link": "Wireless dongle",
+      "prio": 2,
+      "wireless": true,
+      "hyper": false,
+      "udev_eligible": true,
+      "udev_group": "Pulsar (VID 3710, 25a7, 3554)",
+      "interface": {
+        "feature_report_ids": [
+          "0x08"
+        ],
+        "companion_input_report_ids": [
+          "0x09"
+        ],
+        "exclude_collection": {
+          "usage_page": "0xffff",
+          "usage": "0x0002"
+        }
+      },
+      "meta": {
+        "brand": "areson",
+        "dpi_min": 50,
+        "dpi_max": 26000,
+        "rates": [
+          125,
+          250,
+          500,
+          1000
+        ]
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:3554:f507",
+      "model_key": "pulsar-4k-receiver",
+      "profile_id": "compx_odm",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "3554",
+      "pid": "f507",
+      "wpid": null,
+      "role": "dongle",
+      "link": "4K dongle",
+      "prio": 2,
+      "wireless": true,
+      "hyper": true,
+      "udev_eligible": true,
+      "udev_group": "Pulsar (VID 3710, 25a7, 3554)",
+      "interface": {
+        "input_report_ids": [
+          "0x08"
+        ],
+        "output_report_ids": [
+          "0x08"
+        ]
+      },
+      "meta": {
+        "brand": "pulsar_4k",
+        "dpi_min": 50,
+        "dpi_max": 26000,
+        "rates": [
+          125,
+          250,
+          500,
+          1000,
+          2000,
+          4000
+        ]
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:3554:f508",
+      "model_key": "pulsar-4k-receiver",
+      "profile_id": "compx_odm",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "3554",
+      "pid": "f508",
+      "wpid": null,
+      "role": "dongle",
+      "link": "4K dongle",
+      "prio": 2,
+      "wireless": true,
+      "hyper": true,
+      "udev_eligible": true,
+      "udev_group": "Pulsar (VID 3710, 25a7, 3554)",
+      "interface": {
+        "input_report_ids": [
+          "0x08"
+        ],
+        "output_report_ids": [
+          "0x08"
+        ]
+      },
+      "meta": {
+        "brand": "pulsar_4k",
+        "dpi_min": 50,
+        "dpi_max": 26000,
+        "rates": [
+          125,
+          250,
+          500,
+          1000,
+          2000,
+          4000
+        ]
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:3554:f509",
+      "model_key": "pulsar-4k-receiver",
+      "profile_id": "compx_odm",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "3554",
+      "pid": "f509",
+      "wpid": null,
+      "role": "dongle",
+      "link": "4K dongle",
+      "prio": 2,
+      "wireless": true,
+      "hyper": true,
+      "udev_eligible": true,
+      "udev_group": "Pulsar (VID 3710, 25a7, 3554)",
+      "interface": {
+        "input_report_ids": [
+          "0x08"
+        ],
+        "output_report_ids": [
+          "0x08"
+        ]
+      },
+      "meta": {
+        "brand": "pulsar_4k",
+        "dpi_min": 50,
+        "dpi_max": 26000,
+        "rates": [
+          125,
+          250,
+          500,
+          1000,
+          2000,
+          4000
+        ]
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:3554:f50d",
+      "model_key": "lamzu-atlantis",
+      "profile_id": "compx_odm",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "3554",
+      "pid": "f50d",
+      "wpid": null,
+      "role": "dongle",
+      "link": "1K dongle",
+      "prio": 2,
+      "wireless": true,
+      "hyper": false,
+      "udev_eligible": true,
+      "udev_group": "CompX ODM Ecosystem (VID 3554, 373b)",
+      "interface": {
+        "input_report_ids": [
+          "0x08"
+        ],
+        "output_report_ids": [
+          "0x08"
+        ]
+      },
+      "meta": {
+        "brand": "lamzu",
+        "dpi_min": 50,
+        "dpi_max": 26000,
+        "rates": [
+          125,
+          250,
+          500,
+          1000
+        ]
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:3554:f50f",
+      "model_key": "lamzu-atlantis",
+      "profile_id": "compx_odm",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "3554",
+      "pid": "f50f",
+      "wpid": null,
+      "role": "wired",
+      "link": "USB cable",
+      "prio": 0,
+      "wireless": false,
+      "hyper": false,
+      "udev_eligible": true,
+      "udev_group": "CompX ODM Ecosystem (VID 3554, 373b)",
+      "interface": {
+        "input_report_ids": [
+          "0x08"
+        ],
+        "output_report_ids": [
+          "0x08"
+        ]
+      },
+      "meta": {
+        "brand": "lamzu",
+        "dpi_min": 50,
+        "dpi_max": 26000,
+        "rates": [
+          125,
+          250,
+          500,
+          1000
+        ]
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:3554:f510",
+      "model_key": "lamzu-atlantis-4k",
+      "profile_id": "compx_odm",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "3554",
+      "pid": "f510",
+      "wpid": null,
+      "role": "dongle",
+      "link": "4K dongle",
+      "prio": 2,
+      "wireless": true,
+      "hyper": true,
+      "udev_eligible": true,
+      "udev_group": "CompX ODM Ecosystem (VID 3554, 373b)",
+      "interface": {
+        "input_report_ids": [
+          "0x08"
+        ],
+        "output_report_ids": [
+          "0x08"
+        ]
+      },
+      "meta": {
+        "brand": "lamzu",
+        "dpi_min": 50,
+        "dpi_max": 26000,
+        "rates": [
+          125,
+          250,
+          500,
+          1000,
+          2000,
+          4000
+        ]
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:3554:f515",
+      "model_key": "scyrox-v8s",
+      "profile_id": "compx_odm",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "3554",
+      "pid": "f515",
+      "wpid": null,
+      "role": "wired",
+      "link": "USB cable",
+      "prio": 0,
+      "wireless": false,
+      "hyper": true,
+      "udev_eligible": true,
+      "udev_group": "CompX ODM Ecosystem (VID 3554, 373b)",
+      "interface": {
+        "input_report_ids": [
+          "0x08"
+        ],
+        "output_report_ids": [
+          "0x08"
+        ]
+      },
+      "meta": {
+        "brand": "scyrox",
+        "dpi_min": 50,
+        "dpi_max": 50000,
+        "rates": [
+          125,
+          250,
+          500,
+          1000,
+          2000,
+          4000,
+          8000
+        ],
+        "model": "v8s"
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:3554:f517",
+      "model_key": "scyrox-v8s-turbo",
+      "profile_id": "compx_odm",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "3554",
+      "pid": "f517",
+      "wpid": null,
+      "role": "dongle",
+      "link": "8K dongle",
+      "prio": 2,
+      "wireless": true,
+      "hyper": true,
+      "udev_eligible": true,
+      "udev_group": "CompX ODM Ecosystem (VID 3554, 373b)",
+      "interface": {
+        "input_report_ids": [
+          "0x08"
+        ],
+        "output_report_ids": [
+          "0x08"
+        ]
+      },
+      "meta": {
+        "brand": "scyrox",
+        "dpi_min": 50,
+        "dpi_max": 50000,
+        "rates": [
+          125,
+          250,
+          500,
+          1000,
+          2000,
+          4000,
+          8000
+        ],
+        "model": "v8s"
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:3554:f520",
+      "model_key": "teevolution-terra-pro",
+      "profile_id": "compx_odm",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "3554",
+      "pid": "f520",
+      "wpid": null,
+      "role": "dual",
+      "link": "Wireless",
+      "prio": 2,
+      "wireless": true,
+      "hyper": true,
+      "udev_eligible": true,
+      "udev_group": "CompX ODM Ecosystem (VID 3554, 373b)",
+      "interface": {
+        "input_report_ids": [
+          "0x08"
+        ],
+        "output_report_ids": [
+          "0x08"
+        ]
+      },
+      "meta": {
+        "brand": "teevolution",
+        "dpi_min": 50,
+        "dpi_max": 42000,
+        "rates": [
+          125,
+          250,
+          500,
+          1000,
+          2000,
+          4000,
+          8000
+        ]
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:3554:f522",
+      "model_key": "teevolution-terra-pro",
+      "profile_id": "compx_odm",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "3554",
+      "pid": "f522",
+      "wpid": null,
+      "role": "wired",
+      "link": "USB cable",
+      "prio": 0,
+      "wireless": false,
+      "hyper": true,
+      "udev_eligible": true,
+      "udev_group": "CompX ODM Ecosystem (VID 3554, 373b)",
+      "interface": {
+        "input_report_ids": [
+          "0x08"
+        ],
+        "output_report_ids": [
+          "0x08"
+        ]
+      },
+      "meta": {
+        "brand": "teevolution",
+        "dpi_min": 50,
+        "dpi_max": 42000,
+        "rates": [
+          125,
+          250,
+          500,
+          1000,
+          2000,
+          4000,
+          8000
+        ]
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:3554:f523",
+      "model_key": "teevolution-terra-pro",
+      "profile_id": "compx_odm",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "3554",
+      "pid": "f523",
+      "wpid": null,
+      "role": "dongle",
+      "link": "8K dongle",
+      "prio": 2,
+      "wireless": true,
+      "hyper": true,
+      "udev_eligible": true,
+      "udev_group": "CompX ODM Ecosystem (VID 3554, 373b)",
+      "interface": {
+        "input_report_ids": [
+          "0x08"
+        ],
+        "output_report_ids": [
+          "0x08"
+        ]
+      },
+      "meta": {
+        "brand": "teevolution",
+        "dpi_min": 50,
+        "dpi_max": 42000,
+        "rates": [
+          125,
+          250,
+          500,
+          1000,
+          2000,
+          4000,
+          8000
+        ]
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:3554:f58a",
+      "model_key": "atk-vxe-mouse",
+      "profile_id": "compx_odm",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "3554",
+      "pid": "f58a",
+      "wpid": null,
+      "role": "dongle",
+      "link": "Wireless dongle",
+      "prio": 2,
+      "wireless": true,
+      "hyper": true,
+      "udev_eligible": true,
+      "udev_group": "CompX ODM Ecosystem (VID 3554, 373b)",
+      "interface": {
+        "input_report_ids": [
+          "0x08"
+        ],
+        "output_report_ids": [
+          "0x08"
+        ]
+      },
+      "meta": {
+        "brand": "atk",
+        "dpi_min": 50,
+        "dpi_max": 30000,
+        "rates": [
+          125,
+          250,
+          500,
+          1000,
+          2000,
+          4000,
+          8000
+        ]
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:3554:f58c",
+      "model_key": "atk-vxe-mouse",
+      "profile_id": "compx_odm",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "3554",
+      "pid": "f58c",
+      "wpid": null,
+      "role": "wired",
+      "link": "USB cable",
+      "prio": 0,
+      "wireless": false,
+      "hyper": true,
+      "udev_eligible": true,
+      "udev_group": "CompX ODM Ecosystem (VID 3554, 373b)",
+      "interface": {
+        "input_report_ids": [
+          "0x08"
+        ],
+        "output_report_ids": [
+          "0x08"
+        ]
+      },
+      "meta": {
+        "brand": "atk",
+        "dpi_min": 50,
+        "dpi_max": 30000,
+        "rates": [
+          125,
+          250,
+          500,
+          1000,
+          2000,
+          4000,
+          8000
+        ]
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:3554:f58e",
+      "model_key": "atk-vxe-mouse",
+      "profile_id": "compx_odm",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "3554",
+      "pid": "f58e",
+      "wpid": null,
+      "role": "dongle",
+      "link": "Wireless dongle",
+      "prio": 2,
+      "wireless": true,
+      "hyper": true,
+      "udev_eligible": true,
+      "udev_group": "CompX ODM Ecosystem (VID 3554, 373b)",
+      "interface": {
+        "input_report_ids": [
+          "0x08"
+        ],
+        "output_report_ids": [
+          "0x08"
+        ]
+      },
+      "meta": {
+        "brand": "atk",
+        "dpi_min": 50,
+        "dpi_max": 30000,
+        "rates": [
+          125,
+          250,
+          500,
+          1000,
+          2000,
+          4000,
+          8000
+        ]
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:3554:f58f",
+      "model_key": "atk-vxe-mouse",
+      "profile_id": "compx_odm",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "3554",
+      "pid": "f58f",
+      "wpid": null,
+      "role": "dongle",
+      "link": "8K dongle",
+      "prio": 2,
+      "wireless": true,
+      "hyper": true,
+      "udev_eligible": true,
+      "udev_group": "CompX ODM Ecosystem (VID 3554, 373b)",
+      "interface": {
+        "input_report_ids": [
+          "0x08"
+        ],
+        "output_report_ids": [
+          "0x08"
+        ]
+      },
+      "meta": {
+        "brand": "atk",
+        "dpi_min": 50,
+        "dpi_max": 30000,
+        "rates": [
+          125,
+          250,
+          500,
+          1000,
+          2000,
+          4000,
+          8000
+        ]
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:3554:f5bb",
+      "model_key": "teevolution-terra-pro",
+      "profile_id": "compx_odm",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "3554",
+      "pid": "f5bb",
+      "wpid": null,
+      "role": "dongle",
+      "link": "Wireless dongle",
+      "prio": 2,
+      "wireless": true,
+      "hyper": true,
+      "udev_eligible": true,
+      "udev_group": "CompX ODM Ecosystem (VID 3554, 373b)",
+      "interface": {
+        "input_report_ids": [
+          "0x08"
+        ],
+        "output_report_ids": [
+          "0x08"
+        ]
+      },
+      "meta": {
+        "brand": "teevolution",
+        "dpi_min": 50,
+        "dpi_max": 42000,
+        "rates": [
+          125,
+          250,
+          500,
+          1000,
+          2000,
+          4000,
+          8000
+        ]
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:3554:f5f7",
+      "model_key": "scyrox-v8",
+      "profile_id": "compx_odm",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "3554",
+      "pid": "f5f7",
+      "wpid": null,
+      "role": "dongle",
+      "link": "8K dongle",
+      "prio": 2,
+      "wireless": true,
+      "hyper": true,
+      "udev_eligible": true,
+      "udev_group": "CompX ODM Ecosystem (VID 3554, 373b)",
+      "interface": {
+        "input_report_ids": [
+          "0x08"
+        ],
+        "output_report_ids": [
+          "0x08"
+        ]
+      },
+      "meta": {
+        "brand": "scyrox",
+        "dpi_min": 50,
+        "dpi_max": 30000,
+        "rates": [
+          125,
+          250,
+          500,
+          1000,
+          2000,
+          4000,
+          8000
+        ],
+        "model": "v8"
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:3554:fb56",
+      "model_key": "vgn-f2-master",
+      "profile_id": "compx_odm",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "3554",
+      "pid": "fb56",
+      "wpid": null,
+      "role": "dongle",
+      "link": "8K dongle",
+      "prio": 2,
+      "wireless": true,
+      "hyper": true,
+      "udev_eligible": true,
+      "udev_group": "CompX ODM Ecosystem (VID 3554, 373b)",
+      "interface": {
+        "input_report_ids": [
+          "0x08"
+        ],
+        "output_report_ids": [
+          "0x08"
+        ]
+      },
+      "meta": {
+        "brand": "vgn",
+        "dpi_min": 50,
+        "dpi_max": 26000,
+        "rates": [
+          125,
+          250,
+          500,
+          1000,
+          2000,
+          4000,
+          8000
+        ]
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:3554:fb57",
+      "model_key": "vgn-f2-master",
+      "profile_id": "compx_odm",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "3554",
+      "pid": "fb57",
+      "wpid": null,
+      "role": "wired",
+      "link": "USB cable",
+      "prio": 0,
+      "wireless": false,
+      "hyper": true,
+      "udev_eligible": true,
+      "udev_group": "CompX ODM Ecosystem (VID 3554, 373b)",
+      "interface": {
+        "input_report_ids": [
+          "0x08"
+        ],
+        "output_report_ids": [
+          "0x08"
+        ]
+      },
+      "meta": {
+        "brand": "vgn",
+        "dpi_min": 50,
+        "dpi_max": 26000,
+        "rates": [
+          125,
+          250,
+          500,
+          1000,
+          2000,
+          4000,
+          8000
+        ]
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:373b:1085",
+      "model_key": "vxe-r1-se-beken",
+      "profile_id": "compx_odm",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "373b",
+      "pid": "1085",
+      "wpid": null,
+      "role": "dongle",
+      "link": "1K dongle",
+      "prio": 2,
+      "wireless": true,
+      "hyper": false,
+      "udev_eligible": true,
+      "udev_group": "CompX ODM Ecosystem (VID 3554, 373b)",
+      "interface": {
+        "input_report_ids": [
+          "0x08"
+        ],
+        "output_report_ids": [
+          "0x08"
+        ]
+      },
+      "meta": {
+        "brand": "atk",
+        "dpi_min": 50,
+        "dpi_max": 18000,
+        "rates": [
+          250,
+          500,
+          1000
+        ]
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:373b:10c9",
+      "model_key": "atk-nearlink-mouse",
+      "profile_id": "compx_odm",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "373b",
+      "pid": "10c9",
+      "wpid": null,
+      "role": "dongle",
+      "link": "NearLink dongle",
+      "prio": 2,
+      "wireless": true,
+      "hyper": true,
+      "udev_eligible": true,
+      "udev_group": "CompX ODM Ecosystem (VID 3554, 373b)",
+      "interface": {
+        "input_report_ids": [
+          "0x08"
+        ],
+        "output_report_ids": [
+          "0x08"
+        ]
+      },
+      "meta": {
+        "brand": "atk",
+        "dpi_min": 50,
+        "dpi_max": 30000,
+        "rates": [
+          125,
+          250,
+          500,
+          1000,
+          2000,
+          4000,
+          8000
+        ]
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:373b:11d9",
+      "model_key": "atk-f1-ultimate-2-0",
+      "profile_id": "compx_odm",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "373b",
+      "pid": "11d9",
+      "wpid": null,
+      "role": "dongle",
+      "link": "8K dongle",
+      "prio": 2,
+      "wireless": true,
+      "hyper": true,
+      "udev_eligible": true,
+      "udev_group": "CompX ODM Ecosystem (VID 3554, 373b)",
+      "interface": {
+        "input_report_ids": [
+          "0x08"
+        ],
+        "output_report_ids": [
+          "0x08"
+        ]
+      },
+      "meta": {
+        "brand": "atk",
+        "dpi_min": 50,
+        "dpi_max": 42000,
+        "rates": [
+          125,
+          250,
+          500,
+          1000,
+          2000,
+          4000,
+          8000
+        ]
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:258a:0033",
+      "model_key": "glorious-model-d-d",
+      "profile_id": "glorious_sinowealth",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "258a",
+      "pid": "0033",
+      "wpid": null,
+      "role": "wired",
+      "link": "USB cable",
+      "prio": 1,
+      "wireless": false,
+      "hyper": false,
+      "udev_eligible": true,
+      "udev_group": "Glorious (VID 258a, 22d4, 320f, 3794, 093a)",
+      "interface": {
+        "usage_page": "0xff00",
+        "feature_report_ids": [
+          "0x05"
+        ],
+        "feature_report_ids_any": [
+          "0x04",
+          "0x06"
+        ]
+      },
+      "meta": {
+        "dpi_min": 100,
+        "dpi_max": 16000
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:258a:0036",
+      "model_key": "glorious-model-o-o",
+      "profile_id": "glorious_sinowealth",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "258a",
+      "pid": "0036",
+      "wpid": null,
+      "role": "wired",
+      "link": "USB cable",
+      "prio": 1,
+      "wireless": false,
+      "hyper": false,
+      "udev_eligible": true,
+      "udev_group": "Glorious (VID 258a, 22d4, 320f, 3794, 093a)",
+      "interface": {
+        "usage_page": "0xff00",
+        "feature_report_ids": [
+          "0x05"
+        ],
+        "feature_report_ids_any": [
+          "0x04",
+          "0x06"
+        ]
+      },
+      "meta": {
+        "dpi_min": 100,
+        "dpi_max": 16000
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:3794:a000",
+      "model_key": "glorious-model-o-eternal",
+      "profile_id": "glorious_sinowealth",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "3794",
+      "pid": "a000",
+      "wpid": null,
+      "role": "wired",
+      "link": "USB cable",
+      "prio": 1,
+      "wireless": false,
+      "hyper": false,
+      "udev_eligible": true,
+      "udev_group": "Glorious (VID 258a, 22d4, 320f, 3794, 093a)",
+      "interface": {
+        "usage_page": "0xff00",
+        "feature_report_ids": [
+          "0x05"
+        ],
+        "feature_report_ids_any": [
+          "0x04",
+          "0x06"
+        ]
+      },
+      "meta": {
+        "dpi_min": 100,
+        "dpi_max": 16000
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:258a:201b",
+      "model_key": "glorious-model-o-2-pro",
+      "profile_id": "glorious_core2",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "258a",
+      "pid": "201b",
+      "wpid": null,
+      "role": "wired",
+      "link": "USB cable",
+      "prio": 0,
+      "wireless": false,
+      "hyper": true,
+      "udev_eligible": true,
+      "udev_group": "Glorious (VID 258a, 22d4, 320f, 3794, 093a)",
+      "interface": {
+        "usage_page": "0xffff",
+        "feature_report_ids": [
+          "0x00"
+        ],
+        "min_feature_bytes": 64
+      },
+      "meta": {
+        "max_poll": 8000,
+        "dpi_min": 50,
+        "dpi_max": 26000
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:258a:201c",
+      "model_key": "glorious-model-d-2-pro",
+      "profile_id": "glorious_core2",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "258a",
+      "pid": "201c",
+      "wpid": null,
+      "role": "wired",
+      "link": "USB cable",
+      "prio": 0,
+      "wireless": false,
+      "hyper": true,
+      "udev_eligible": true,
+      "udev_group": "Glorious (VID 258a, 22d4, 320f, 3794, 093a)",
+      "interface": {
+        "usage_page": "0xffff",
+        "feature_report_ids": [
+          "0x00"
+        ],
+        "min_feature_bytes": 64
+      },
+      "meta": {
+        "max_poll": 8000,
+        "dpi_min": 50,
+        "dpi_max": 26000
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:258a:2035",
+      "model_key": "glorious-model-o-2-pro-4k-8k",
+      "profile_id": "glorious_core2",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "258a",
+      "pid": "2035",
+      "wpid": null,
+      "role": "dongle",
+      "link": "Wireless dongle",
+      "prio": 2,
+      "wireless": true,
+      "hyper": true,
+      "udev_eligible": true,
+      "udev_group": "Glorious (VID 258a, 22d4, 320f, 3794, 093a)",
+      "interface": {
+        "usage_page": "0xffff",
+        "feature_report_ids": [
+          "0x00"
+        ],
+        "min_feature_bytes": 64
+      },
+      "meta": {
+        "max_poll": 4000,
+        "dpi_min": 50,
+        "dpi_max": 26000
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:258a:2036",
+      "model_key": "glorious-model-d-2-pro-4k-8k",
+      "profile_id": "glorious_core2",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "258a",
+      "pid": "2036",
+      "wpid": null,
+      "role": "dongle",
+      "link": "Wireless dongle",
+      "prio": 2,
+      "wireless": true,
+      "hyper": true,
+      "udev_eligible": true,
+      "udev_group": "Glorious (VID 258a, 22d4, 320f, 3794, 093a)",
+      "interface": {
+        "usage_page": "0xffff",
+        "feature_report_ids": [
+          "0x00"
+        ],
+        "min_feature_bytes": 64
+      },
+      "meta": {
+        "max_poll": 4000,
+        "dpi_min": 50,
+        "dpi_max": 26000
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:22d4:1503",
+      "model_key": "glorious-model-i",
+      "profile_id": "glorious_classic",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "22d4",
+      "pid": "1503",
+      "wpid": null,
+      "role": "wired",
+      "link": "USB cable",
+      "prio": 0,
+      "wireless": false,
+      "hyper": false,
+      "udev_eligible": true,
+      "udev_group": "Glorious (VID 258a, 22d4, 320f, 3794, 093a)",
+      "interface": {
+        "usage_pages": [
+          "0xff01",
+          "0xff00",
+          "0xffff"
+        ],
+        "requires_any_feature_report": true
+      },
+      "meta": {
+        "gen": "legacy",
+        "dpi_min": 100,
+        "dpi_max": 19000
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:258a:2011",
+      "model_key": "glorious-model-o-wireless",
+      "profile_id": "glorious_classic",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "258a",
+      "pid": "2011",
+      "wpid": null,
+      "role": "wired",
+      "link": "USB cable",
+      "prio": 2,
+      "wireless": true,
+      "hyper": false,
+      "udev_eligible": true,
+      "udev_group": "Glorious (VID 258a, 22d4, 320f, 3794, 093a)",
+      "interface": {
+        "usage_pages": [
+          "0xff01",
+          "0xff00",
+          "0xffff"
+        ],
+        "requires_any_feature_report": true
+      },
+      "meta": {
+        "gen": "legacy",
+        "dpi_min": 100,
+        "dpi_max": 19000
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:258a:2012",
+      "model_key": "glorious-model-d-wireless",
+      "profile_id": "glorious_classic",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "258a",
+      "pid": "2012",
+      "wpid": null,
+      "role": "wired",
+      "link": "USB cable",
+      "prio": 2,
+      "wireless": true,
+      "hyper": false,
+      "udev_eligible": true,
+      "udev_group": "Glorious (VID 258a, 22d4, 320f, 3794, 093a)",
+      "interface": {
+        "usage_pages": [
+          "0xff01",
+          "0xff00",
+          "0xffff"
+        ],
+        "requires_any_feature_report": true
+      },
+      "meta": {
+        "gen": "legacy",
+        "dpi_min": 100,
+        "dpi_max": 19000
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:258a:2013",
+      "model_key": "glorious-model-o-wireless",
+      "profile_id": "glorious_classic",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "258a",
+      "pid": "2013",
+      "wpid": null,
+      "role": "wired",
+      "link": "USB cable",
+      "prio": 2,
+      "wireless": true,
+      "hyper": false,
+      "udev_eligible": true,
+      "udev_group": "Glorious (VID 258a, 22d4, 320f, 3794, 093a)",
+      "interface": {
+        "usage_pages": [
+          "0xff01",
+          "0xff00",
+          "0xffff"
+        ],
+        "requires_any_feature_report": true
+      },
+      "meta": {
+        "gen": "legacy",
+        "dpi_min": 100,
+        "dpi_max": 19000
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:258a:2014",
+      "model_key": "glorious-model-d-wireless",
+      "profile_id": "glorious_classic",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "258a",
+      "pid": "2014",
+      "wpid": null,
+      "role": "wired",
+      "link": "USB cable",
+      "prio": 2,
+      "wireless": true,
+      "hyper": false,
+      "udev_eligible": true,
+      "udev_group": "Glorious (VID 258a, 22d4, 320f, 3794, 093a)",
+      "interface": {
+        "usage_pages": [
+          "0xff01",
+          "0xff00",
+          "0xffff"
+        ],
+        "requires_any_feature_report": true
+      },
+      "meta": {
+        "gen": "legacy",
+        "dpi_min": 100,
+        "dpi_max": 19000
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:258a:2015",
+      "model_key": "glorious-series-one-pro",
+      "profile_id": "glorious_classic",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "258a",
+      "pid": "2015",
+      "wpid": null,
+      "role": "wired",
+      "link": "USB cable",
+      "prio": 2,
+      "wireless": true,
+      "hyper": false,
+      "udev_eligible": true,
+      "udev_group": "Glorious (VID 258a, 22d4, 320f, 3794, 093a)",
+      "interface": {
+        "usage_pages": [
+          "0xff01",
+          "0xff00",
+          "0xffff"
+        ],
+        "requires_any_feature_report": true
+      },
+      "meta": {
+        "gen": "legacy",
+        "dpi_min": 100,
+        "dpi_max": 19000
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:258a:2018",
+      "model_key": "glorious-model-i-2-wireless",
+      "profile_id": "glorious_classic",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "258a",
+      "pid": "2018",
+      "wpid": null,
+      "role": "wired",
+      "link": "USB cable",
+      "prio": 2,
+      "wireless": true,
+      "hyper": false,
+      "udev_eligible": true,
+      "udev_group": "Glorious (VID 258a, 22d4, 320f, 3794, 093a)",
+      "interface": {
+        "usage_pages": [
+          "0xff01",
+          "0xff00",
+          "0xffff"
+        ],
+        "requires_any_feature_report": true
+      },
+      "meta": {
+        "gen": "legacy",
+        "dpi_min": 100,
+        "dpi_max": 19000
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:258a:2019",
+      "model_key": "glorious-model-o-2-wireless",
+      "profile_id": "glorious_classic",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "258a",
+      "pid": "2019",
+      "wpid": null,
+      "role": "wired",
+      "link": "USB cable",
+      "prio": 2,
+      "wireless": true,
+      "hyper": false,
+      "udev_eligible": true,
+      "udev_group": "Glorious (VID 258a, 22d4, 320f, 3794, 093a)",
+      "interface": {
+        "usage_pages": [
+          "0xff01",
+          "0xff00",
+          "0xffff"
+        ],
+        "requires_any_feature_report": true
+      },
+      "meta": {
+        "gen": "legacy",
+        "dpi_min": 100,
+        "dpi_max": 19000
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:258a:201a",
+      "model_key": "glorious-model-d-2-wireless",
+      "profile_id": "glorious_classic",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "258a",
+      "pid": "201a",
+      "wpid": null,
+      "role": "wired",
+      "link": "USB cable",
+      "prio": 2,
+      "wireless": true,
+      "hyper": false,
+      "udev_eligible": true,
+      "udev_group": "Glorious (VID 258a, 22d4, 320f, 3794, 093a)",
+      "interface": {
+        "usage_pages": [
+          "0xff01",
+          "0xff00",
+          "0xffff"
+        ],
+        "requires_any_feature_report": true
+      },
+      "meta": {
+        "gen": "legacy",
+        "dpi_min": 100,
+        "dpi_max": 19000
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:258a:201d",
+      "model_key": "glorious-model-o-2",
+      "profile_id": "glorious_classic",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "258a",
+      "pid": "201d",
+      "wpid": null,
+      "role": "wired",
+      "link": "USB cable",
+      "prio": 0,
+      "wireless": false,
+      "hyper": false,
+      "udev_eligible": true,
+      "udev_group": "Glorious (VID 258a, 22d4, 320f, 3794, 093a)",
+      "interface": {
+        "usage_pages": [
+          "0xff01",
+          "0xff00",
+          "0xffff"
+        ],
+        "requires_any_feature_report": true
+      },
+      "meta": {
+        "gen": "legacy",
+        "dpi_min": 100,
+        "dpi_max": 19000
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:258a:2022",
+      "model_key": "glorious-model-o-wireless",
+      "profile_id": "glorious_classic",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "258a",
+      "pid": "2022",
+      "wpid": null,
+      "role": "dongle",
+      "link": "Wireless dongle",
+      "prio": 2,
+      "wireless": true,
+      "hyper": false,
+      "udev_eligible": true,
+      "udev_group": "Glorious (VID 258a, 22d4, 320f, 3794, 093a)",
+      "interface": {
+        "usage_pages": [
+          "0xff01",
+          "0xff00",
+          "0xffff"
+        ],
+        "requires_any_feature_report": true
+      },
+      "meta": {
+        "gen": "legacy",
+        "dpi_min": 100,
+        "dpi_max": 19000
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:258a:2023",
+      "model_key": "glorious-model-d-wireless",
+      "profile_id": "glorious_classic",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "258a",
+      "pid": "2023",
+      "wpid": null,
+      "role": "dongle",
+      "link": "Wireless dongle",
+      "prio": 2,
+      "wireless": true,
+      "hyper": false,
+      "udev_eligible": true,
+      "udev_group": "Glorious (VID 258a, 22d4, 320f, 3794, 093a)",
+      "interface": {
+        "usage_pages": [
+          "0xff01",
+          "0xff00",
+          "0xffff"
+        ],
+        "requires_any_feature_report": true
+      },
+      "meta": {
+        "gen": "legacy",
+        "dpi_min": 100,
+        "dpi_max": 19000
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:258a:2024",
+      "model_key": "glorious-model-o-wireless",
+      "profile_id": "glorious_classic",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "258a",
+      "pid": "2024",
+      "wpid": null,
+      "role": "dongle",
+      "link": "Wireless dongle",
+      "prio": 2,
+      "wireless": true,
+      "hyper": false,
+      "udev_eligible": true,
+      "udev_group": "Glorious (VID 258a, 22d4, 320f, 3794, 093a)",
+      "interface": {
+        "usage_pages": [
+          "0xff01",
+          "0xff00",
+          "0xffff"
+        ],
+        "requires_any_feature_report": true
+      },
+      "meta": {
+        "gen": "legacy",
+        "dpi_min": 100,
+        "dpi_max": 19000
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:258a:2025",
+      "model_key": "glorious-model-d-wireless",
+      "profile_id": "glorious_classic",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "258a",
+      "pid": "2025",
+      "wpid": null,
+      "role": "dongle",
+      "link": "Wireless dongle",
+      "prio": 2,
+      "wireless": true,
+      "hyper": false,
+      "udev_eligible": true,
+      "udev_group": "Glorious (VID 258a, 22d4, 320f, 3794, 093a)",
+      "interface": {
+        "usage_pages": [
+          "0xff01",
+          "0xff00",
+          "0xffff"
+        ],
+        "requires_any_feature_report": true
+      },
+      "meta": {
+        "gen": "legacy",
+        "dpi_min": 100,
+        "dpi_max": 19000
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:258a:2027",
+      "model_key": "glorious-series-one-pro",
+      "profile_id": "glorious_classic",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "258a",
+      "pid": "2027",
+      "wpid": null,
+      "role": "dongle",
+      "link": "Wireless dongle",
+      "prio": 2,
+      "wireless": true,
+      "hyper": false,
+      "udev_eligible": true,
+      "udev_group": "Glorious (VID 258a, 22d4, 320f, 3794, 093a)",
+      "interface": {
+        "usage_pages": [
+          "0xff01",
+          "0xff00",
+          "0xffff"
+        ],
+        "requires_any_feature_report": true
+      },
+      "meta": {
+        "gen": "legacy",
+        "dpi_min": 100,
+        "dpi_max": 19000
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:258a:2031",
+      "model_key": "glorious-model-i-2-wireless",
+      "profile_id": "glorious_classic",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "258a",
+      "pid": "2031",
+      "wpid": null,
+      "role": "dongle",
+      "link": "Wireless dongle",
+      "prio": 2,
+      "wireless": true,
+      "hyper": false,
+      "udev_eligible": true,
+      "udev_group": "Glorious (VID 258a, 22d4, 320f, 3794, 093a)",
+      "interface": {
+        "usage_pages": [
+          "0xff01",
+          "0xff00",
+          "0xffff"
+        ],
+        "requires_any_feature_report": true
+      },
+      "meta": {
+        "gen": "legacy",
+        "dpi_min": 100,
+        "dpi_max": 19000
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:258a:2033",
+      "model_key": "glorious-model-o-2-wireless",
+      "profile_id": "glorious_classic",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "258a",
+      "pid": "2033",
+      "wpid": null,
+      "role": "dongle",
+      "link": "Wireless dongle",
+      "prio": 2,
+      "wireless": true,
+      "hyper": false,
+      "udev_eligible": true,
+      "udev_group": "Glorious (VID 258a, 22d4, 320f, 3794, 093a)",
+      "interface": {
+        "usage_pages": [
+          "0xff01",
+          "0xff00",
+          "0xffff"
+        ],
+        "requires_any_feature_report": true
+      },
+      "meta": {
+        "gen": "legacy",
+        "dpi_min": 100,
+        "dpi_max": 19000
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:258a:2034",
+      "model_key": "glorious-model-d-2-wireless",
+      "profile_id": "glorious_classic",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "258a",
+      "pid": "2034",
+      "wpid": null,
+      "role": "dongle",
+      "link": "Wireless dongle",
+      "prio": 2,
+      "wireless": true,
+      "hyper": false,
+      "udev_eligible": true,
+      "udev_group": "Glorious (VID 258a, 22d4, 320f, 3794, 093a)",
+      "interface": {
+        "usage_pages": [
+          "0xff01",
+          "0xff00",
+          "0xffff"
+        ],
+        "requires_any_feature_report": true
+      },
+      "meta": {
+        "gen": "legacy",
+        "dpi_min": 100,
+        "dpi_max": 19000
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:258a:2039",
+      "model_key": "glorious-forge-mouse",
+      "profile_id": "glorious_classic",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "258a",
+      "pid": "2039",
+      "wpid": null,
+      "role": "dual",
+      "link": "USB / Wireless",
+      "prio": 2,
+      "wireless": true,
+      "hyper": false,
+      "udev_eligible": true,
+      "udev_group": "Glorious (VID 258a, 22d4, 320f, 3794, 093a)",
+      "interface": {
+        "usage_pages": [
+          "0xff01",
+          "0xff00",
+          "0xffff"
+        ],
+        "requires_any_feature_report": true
+      },
+      "meta": {
+        "gen": "legacy",
+        "dpi_min": 100,
+        "dpi_max": 19000
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:320f:821a",
+      "model_key": "glorious-model-o-2",
+      "profile_id": "glorious_classic",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "320f",
+      "pid": "821a",
+      "wpid": null,
+      "role": "wired",
+      "link": "USB cable",
+      "prio": 0,
+      "wireless": false,
+      "hyper": false,
+      "udev_eligible": true,
+      "udev_group": "Glorious (VID 258a, 22d4, 320f, 3794, 093a)",
+      "interface": {
+        "usage_pages": [
+          "0xff01",
+          "0xff00",
+          "0xffff"
+        ],
+        "requires_any_feature_report": true
+      },
+      "meta": {
+        "gen": "legacy",
+        "dpi_min": 100,
+        "dpi_max": 19000
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:320f:823a",
+      "model_key": "glorious-model-o-2-v2",
+      "profile_id": "glorious_classic",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "320f",
+      "pid": "823a",
+      "wpid": null,
+      "role": "wired",
+      "link": "USB cable",
+      "prio": 0,
+      "wireless": false,
+      "hyper": false,
+      "udev_eligible": true,
+      "udev_group": "Glorious (VID 258a, 22d4, 320f, 3794, 093a)",
+      "interface": {
+        "usage_pages": [
+          "0xff01",
+          "0xff00",
+          "0xffff"
+        ],
+        "requires_any_feature_report": true
+      },
+      "meta": {
+        "gen": "legacy",
+        "dpi_min": 100,
+        "dpi_max": 19000
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:320f:831a",
+      "model_key": "glorious-model-d-2",
+      "profile_id": "glorious_classic",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "320f",
+      "pid": "831a",
+      "wpid": null,
+      "role": "wired",
+      "link": "USB cable",
+      "prio": 0,
+      "wireless": false,
+      "hyper": false,
+      "udev_eligible": true,
+      "udev_group": "Glorious (VID 258a, 22d4, 320f, 3794, 093a)",
+      "interface": {
+        "usage_pages": [
+          "0xff01",
+          "0xff00",
+          "0xffff"
+        ],
+        "requires_any_feature_report": true
+      },
+      "meta": {
+        "gen": "legacy",
+        "dpi_min": 100,
+        "dpi_max": 19000
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:3794:a300",
+      "model_key": "glorious-classic-core-2",
+      "profile_id": "glorious_classic",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "3794",
+      "pid": "a300",
+      "wpid": null,
+      "role": "wired",
+      "link": "USB cable",
+      "prio": 2,
+      "wireless": true,
+      "hyper": false,
+      "udev_eligible": true,
+      "udev_group": "Glorious (VID 258a, 22d4, 320f, 3794, 093a)",
+      "interface": {
+        "usage_pages": [
+          "0xff01",
+          "0xff00",
+          "0xffff"
+        ],
+        "requires_any_feature_report": true
+      },
+      "meta": {
+        "gen": "core2",
+        "dpi_min": 100,
+        "dpi_max": 19000
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:3794:a312",
+      "model_key": "glorious-classic-core-2",
+      "profile_id": "glorious_classic",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "3794",
+      "pid": "a312",
+      "wpid": null,
+      "role": "dongle",
+      "link": "Wireless dongle",
+      "prio": 2,
+      "wireless": true,
+      "hyper": false,
+      "udev_eligible": true,
+      "udev_group": "Glorious (VID 258a, 22d4, 320f, 3794, 093a)",
+      "interface": {
+        "usage_pages": [
+          "0xff01",
+          "0xff00",
+          "0xffff"
+        ],
+        "requires_any_feature_report": true
+      },
+      "meta": {
+        "gen": "core2",
+        "dpi_min": 100,
+        "dpi_max": 19000
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:093a:821b",
+      "model_key": "glorious-model-o-2-mini",
+      "profile_id": "glorious_pixart",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "093a",
+      "pid": "821b",
+      "wpid": null,
+      "role": "wired",
+      "link": "USB cable",
+      "prio": 0,
+      "wireless": false,
+      "hyper": false,
+      "udev_eligible": true,
+      "udev_group": "Glorious (VID 258a, 22d4, 320f, 3794, 093a)",
+      "interface": {
+        "usage_page": "0xff00",
+        "feature_report_ids": [
+          "0x03"
+        ]
+      },
+      "meta": {
+        "dpi_min": 100,
+        "dpi_max": 26000
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:093a:821d",
+      "model_key": "glorious-model-o-2-mini",
+      "profile_id": "glorious_pixart",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "093a",
+      "pid": "821d",
+      "wpid": null,
+      "role": "dongle",
+      "link": "Wireless dongle",
+      "prio": 2,
+      "wireless": true,
+      "hyper": false,
+      "udev_eligible": true,
+      "udev_group": "Glorious (VID 258a, 22d4, 320f, 3794, 093a)",
+      "interface": {
+        "usage_page": "0xff00",
+        "feature_report_ids": [
+          "0x03"
+        ]
+      },
+      "meta": {
+        "dpi_min": 100,
+        "dpi_max": 26000
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:093a:822a",
+      "model_key": "glorious-model-o-2-mini-wireless",
+      "profile_id": "glorious_pixart",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "093a",
+      "pid": "822a",
+      "wpid": null,
+      "role": "wired",
+      "link": "USB cable",
+      "prio": 2,
+      "wireless": true,
+      "hyper": false,
+      "udev_eligible": true,
+      "udev_group": "Glorious (VID 258a, 22d4, 320f, 3794, 093a)",
+      "interface": {
+        "usage_page": "0xff00",
+        "feature_report_ids": [
+          "0x03"
+        ]
+      },
+      "meta": {
+        "dpi_min": 100,
+        "dpi_max": 26000
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:093a:822b",
+      "model_key": "glorious-model-o-2-mini-wireless",
+      "profile_id": "glorious_pixart",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "093a",
+      "pid": "822b",
+      "wpid": null,
+      "role": "dongle",
+      "link": "Wireless dongle",
+      "prio": 2,
+      "wireless": true,
+      "hyper": false,
+      "udev_eligible": true,
+      "udev_group": "Glorious (VID 258a, 22d4, 320f, 3794, 093a)",
+      "interface": {
+        "usage_page": "0xff00",
+        "feature_report_ids": [
+          "0x03"
+        ]
+      },
+      "meta": {
+        "dpi_min": 100,
+        "dpi_max": 26000
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:093a:822d",
+      "model_key": "glorious-series-2-pro",
+      "profile_id": "glorious_pixart",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "093a",
+      "pid": "822d",
+      "wpid": null,
+      "role": "wired",
+      "link": "USB cable",
+      "prio": 2,
+      "wireless": true,
+      "hyper": false,
+      "udev_eligible": true,
+      "udev_group": "Glorious (VID 258a, 22d4, 320f, 3794, 093a)",
+      "interface": {
+        "usage_page": "0xff00",
+        "feature_report_ids": [
+          "0x03"
+        ]
+      },
+      "meta": {
+        "dpi_min": 100,
+        "dpi_max": 26000
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:093a:824a",
+      "model_key": "glorious-series-2-pro",
+      "profile_id": "glorious_pixart",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "093a",
+      "pid": "824a",
+      "wpid": null,
+      "role": "dongle",
+      "link": "Wireless dongle",
+      "prio": 2,
+      "wireless": true,
+      "hyper": false,
+      "udev_eligible": true,
+      "udev_group": "Glorious (VID 258a, 22d4, 320f, 3794, 093a)",
+      "interface": {
+        "usage_page": "0xff00",
+        "feature_report_ids": [
+          "0x03"
+        ]
+      },
+      "meta": {
+        "dpi_min": 100,
+        "dpi_max": 26000
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:093a:824b",
+      "model_key": "glorious-model-d-2-mini",
+      "profile_id": "glorious_pixart",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "093a",
+      "pid": "824b",
+      "wpid": null,
+      "role": "wired",
+      "link": "USB cable",
+      "prio": 0,
+      "wireless": false,
+      "hyper": false,
+      "udev_eligible": true,
+      "udev_group": "Glorious (VID 258a, 22d4, 320f, 3794, 093a)",
+      "interface": {
+        "usage_page": "0xff00",
+        "feature_report_ids": [
+          "0x03"
+        ]
+      },
+      "meta": {
+        "dpi_min": 100,
+        "dpi_max": 26000
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:093a:824d",
+      "model_key": "glorious-model-d-2-mini",
+      "profile_id": "glorious_pixart",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "093a",
+      "pid": "824d",
+      "wpid": null,
+      "role": "dongle",
+      "link": "Wireless dongle",
+      "prio": 2,
+      "wireless": true,
+      "hyper": false,
+      "udev_eligible": true,
+      "udev_group": "Glorious (VID 258a, 22d4, 320f, 3794, 093a)",
+      "interface": {
+        "usage_page": "0xff00",
+        "feature_report_ids": [
+          "0x03"
+        ]
+      },
+      "meta": {
+        "dpi_min": 100,
+        "dpi_max": 26000
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:093a:825a",
+      "model_key": "glorious-model-d-2-mini-wireless",
+      "profile_id": "glorious_pixart",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "093a",
+      "pid": "825a",
+      "wpid": null,
+      "role": "dongle",
+      "link": "Wireless dongle",
+      "prio": 2,
+      "wireless": true,
+      "hyper": false,
+      "udev_eligible": true,
+      "udev_group": "Glorious (VID 258a, 22d4, 320f, 3794, 093a)",
+      "interface": {
+        "usage_page": "0xff00",
+        "feature_report_ids": [
+          "0x03"
+        ]
+      },
+      "meta": {
+        "dpi_min": 100,
+        "dpi_max": 26000
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:093a:826a",
+      "model_key": "glorious-model-o-3",
+      "profile_id": "glorious_pixart",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "093a",
+      "pid": "826a",
+      "wpid": null,
+      "role": "wired",
+      "link": "USB cable",
+      "prio": 0,
+      "wireless": false,
+      "hyper": false,
+      "udev_eligible": true,
+      "udev_group": "Glorious (VID 258a, 22d4, 320f, 3794, 093a)",
+      "interface": {
+        "usage_page": "0xff00",
+        "feature_report_ids": [
+          "0x03"
+        ]
+      },
+      "meta": {
+        "dpi_min": 100,
+        "dpi_max": 26000
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:093a:826b",
+      "model_key": "glorious-model-o-3-wireless",
+      "profile_id": "glorious_pixart",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "093a",
+      "pid": "826b",
+      "wpid": null,
+      "role": "wired",
+      "link": "USB cable",
+      "prio": 2,
+      "wireless": true,
+      "hyper": false,
+      "udev_eligible": true,
+      "udev_group": "Glorious (VID 258a, 22d4, 320f, 3794, 093a)",
+      "interface": {
+        "usage_page": "0xff00",
+        "feature_report_ids": [
+          "0x03"
+        ]
+      },
+      "meta": {
+        "dpi_min": 100,
+        "dpi_max": 26000
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:093a:826d",
+      "model_key": "glorious-model-o-3-wireless",
+      "profile_id": "glorious_pixart",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "093a",
+      "pid": "826d",
+      "wpid": null,
+      "role": "dongle",
+      "link": "Wireless dongle",
+      "prio": 2,
+      "wireless": true,
+      "hyper": false,
+      "udev_eligible": true,
+      "udev_group": "Glorious (VID 258a, 22d4, 320f, 3794, 093a)",
+      "interface": {
+        "usage_page": "0xff00",
+        "feature_report_ids": [
+          "0x03"
+        ]
+      },
+      "meta": {
+        "dpi_min": 100,
+        "dpi_max": 26000
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:093a:827a",
+      "model_key": "glorious-model-d-3-wireless",
+      "profile_id": "glorious_pixart",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "093a",
+      "pid": "827a",
+      "wpid": null,
+      "role": "dongle",
+      "link": "Wireless dongle",
+      "prio": 2,
+      "wireless": true,
+      "hyper": false,
+      "udev_eligible": true,
+      "udev_group": "Glorious (VID 258a, 22d4, 320f, 3794, 093a)",
+      "interface": {
+        "usage_page": "0xff00",
+        "feature_report_ids": [
+          "0x03"
+        ]
+      },
+      "meta": {
+        "dpi_min": 100,
+        "dpi_max": 26000
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:093a:832a",
+      "model_key": "glorious-pixart-mouse",
+      "profile_id": "glorious_pixart",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "093a",
+      "pid": "832a",
+      "wpid": null,
+      "role": "dual",
+      "link": "USB / Wireless",
+      "prio": 2,
+      "wireless": true,
+      "hyper": false,
+      "udev_eligible": true,
+      "udev_group": "Glorious (VID 258a, 22d4, 320f, 3794, 093a)",
+      "interface": {
+        "usage_page": "0xff00",
+        "feature_report_ids": [
+          "0x03"
+        ]
+      },
+      "meta": {
+        "dpi_min": 100,
+        "dpi_max": 26000
+      },
+      "source": "mousetool_baseline"
+    },
+    {
+      "id": "usb:31e3:1310",
+      "model_key": "wooting-60he",
+      "profile_id": "generic_tier0",
+      "bus": "usb",
+      "id_namespace": "usb_pid",
+      "vid": "31e3",
+      "pid": "1310",
+      "wpid": null,
+      "role": "keyboard",
+      "link": "USB keyboard",
+      "prio": 9,
+      "wireless": false,
+      "hyper": false,
+      "udev_eligible": false,
+      "udev_group": "Excluded keyboards",
+      "interface": {},
+      "meta": {},
+      "source": "mousetool_baseline"
+    }
+  ],
+  "atk_products": [
+    {
+      "cid": 1,
+      "mid": 8,
+      "name": "ATK Blazing Sky F1 Ultimate 2.0",
+      "sensor": "PAW3950Ultra",
+      "dpi_max": 42000,
+      "rates": [
+        125,
+        250,
+        500,
+        1000,
+        2000,
+        4000,
+        8000
+      ],
+      "max_stages": 6,
+      "is_r1": false,
+      "dpi6": false,
+      "anti_mistouch": true,
+      "source": "mousetool_baseline"
+    },
+    {
+      "cid": 1,
+      "mid": 31,
+      "name": "ATK A9 Mini+",
+      "sensor": "PAW3955Master",
+      "dpi_max": 50000,
+      "rates": [
+        125,
+        250,
+        500,
+        1000,
+        2000,
+        4000,
+        8000
+      ],
+      "max_stages": 6,
+      "is_r1": false,
+      "dpi6": true,
+      "anti_mistouch": false,
+      "source": "mousetool_baseline"
+    },
+    {
+      "cid": 1,
+      "mid": 52,
+      "name": "ATK A9 Mini+",
+      "sensor": "PAW3955Master",
+      "dpi_max": 50000,
+      "rates": [
+        125,
+        250,
+        500,
+        1000,
+        2000,
+        4000,
+        8000
+      ],
+      "max_stages": 6,
+      "is_r1": false,
+      "dpi6": true,
+      "anti_mistouch": false,
+      "source": "mousetool_baseline"
+    },
+    {
+      "cid": 2,
+      "mid": 11,
+      "name": "VXE R1",
+      "sensor": "PAW3395",
+      "dpi_max": 26000,
+      "rates": [
+        125,
+        250,
+        500,
+        1000,
+        2000,
+        4000
+      ],
+      "max_stages": 4,
+      "is_r1": true,
+      "dpi6": false,
+      "anti_mistouch": false,
+      "source": "mousetool_baseline"
+    },
+    {
+      "cid": 2,
+      "mid": 12,
+      "name": "VXE R1",
+      "sensor": "PAW3395",
+      "dpi_max": 26000,
+      "rates": [
+        125,
+        250,
+        500,
+        1000,
+        2000,
+        4000
+      ],
+      "max_stages": 4,
+      "is_r1": true,
+      "dpi6": false,
+      "anti_mistouch": false,
+      "source": "mousetool_baseline"
+    },
+    {
+      "cid": 2,
+      "mid": 27,
+      "name": "VXE R1 Pro Max",
+      "sensor": "PAW3395",
+      "dpi_max": 26000,
+      "rates": [
+        125,
+        250,
+        500,
+        1000,
+        2000,
+        4000
+      ],
+      "max_stages": 4,
+      "is_r1": true,
+      "dpi6": false,
+      "anti_mistouch": false,
+      "source": "mousetool_baseline"
+    },
+    {
+      "cid": 2,
+      "mid": 32,
+      "name": "VXE R1 SE+",
+      "sensor": "PAW3395SE",
+      "dpi_max": 18000,
+      "rates": [
+        250,
+        500,
+        1000
+      ],
+      "max_stages": 4,
+      "is_r1": true,
+      "dpi6": false,
+      "anti_mistouch": false,
+      "source": "mousetool_baseline"
+    },
+    {
+      "cid": 2,
+      "mid": 39,
+      "name": "ATK Blazing Sky X1 Pro Max",
+      "sensor": "PAW3950",
+      "dpi_max": 42000,
+      "rates": [
+        125,
+        250,
+        500,
+        1000,
+        2000,
+        4000,
+        8000
+      ],
+      "max_stages": 6,
+      "is_r1": false,
+      "dpi6": false,
+      "anti_mistouch": false,
+      "source": "mousetool_baseline"
+    },
+    {
+      "cid": 2,
+      "mid": 83,
+      "name": "ATK A9 Plus NearLink",
+      "sensor": "PAW3395",
+      "dpi_max": 26000,
+      "rates": [
+        125,
+        250,
+        500,
+        1000
+      ],
+      "max_stages": 6,
+      "is_r1": false,
+      "dpi6": false,
+      "anti_mistouch": false,
+      "source": "mousetool_baseline"
+    }
+  ]
+}

@@ -1,8 +1,8 @@
 // Mouse Tool web UI entry point (native ES modules, zero build step)
 import { createAccelController } from "./accel_graph.js";
+import { groupHidTargets } from "./drivers/classifier.js";
 import {
   describeHidCollections,
-  findCollection,
   fmtHz,
   hex,
   hex4,
@@ -11,56 +11,39 @@ import {
   vpKey,
 } from "./drivers/common.js";
 import {
-  EGG_DEVICES,
   EGG_GLASS_LOD,
   EGG_OFF,
-  EGG_REPORT,
-  EGG_VID,
-  EGG_WE_DEVICES,
-  classifyEgg,
   eggClampCpi,
   makeEggApi,
 } from "./drivers/egg.js";
 import {
-  GLORIOUS_CLASSIC,
-  GLORIOUS_CORE2,
-  GLORIOUS_PIXART,
-  GLORIOUS_SINOWEALTH,
-  classifyGlorious,
   makeGloriousClassicApi,
   makeGloriousCore2Api,
   makeGloriousPixartApi,
   makeGloriousSinowealthApi,
 } from "./drivers/glorious.js";
+import { makeHidppApi } from "./drivers/logitech.js";
 import {
-  LOGI_DEVICES,
-  LOGI_VID,
-  classifyLogitech,
-  makeHidppApi,
-} from "./drivers/logitech.js";
-import {
-  ARESON_DEVICES,
-  ARESON_VID,
-  ATK_VID,
-  COMPX_DEVICES,
-  COMPX_VID,
-  PULSAR_VID,
-  classifyPulsar,
   makeCompxApi,
   makePulsarProApi,
   makePulsarXs1Api,
 } from "./drivers/pulsar.js";
+import { makeRazerApi } from "./drivers/razer.js";
 import {
-  DEVICES,
-  VID,
-  classifyRazer,
-  makeRazerApi,
-} from "./drivers/razer.js";
+  getSupportedFilters,
+  loadRegistry,
+  tierLabel,
+} from "./drivers/registry.js";
 import {
   fetchHelperBattery,
   fetchHelperStatus,
   postHelperBattery,
 } from "./helper_client.js";
+
+const registryReady = loadRegistry().catch((e) => {
+  console.error("Failed to load /devices/devices.json:", e);
+  return null;
+});
 
 const $ = (id) => document.getElementById(id);
 
@@ -116,15 +99,17 @@ function toast(msg, err = false) {
 // ======================================================================
 function makeGenericApi(sess) {
   const key = `mousetool.genericDpi.${hex4(sess.vid)}:${hex4(sess.pid)}`;
+  const readLocal = () => {
+    const v = parseInt(localStorage.getItem(key) || "800", 10) || 800;
+    return [v, v];
+  };
   return {
     fastKeys: [],
     slowKeys: [],
+    init: async () => { sess.S.dpi = readLocal(); },
     firmware: async () => "–",
     serial: async () => sess.dev.serialNumber || "",
-    getDpi: async () => {
-      const v = parseInt(localStorage.getItem(key) || "800", 10) || 800;
-      return [v, v];
-    },
+    getDpi: async () => readLocal(),
     setGenericDpi: (v) => { localStorage.setItem(key, String(v)); sess.S.dpi = [v, v]; },
   };
 }
@@ -144,6 +129,15 @@ function setState(key, kind, msg = "") {
 
 async function commit(key, { write, read, want, eq = same, label, sess = cur() }) {
   if (!sess) return false;
+  if (!sess.writeEnabled || (sess.tier ?? 0) < 2) {
+    const msg = `Blocked: ${sess.tierLabel || tierLabel(sess.tier ?? 0)} device`;
+    if (cur()?.id === sess.id) {
+      setState(key, "error", msg);
+      toast(`${label}: ${msg}`, true);
+    }
+    log(`! ${label}: ${msg}`, sess.shortName);
+    return false;
+  }
   sess.userBusy++; sess.pending.add(key);
   if (cur()?.id === sess.id) setState(key, "saving");
   let err = null, got;
@@ -209,9 +203,14 @@ function render(key) {
 function renderDpi() {
   const s = cur();
   const d = s?.S?.dpi;
-  if (!d) { $("hDpi").textContent = "–"; return; }
+  if (!d) {
+    $("hDpi").textContent = "–";
+    $("roDpiVal").textContent = "–";
+    return;
+  }
   const [x, y] = d;
   $("hDpi").innerHTML = x === y ? `${x}` : `${x}<small>x</small> ${y}<small>y</small>`;
+  $("roDpiVal").textContent = x === y ? `${x} DPI` : `${x} × ${y} DPI`;
   $("genericDpiIn").value = x;
   renderTrack();
   accelCtrl.renderAccelDpiHint();
@@ -220,7 +219,11 @@ function renderDpi() {
 function renderPips() {
   const s = cur();
   const st = s?.S?.stages; const wrap = $("hPips");
-  if (!st || !s?.caps?.stages) { wrap.innerHTML = ""; $("hStage").textContent = ""; return; }
+  if (!st || !s?.caps?.stages) {
+    wrap.innerHTML = "";
+    $("hStage").textContent = s?.tier === 1 && s?.caps?.dpiRead ? "Read-only" : s?.caps?.genericDpi ? "Reference" : "";
+    return;
+  }
   wrap.innerHTML = st.list.map((_, i) => `<i class="${i + 1 === st.active ? "on" : ""}" title="Stage ${i + 1}"></i>`).join("");
   wrap.title = `Stage ${st.active} of ${st.list.length}`;
   $("hStage").textContent = `Stage ${st.active}/${st.list.length}`;
@@ -256,10 +259,10 @@ function renderBattery() {
   const s = cur();
   const pct = activeS().battery, ch = activeS().charging;
   if (!s?.caps?.wireless && pct == null) {
-    $("hBatt").innerHTML = "Wired";
-    $("hBattS").textContent = "";
+    $("hBatt").innerHTML = s?.tier === 0 ? "N/A" : "Wired";
+    $("hBattS").textContent = s?.tier === 0 ? "Pointer only" : "";
     $("hBattCells").innerHTML = "";
-    $("chargeVal").textContent = "USB powered (no battery)";
+    $("chargeVal").textContent = s?.tier === 0 ? "No vendor telemetry (Tier 0)" : "USB powered (no battery)";
     return;
   }
   if (pct != null) {
@@ -1019,26 +1022,43 @@ async function readAll(sess = cur()) {
 function applySessionChrome() {
   const s = cur();
   if (!s) return;
+  const tier = s.tier ?? 0;
+  const tLabel = s.tierLabel || tierLabel(tier);
   $("conn").className = "pill " + (s.asleep ? "sleep" : "on");
   $("connText").textContent = s.asleep ? "Mouse asleep — move it" : `${s.shortName} · ${s.link}`;
+  $("tierBadge").hidden = false;
+  $("tierBadge").className = `tierbadge tier-${tier}`;
+  $("tierBadgeText").textContent = tLabel;
+
   $("model").textContent = s.name;
   $("protoName").textContent = s.protoLabel;
+  const evNote = tier === 0
+    ? "Zero vendor HID commands sent"
+    : tier === 1
+    ? "Reviewed read-only getters only (writes blocked at dispatch)"
+    : s.evidenceStatus === "hardware_verified"
+    ? "Hardware-verified operations"
+    : "Legacy documented profile (migrated from baseline)";
+  $("supportTier").textContent = `${tLabel} — ${evNote}`;
   $("link").textContent = s.link;
   $("usbid").textContent = `${hex4(s.vid)}:${hex4(s.pid)}`;
   $("fw").textContent = s.fw ?? "–";
   $("serial").textContent = s.serial ?? "–";
   $("hidCols").textContent = s.collectionsText;
-  $("factoryResetBtn").hidden = !s.caps.factoryReset;
+  $("factoryResetBtn").hidden = !s.caps.factoryReset || !s.writeEnabled;
 
   $("statusNote").hidden = !s.caps.statusNote;
+  $("statusNote").className = "accelnotice" + (tier === 0 ? " tier-0" : tier === 1 ? " tier-1" : "");
   $("statusNote").textContent = s.caps.statusNote || "";
 
   $("hLink").textContent = s.link;
   $("hLinkS").textContent = s.fw && s.fw !== "–" ? `${s.name} · ${s.fw}` : s.name;
 
+  const isReadonlyDpi = tier === 1 && !!s.caps.dpiRead && !s.caps.dpiWrite;
   $("stagesGroup").hidden = !s.caps.stages;
+  $("readonlyDpiGroup").hidden = !isReadonlyDpi;
   $("genericDpiGroup").hidden = !s.caps.genericDpi;
-  $("dpiNowRow").hidden = !s.caps.dpi;
+  $("dpiNowRow").hidden = !(s.caps.dpi && s.writeEnabled);
   $("splitXYWrap").hidden = !s.caps.splitXY;
   if (!s.caps.splitXY) $("splitXY").checked = false;
   $("stagesNote").textContent = s.driver === "egg"
@@ -1047,11 +1067,14 @@ function applySessionChrome() {
   $("stagesHint").textContent = `Click a stage to make it active · up to ${s.caps.maxStages} · ${s.caps.dpiMin}–${s.caps.dpiMax.toLocaleString()}`;
   $("dpiNow").min = s.caps.dpiMin; $("dpiNow").max = s.caps.dpiMax; $("dpiNow").step = s.caps.dpiStepLo;
   $("dpiNowY").min = s.caps.dpiMin; $("dpiNowY").max = s.caps.dpiMax; $("dpiNowY").step = s.caps.dpiStepLo;
+  if (isReadonlyDpi) {
+    $("roDpiNote").textContent = `Live X/Y sensor readout (${s.caps.dpiMin}–${s.caps.dpiMax.toLocaleString()} DPI) via 0xff getter — writes blocked at dispatch`;
+  }
 
   $("idleRow").hidden = !s.caps.powerTune;
   $("lowRow").hidden = !(s.caps.powerTune && s.caps.lowBatt !== false);
-  $("idle").disabled = !s.caps.wireless;
-  $("low").disabled = !s.caps.wireless;
+  $("idle").disabled = !s.caps.wireless || !s.writeEnabled;
+  $("low").disabled = !s.caps.wireless || !s.writeEnabled;
   $("idle").min = 1;
   $("idle").max = s.caps.idleMaxMin ?? 15;
   $("low").min = s.caps.lowMin ?? 5;
@@ -1060,10 +1083,17 @@ function applySessionChrome() {
   $("powerNote").textContent = s.caps.powerTune
     ? (s.info.prio === 0 ? "Wireless settings (saved on mouse even over cable)" : "Wireless")
     : s.caps.batteryRead ? "Battery telemetry (read-only)"
+    : tier === 0 ? "Pointer only — no vendor battery telemetry"
     : "Wired / no battery reported";
 
   $("dongleTab").hidden = !s.caps.dongle;
   if (!s.caps.dongle && activeTab === "dongle") showTab("perf");
+
+  $("appFoot").textContent = tier === 0
+    ? "Tier 0 · Pointer only. Zero vendor HID reports are sent to this device."
+    : tier === 1
+    ? "Tier 1 · Read-only. Only reviewed firmware and X/Y DPI getters are active; all writes are blocked at dispatch."
+    : "Changes are written to the mouse straight away and read back to confirm. Settings re-sync every 10 s and when you come back to the window.";
 
   buildPollButtons();
   renderDpi();
@@ -1092,11 +1122,12 @@ function renderFleet() {
     const battStr = s.S.battery != null ? `${Math.round(s.S.battery)}%` : "";
     const meta = [dpiStr, pollStr, battStr].filter(Boolean).join(" · ") || s.link;
     const isAct = s.id === activeId;
+    const tShort = s.tier === 1 ? "T1 · RO" : s.tier === 2 ? "T2" : "T0";
     cards.push(`
       <div class="mcard${isAct ? " active" : ""}" data-sid="${s.id}" tabindex="0" role="button" aria-pressed="${isAct}">
         <button class="mcard-close" data-close="${s.id}" title="Disconnect ${s.name}" aria-label="Disconnect ${s.name}">×</button>
         <div class="mcard-top"><i class="mcard-dot"></i><span class="mcard-name">${s.name}</span></div>
-        <div class="mcard-sub"><span class="mcard-tag">${s.protoTag}</span><span>${meta}</span></div>
+        <div class="mcard-sub"><span class="mcard-tag">${s.protoTag}</span><span class="mcard-tier tier-${s.tier ?? 0}">${tShort}</span><span>${meta}</span></div>
       </div>`);
   }
   for (const m of systemMice) {
@@ -1148,76 +1179,15 @@ function selectSession(id) {
 // ======================================================================
 // multi-device identification, grouping & connection
 // ======================================================================
-function classifyDevice(d, allowGeneric = false, ctx = {}) {
-  const spec =
-    classifyRazer(d, allowGeneric) ||
-    classifyEgg(d, ctx) ||
-    classifyLogitech(d) ||
-    classifyPulsar(d) ||
-    classifyGlorious(d);
-  if (spec) return spec;
-
-  if (allowGeneric) {
-    const vp = vpKey(d.vendorId, d.productId);
-    return {
-      driver: "generic", protoLabel: "Generic USB / HID Mouse", protoTag: "HID",
-      info: { name: d.productName || `HID Device (${vp})`, link: "Generic HID", prio: 9, wireless: false, hyper: false, dpiMax: 50000 },
-      caps: {
-        stages: false, dpi: false, maxStages: 1, dpiMin: 50, dpiMax: 50000, dpiStepLo: 50, dpiStepHi: 50,
-        splitXY: false, pollRates: [], lodMode: "none", buttons: false, layers: false,
-        wireless: false, powerTune: false, batteryRead: false, hyper: false, dongle: false, factoryReset: false, genericDpi: true,
-      },
-    };
-  }
-  return null;
-}
-
-function groupHidTargets(devices, allowGeneric = false) {
+function groupSessionTargets(devices, allowGeneric = false) {
   const claimed = new Set();
+  const existing = [];
   for (const s of sessions.values()) {
     claimed.add(s.dev);
     for (const sib of s.siblings) claimed.add(sib);
+    existing.push({ vid: s.vid, pid: s.pid, serial: s.dev.serialNumber });
   }
-  const eggA1Vps = new Set();
-  for (const d of devices) {
-    if (d.vendorId === EGG_VID && findCollection(d, { featId: 0xa1 })) eggA1Vps.add(vpKey(d.vendorId, d.productId));
-  }
-  const claimNotify = (d, pred) => {
-    const cands = devices.filter((cand) => cand !== d && !claimed.has(cand) && cand.vendorId === d.vendorId && cand.productId === d.productId && pred(cand));
-    if (!cands.length) return [];
-    const exact = d.serialNumber ? cands.find((c) => c.serialNumber === d.serialNumber) : null;
-    const match = exact || cands[0];
-    claimed.add(match);
-    return [match];
-  };
-
-  const targets = [];
-  for (const d of devices) {
-    if (claimed.has(d)) continue;
-    const spec = classifyDevice(d, false, { eggA1Vps });
-    if (!spec) continue;
-    let siblings = [];
-    if (spec.driver === "egg") {
-      siblings = claimNotify(d, (cand) => cand.collections?.some((c) => (c.inputReports || []).some((r) => r.reportId === EGG_REPORT.EVT)));
-    } else if (spec.driver === "egg_we" || (spec.driver === "compx" && spec.info.brand === "areson")) {
-      siblings = claimNotify(d, (cand) => cand.collections?.some((c) => (c.inputReports || []).some((r) => r.reportId === 0x09)));
-    }
-    claimed.add(d);
-    targets.push({ dev: d, siblings, spec });
-  }
-  if (allowGeneric) {
-    for (const d of devices) {
-      if (claimed.has(d)) continue;
-      // Skip secondary non-control interfaces of an already-claimed mouse with same VID:PID and serial
-      const alreadyOwned = [...sessions.values(), ...targets.map((t) => ({ vid: t.dev.vendorId, pid: t.dev.productId, serial: t.dev.serialNumber }))]
-        .some((x) => x.vid === d.vendorId && x.pid === d.productId && (!d.serialNumber || !x.serial || x.serial === d.serialNumber));
-      if (alreadyOwned) continue;
-      const spec = classifyDevice(d, true, { eggA1Vps });
-      if (spec) { claimed.add(d); targets.push({ dev: d, siblings: [], spec }); }
-    }
-  }
-  targets.sort((a, b) => a.spec.info.prio - b.spec.info.prio);
-  return targets;
+  return groupHidTargets(devices, allowGeneric, claimed, existing);
 }
 
 const driverCtx = {
@@ -1242,9 +1212,15 @@ async function attachTarget({ dev: d, siblings = [], spec }) {
   $("permhint").hidden = true;
   const id = `${spec.driver}:${hex4(d.vendorId)}:${hex4(d.productId)}:${d.serialNumber || Math.random().toString(36).slice(2, 7)}`;
   const shortName = spec.info.name.replace(/^Razer |^Endgame Gear |^Logitech |^Pulsar |^Glorious |^ATK |^VXE |^Scyrox |^Teevolution |^VGN |^Lamzu /i, "");
+  const tier = spec.tier ?? 0;
   const sess = {
     id, dev: d, siblings, vid: d.vendorId, pid: d.productId,
     driver: spec.driver, protoLabel: spec.protoLabel, protoTag: spec.protoTag,
+    tier, tierLabel: spec.tierLabel || tierLabel(tier),
+    profileId: spec.profileId || "generic_tier0",
+    writeEnabled: !!(spec.writeEnabled && tier >= 2),
+    evidenceStatus: spec.evidenceStatus || "none",
+    operations: spec.operations || {},
     name: spec.info.name, shortName, link: spec.info.link,
     info: spec.info, caps: spec.caps,
     collectionsText: describeHidCollections(d),
@@ -1341,33 +1317,18 @@ function showConnected(on, helperOnly = false, tab = "accel") {
   $("empty").hidden = showApp;
   $("refresh").hidden = !on;
   setTabAccess(on);
-  if (!on) { $("conn").className = "pill"; renderSyncLabel(); }
+  if (!on) { $("conn").className = "pill"; $("tierBadge").hidden = true; renderSyncLabel(); }
   if (helperOnly && !on) showTab(tab);
   paintRanges();
   accelCtrl.syncAccelMotion();
 }
 
-const vpFilter = (k) => { const [v, p] = k.split(":").map((x) => parseInt(x, 16)); return { vendorId: v, productId: p }; };
-const SUPPORTED_FILTERS = [
-  ...Object.keys(DEVICES).map((p) => ({ vendorId: VID, productId: +p })),
-  ...Object.keys(EGG_DEVICES).map((p) => ({ vendorId: EGG_VID, productId: +p })),
-  ...Object.keys(EGG_WE_DEVICES).map((p) => ({ vendorId: EGG_VID, productId: +p })),
-  ...Object.keys(LOGI_DEVICES).map((p) => ({ vendorId: LOGI_VID, productId: +p })),
-  { vendorId: PULSAR_VID },
-  ...Object.keys(ARESON_DEVICES).map((p) => ({ vendorId: ARESON_VID, productId: +p })),
-  ...Object.keys(COMPX_DEVICES).map(vpFilter),
-  { vendorId: COMPX_VID, usagePage: 0xff02 },
-  { vendorId: ATK_VID, usagePage: 0xff02 },
-  ...Object.keys(GLORIOUS_SINOWEALTH).map(vpFilter),
-  ...Object.keys(GLORIOUS_CORE2).map(vpFilter),
-  ...Object.keys(GLORIOUS_CLASSIC).map(vpFilter),
-  ...Object.keys(GLORIOUS_PIXART).map(vpFilter),
-];
-
-async function connectSupportedDevices(filters = SUPPORTED_FILTERS) {
+async function connectSupportedDevices(filters = null) {
   try {
-    const picked = await navigator.hid.requestDevice({ filters });
-    const targets = groupHidTargets([...picked, ...(await navigator.hid.getDevices())], false);
+    await registryReady;
+    const useFilters = filters || getSupportedFilters();
+    const picked = await navigator.hid.requestDevice({ filters: useFilters });
+    const targets = groupSessionTargets([...picked, ...(await navigator.hid.getDevices())], false);
     if (!targets.length) { if (picked.length) toast("No supported control interface found on that selection (try Any HID…)", true); return; }
     let first = null;
     for (const t of targets) {
@@ -1380,9 +1341,10 @@ async function connectSupportedDevices(filters = SUPPORTED_FILTERS) {
 
 async function connectGenericDevice() {
   try {
+    await registryReady;
     const picked = await navigator.hid.requestDevice({ filters: [] });
     if (!picked.length) return;
-    const targets = groupHidTargets(picked, true);
+    const targets = groupSessionTargets(picked, true);
     let first = null;
     for (const t of targets) {
       const s = await attachTarget(t);
@@ -1394,8 +1356,9 @@ async function connectGenericDevice() {
 
 async function scanExistingHid() {
   if (!("hid" in navigator)) return;
+  await registryReady;
   const ds = await navigator.hid.getDevices();
-  const targets = groupHidTargets(ds, true);
+  const targets = groupSessionTargets(ds, true);
   for (const t of targets) await attachTarget(t);
 }
 
@@ -1410,6 +1373,12 @@ $("refresh").addEventListener("click", async () => {
   const b = $("refresh"); b.disabled = true;
   await readAll(s);
   b.disabled = false; toast(`Read everything from ${s.shortName}`);
+});
+$("roDpiRefresh").addEventListener("click", async () => {
+  const s = cur(); if (!s) return;
+  const b = $("roDpiRefresh"); b.disabled = true;
+  await readAll(s);
+  b.disabled = false; toast(`Read sensor DPI from ${s.shortName}`);
 });
 $("snoopToggle").addEventListener("change", () => {
   snoopEnabled = $("snoopToggle").checked;

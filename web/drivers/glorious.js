@@ -1,4 +1,4 @@
-// Protocol 7: Glorious Sinowealth / CORE 2 / Classic / Pixart drivers
+// Protocol 7: Glorious Sinowealth / CORE 2 / Classic / Pixart drivers (registry-backed)
 import {
   DevErr,
   calcReportBytes,
@@ -10,89 +10,39 @@ import {
   unwrapReport,
   vpKey,
 } from "./common.js";
-
-const GLORIOUS_SINOWEALTH = {
-  "258a:0033": { name: "Glorious Model D / D-", link: "USB cable" },
-  "258a:0036": { name: "Glorious Model O / O-", link: "USB cable" },
-  "3794:a000": { name: "Glorious Model O Eternal", link: "USB cable" },
-};
-const GLORIOUS_CORE2 = {
-  "258a:201b": { name: "Glorious Model O 2 Pro", link: "USB cable", wireless: false, maxPoll: 8000 },
-  "258a:2035": { name: "Glorious Model O 2 Pro 4K/8K", link: "Wireless dongle", wireless: true, maxPoll: 4000 },
-  "258a:201c": { name: "Glorious Model D 2 Pro", link: "USB cable", wireless: false, maxPoll: 8000 },
-  "258a:2036": { name: "Glorious Model D 2 Pro 4K/8K", link: "Wireless dongle", wireless: true, maxPoll: 4000 },
-};
-const GLORIOUS_CLASSIC = {
-  "258a:2011": { name: "Glorious Model O Wireless", link: "USB cable", wireless: true, gen: "legacy" },
-  "258a:2012": { name: "Glorious Model D Wireless", link: "USB cable", wireless: true, gen: "legacy" },
-  "258a:2013": { name: "Glorious Model O- Wireless", link: "USB cable", wireless: true, gen: "legacy" },
-  "258a:2014": { name: "Glorious Model D- Wireless", link: "USB cable", wireless: true, gen: "legacy" },
-  "258a:2015": { name: "Glorious Series One Pro", link: "USB cable", wireless: true, gen: "legacy" },
-  "258a:2018": { name: "Glorious Model I 2 Wireless", link: "USB cable", wireless: true, gen: "legacy" },
-  "258a:2019": { name: "Glorious Model O 2 Wireless", link: "USB cable", wireless: true, gen: "legacy" },
-  "258a:201a": { name: "Glorious Model D 2 Wireless", link: "USB cable", wireless: true, gen: "legacy" },
-  "258a:201d": { name: "Glorious Model O 2", link: "USB cable", wireless: false, gen: "legacy" },
-  "258a:2022": { name: "Glorious Model O Wireless", link: "Wireless dongle", wireless: true, gen: "legacy" },
-  "258a:2023": { name: "Glorious Model D Wireless", link: "Wireless dongle", wireless: true, gen: "legacy" },
-  "258a:2024": { name: "Glorious Model O- Wireless", link: "Wireless dongle", wireless: true, gen: "legacy" },
-  "258a:2025": { name: "Glorious Model D- Wireless", link: "Wireless dongle", wireless: true, gen: "legacy" },
-  "258a:2027": { name: "Glorious Series One Pro", link: "Wireless dongle", wireless: true, gen: "legacy" },
-  "258a:2031": { name: "Glorious Model I 2 Wireless", link: "Wireless dongle", wireless: true, gen: "legacy" },
-  "258a:2033": { name: "Glorious Model O 2 Wireless", link: "Wireless dongle", wireless: true, gen: "legacy" },
-  "258a:2034": { name: "Glorious Model D 2 Wireless", link: "Wireless dongle", wireless: true, gen: "legacy" },
-  "258a:2039": { name: "Glorious Forge Mouse", link: "USB / Wireless", wireless: true, gen: "legacy" },
-  "22d4:1503": { name: "Glorious Model I", link: "USB cable", wireless: false, gen: "legacy" },
-  "320f:821a": { name: "Glorious Model O 2", link: "USB cable", wireless: false, gen: "legacy" },
-  "320f:823a": { name: "Glorious Model O 2 (v2)", link: "USB cable", wireless: false, gen: "legacy" },
-  "320f:831a": { name: "Glorious Model D 2", link: "USB cable", wireless: false, gen: "legacy" },
-  "3794:a300": { name: "Glorious Classic (CORE 2)", link: "USB cable", wireless: true, gen: "core2" },
-  "3794:a312": { name: "Glorious Classic (CORE 2)", link: "Wireless dongle", wireless: true, gen: "core2" },
-};
-const GLORIOUS_PIXART = {
-  "093a:821b": { name: "Glorious Model O 2 Mini", link: "USB cable", wireless: false },
-  "093a:821d": { name: "Glorious Model O 2 Mini", link: "Wireless dongle", wireless: true },
-  "093a:822a": { name: "Glorious Model O 2 Mini Wireless", link: "USB cable", wireless: true },
-  "093a:822b": { name: "Glorious Model O 2 Mini Wireless", link: "Wireless dongle", wireless: true },
-  "093a:822d": { name: "Glorious Series 2 Pro", link: "USB cable", wireless: true },
-  "093a:824a": { name: "Glorious Series 2 Pro", link: "Wireless dongle", wireless: true },
-  "093a:824b": { name: "Glorious Model D 2 Mini", link: "USB cable", wireless: false },
-  "093a:824d": { name: "Glorious Model D 2 Mini", link: "Wireless dongle", wireless: true },
-  "093a:825a": { name: "Glorious Model D 2 Mini Wireless", link: "Wireless dongle", wireless: true },
-  "093a:826a": { name: "Glorious Model O 3", link: "USB cable", wireless: false },
-  "093a:826b": { name: "Glorious Model O 3 Wireless", link: "USB cable", wireless: true },
-  "093a:826d": { name: "Glorious Model O 3 Wireless", link: "Wireless dongle", wireless: true },
-  "093a:827a": { name: "Glorious Model D 3 Wireless", link: "Wireless dongle", wireless: true },
-  "093a:832a": { name: "Glorious Pixart Mouse", link: "USB / Wireless", wireless: true },
-};
+import { getGloriousTables, tierMetaFromProfile } from "./registry.js";
 
 function classifyGlorious(d) {
   const vp = vpKey(d.vendorId, d.productId);
+  const { sinowealth, core2, classic, pixart } = getGloriousTables();
 
-  if (GLORIOUS_SINOWEALTH[vp]) {
+  if (sinowealth[vp]) {
     if (!findCollection(d, { page: 0xff00, featId: 0x05 }) || !(findCollection(d, { featId: 0x06 }) || findCollection(d, { featId: 0x04 }))) return null;
-    const prof = GLORIOUS_SINOWEALTH[vp];
+    const prof = sinowealth[vp];
     return {
       driver: "glorious_sinowealth", protoLabel: "Glorious Sinowealth HID", protoTag: "Glorious",
+      ...tierMetaFromProfile("glorious_sinowealth"),
       info: { ...prof, prio: 0, wireless: false, hyper: false, dpiMax: 16000 },
       caps: {
-        stages: true, dpi: true, maxStages: 6, dpiMin: 100, dpiMax: 16000, dpiStepLo: 100, dpiStepHi: 100,
+        stages: true, dpi: true, dpiRead: true, dpiWrite: true, maxStages: 6, dpiMin: 100, dpiMax: 16000, dpiStepLo: 100, dpiStepHi: 100,
         splitXY: true, pollRates: [125, 250, 500, 1000], lodMode: "none", buttons: false, layers: false,
         wireless: false, powerTune: false, batteryRead: false, hyper: false, dongle: false, factoryReset: false, tune: {},
       },
     };
   }
 
-  if (GLORIOUS_CORE2[vp]) {
+  if (core2[vp]) {
     const col = findCollection(d, { page: 0xffff, featId: 0 });
     const rep = col && (col.featureReports || []).find((r) => r.reportId === 0);
     if (!col || calcReportBytes(rep) < 64) return null;
-    const prof = GLORIOUS_CORE2[vp];
+    const prof = core2[vp];
     const rates = prof.maxPoll >= 8000 ? [125, 250, 500, 1000, 2000, 4000, 8000] : [125, 250, 500, 1000, 2000, 4000];
     return {
       driver: "glorious_core2", protoLabel: "Glorious CORE 2 HID", protoTag: "Glorious",
+      ...tierMetaFromProfile("glorious_core2"),
       info: { ...prof, prio: prof.wireless ? 2 : 0, hyper: true, dpiMax: 26000 },
       caps: {
-        stages: true, dpi: true, maxStages: 6, dpiMin: 100, dpiMax: 26000, dpiStepLo: 50, dpiStepHi: 50,
+        stages: true, dpi: true, dpiRead: false, dpiWrite: true, maxStages: 6, dpiMin: 100, dpiMax: 26000, dpiStepLo: 50, dpiStepHi: 50,
         splitXY: true, pollRates: rates, lodMode: "none", buttons: false, layers: false,
         wireless: prof.wireless, powerTune: false, batteryRead: prof.wireless, hyper: false, dongle: false, factoryReset: false,
         tune: { debounce: true, debMin: 4, debMax: 16, debStep: 2, motionSync: true },
@@ -100,15 +50,16 @@ function classifyGlorious(d) {
     };
   }
 
-  if (GLORIOUS_CLASSIC[vp]) {
+  if (classic[vp]) {
     const hasFeat = (d.collections || []).some((c) => [0xff01, 0xff00, 0xffff].includes(c.usagePage) && (c.featureReports || []).length);
     if (!hasFeat) return null;
-    const prof = GLORIOUS_CLASSIC[vp];
+    const prof = classic[vp];
     return {
       driver: "glorious_classic", protoLabel: "Glorious Classic HID", protoTag: "Glorious",
+      ...tierMetaFromProfile("glorious_classic"),
       info: { ...prof, prio: prof.wireless ? 2 : 0, hyper: false, dpiMax: 19000 },
       caps: {
-        stages: true, dpi: true, maxStages: 4, dpiMin: 100, dpiMax: 19000, dpiStepLo: 100, dpiStepHi: 100,
+        stages: true, dpi: true, dpiRead: false, dpiWrite: true, maxStages: 4, dpiMin: 100, dpiMax: 19000, dpiStepLo: 100, dpiStepHi: 100,
         splitXY: true, pollRates: [125, 250, 500, 1000], lodMode: "preset", lodAsync: false, buttons: false, layers: false,
         wireless: prof.wireless, powerTune: false, batteryRead: prof.wireless, hyper: false, dongle: false, factoryReset: false,
         tune: { debounce: true, debMin: 0, debMax: 32, debStep: 1 },
@@ -116,14 +67,15 @@ function classifyGlorious(d) {
     };
   }
 
-  if (GLORIOUS_PIXART[vp]) {
+  if (pixart[vp]) {
     if (!findCollection(d, { page: 0xff00, featId: 0x03 })) return null;
-    const prof = GLORIOUS_PIXART[vp];
+    const prof = pixart[vp];
     return {
       driver: "glorious_pixart", protoLabel: "Glorious Pixart HID", protoTag: "Glorious",
+      ...tierMetaFromProfile("glorious_pixart"),
       info: { ...prof, prio: prof.wireless ? 2 : 0, hyper: false, dpiMax: 26000 },
       caps: {
-        stages: true, dpi: true, maxStages: 6, dpiMin: 100, dpiMax: 26000, dpiStepLo: 50, dpiStepHi: 50,
+        stages: true, dpi: true, dpiRead: false, dpiWrite: true, maxStages: 6, dpiMin: 100, dpiMax: 26000, dpiStepLo: 50, dpiStepHi: 50,
         splitXY: true, pollRates: [125, 250, 500, 1000], lodMode: "preset", lodAsync: false, buttons: false, layers: false,
         wireless: false, powerTune: false, batteryRead: false, hyper: false, dongle: false, factoryReset: false,
         tune: { debounce: true, debMin: 0, debMax: 16, debStep: 1 },
@@ -506,10 +458,7 @@ function makeGloriousPixartApi(sess) {
 }
 
 export {
-  GLORIOUS_SINOWEALTH,
-  GLORIOUS_CORE2,
-  GLORIOUS_CLASSIC,
-  GLORIOUS_PIXART,
+  getGloriousTables,
   classifyGlorious,
   makeGloriousSinowealthApi,
   makeGloriousCore2Api,

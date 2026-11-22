@@ -1,0 +1,252 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/LDLNAN/mousetool/devices/schema.json",
+  "title": "mousetool Shared Device Registry",
+  "description": "Versioned single source of truth for mouse models, transport/interface match records, protocol profiles, per-operation capabilities, provenance citations, and Linux udev eligibility.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "tiers",
+    "sources",
+    "models",
+    "profiles",
+    "matches",
+    "atk_products"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "tiers": {
+      "type": "object",
+      "required": ["0", "1", "2"],
+      "additionalProperties": false,
+      "patternProperties": {
+        "^[012]$": {
+          "type": "object",
+          "required": ["label", "short", "description"],
+          "additionalProperties": false,
+          "properties": {
+            "label": { "type": "string", "minLength": 1 },
+            "short": { "type": "string", "minLength": 1 },
+            "description": { "type": "string", "minLength": 1 }
+          }
+        }
+      }
+    },
+    "sources": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "type": "object",
+        "required": ["url", "revision", "path", "licence", "extraction_rule"],
+        "additionalProperties": false,
+        "properties": {
+          "url": { "type": "string", "pattern": "^https://" },
+          "revision": { "type": "string", "pattern": "^[0-9a-f]{7,40}$" },
+          "path": { "type": "string", "minLength": 1 },
+          "licence": { "type": "string", "minLength": 1 },
+          "extraction_rule": { "type": "string", "minLength": 1 },
+          "notes": { "type": "string" }
+        }
+      }
+    },
+    "models": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["key", "name", "brand", "aliases", "kind", "source"],
+        "additionalProperties": false,
+        "properties": {
+          "key": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
+          "name": { "type": "string", "minLength": 1 },
+          "brand": { "type": "string", "minLength": 1 },
+          "aliases": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1 }
+          },
+          "kind": {
+            "type": "string",
+            "enum": ["mouse", "receiver", "keyboard"]
+          },
+          "source": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "profiles": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "type": "object",
+        "required": [
+          "driver",
+          "proto_label",
+          "proto_tag",
+          "tier",
+          "write_enabled",
+          "legacy_migrated",
+          "evidence_status",
+          "evidence",
+          "source",
+          "operations"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "driver": {
+            "type": "string",
+            "enum": [
+              "generic",
+              "razer",
+              "egg8k",
+              "egg_we",
+              "hidpp",
+              "pulsar_xs1",
+              "pulsar_pro",
+              "compx",
+              "glorious_sinowealth",
+              "glorious_core2",
+              "glorious_classic",
+              "glorious_pixart"
+            ]
+          },
+          "proto_label": { "type": "string", "minLength": 1 },
+          "proto_tag": { "type": "string", "minLength": 1 },
+          "tier": { "type": "integer", "enum": [0, 1, 2] },
+          "write_enabled": { "type": "boolean" },
+          "legacy_migrated": { "type": "boolean" },
+          "evidence_status": {
+            "type": "string",
+            "enum": ["none", "upstream_claim", "legacy_documented", "hardware_verified"]
+          },
+          "evidence": {
+            "type": ["object", "null"],
+            "required": ["firmware", "backend", "transport", "date", "result"],
+            "additionalProperties": false,
+            "properties": {
+              "firmware": { "type": "string", "minLength": 1 },
+              "backend": { "type": "string", "minLength": 1 },
+              "transport": { "type": "string", "minLength": 1 },
+              "date": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+              "fixture": { "type": ["string", "null"] },
+              "result": { "type": "string", "minLength": 1 }
+            }
+          },
+          "source": { "type": "string", "minLength": 1 },
+          "status_note": { "type": ["string", "null"] },
+          "operations": {
+            "type": "object",
+            "required": [
+              "firmware",
+              "serial",
+              "dpi",
+              "stages",
+              "polling",
+              "lod",
+              "battery",
+              "power",
+              "buttons",
+              "layers",
+              "dongle",
+              "lighting",
+              "tuning"
+            ],
+            "additionalProperties": false,
+            "patternProperties": {
+              "^(firmware|serial|dpi|stages|polling|lod|battery|power|buttons|layers|dongle|lighting|tuning)$": {
+                "type": "object",
+                "required": ["read", "write"],
+                "additionalProperties": true,
+                "properties": {
+                  "read": { "type": "boolean" },
+                  "write": { "type": "boolean" },
+                  "txn": { "type": "string", "pattern": "^0x[0-9a-f]{2}$" },
+                  "storage": { "type": "string", "pattern": "^0x[0-9a-f]{2}$" },
+                  "cmd_class": { "type": "string", "pattern": "^0x[0-9a-f]{2}$" },
+                  "cmd_id": { "type": "string", "pattern": "^0x[0-9a-f]{2}$" },
+                  "data_size": { "type": "integer", "minimum": 0, "maximum": 80 },
+                  "claim_source": { "type": "string", "minLength": 1 },
+                  "evidence": { "type": ["object", "null"] }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "matches": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "model_key",
+          "profile_id",
+          "bus",
+          "id_namespace",
+          "vid",
+          "role",
+          "link",
+          "prio",
+          "wireless",
+          "hyper",
+          "udev_eligible",
+          "interface",
+          "source"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "model_key": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
+          "profile_id": { "type": "string", "minLength": 1 },
+          "bus": { "type": "string", "enum": ["usb", "bluetooth", "receiver_child"] },
+          "id_namespace": { "type": "string", "enum": ["usb_pid", "bluetooth_pid", "logitech_wpid"] },
+          "vid": { "type": "string", "pattern": "^[0-9a-f]{4}$" },
+          "pid": { "type": ["string", "null"], "pattern": "^[0-9a-f]{4}$" },
+          "wpid": { "type": ["string", "null"], "pattern": "^[0-9a-f]{4}$" },
+          "receiver_pids": {
+            "type": "array",
+            "items": { "type": "string", "pattern": "^[0-9a-f]{4}$" }
+          },
+          "role": { "type": "string", "enum": ["wired", "dongle", "receiver", "bluetooth", "dual", "keyboard"] },
+          "link": { "type": "string", "minLength": 1 },
+          "prio": { "type": "integer", "minimum": 0, "maximum": 9 },
+          "wireless": { "type": "boolean" },
+          "hyper": { "type": "boolean" },
+          "udev_eligible": { "type": "boolean" },
+          "udev_group": { "type": "string" },
+          "interface": { "type": "object" },
+          "meta": { "type": "object" },
+          "source": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "atk_products": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["cid", "mid", "name", "sensor", "dpi_max", "rates", "max_stages", "is_r1", "source"],
+        "additionalProperties": false,
+        "properties": {
+          "cid": { "type": "integer", "minimum": 0, "maximum": 255 },
+          "mid": { "type": "integer", "minimum": 0, "maximum": 255 },
+          "name": { "type": "string", "minLength": 1 },
+          "sensor": { "type": "string", "minLength": 1 },
+          "dpi_max": { "type": "integer", "minimum": 100, "maximum": 100000 },
+          "rates": {
+            "type": "array",
+            "items": { "type": "integer", "minimum": 125, "maximum": 8000 }
+          },
+          "max_stages": { "type": "integer", "minimum": 1, "maximum": 8 },
+          "is_r1": { "type": "boolean" },
+          "dpi6": { "type": "boolean" },
+          "anti_mistouch": { "type": "boolean" },
+          "source": { "type": "string", "minLength": 1 }
+        }
+      }
+    }
+  }
+}
