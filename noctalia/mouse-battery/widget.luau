@@ -7,7 +7,8 @@
 -- enough for a horizontal bar). barWidget.isVertical() reported false on a right-hand bar in 5.4.1, so
 -- the layout doesn't depend on it.
 
-local TOOL = '"$HOME/Documents/GitHub/mousetool/mousetool.py"'
+-- Set MOUSETOOL_BIN in your environment, install `mousetool` on PATH, or point TOOL at `/path/to/mousetool/mousetool.py`.
+local TOOL = '"${MOUSETOOL_BIN:-mousetool}"'
 local busy = false
 
 local function ago(sec)

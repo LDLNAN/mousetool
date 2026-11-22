@@ -3,3 +3,9 @@ __pycache__/
 *$py.class
 *.bak*
 .DS_Store
+.tephra/
+.t3/
+.env
+.env.*
+*.pem
+*.key

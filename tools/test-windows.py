@@ -1,4 +1,4 @@
-"""Reversible hardware smoke test. Run from a scratch app copy with rawaccel binaries."""
+"""Reversible hardware smoke test. Run from a temporary app copy with rawaccel binaries."""
 import json
 import os
 from pathlib import Path
@@ -15,10 +15,13 @@ from mousetool.accel.windows import OFF, read_active, write_settings
 
 
 def main():
-    scratch = Path.home() / ".t3" + "/scratch"
     app = APP
-    if sys.platform != "win32" or not app.is_relative_to(scratch):
-        raise SystemExit("Run the test from an app copy under the Windows user's mousetool-test-scratch")
+    in_git_checkout = (app / ".git").exists()
+    if sys.platform != "win32" or (in_git_checkout and "--allow-in-place" not in sys.argv[1:]):
+        raise SystemExit(
+            "Run this smoke test on Windows from a temporary app copy outside the git checkout "
+            "(or pass --allow-in-place)."
+        )
     url = "http://127.0.0.1:8766"
 
     def api(path, body=None):
@@ -28,7 +31,7 @@ def main():
 
     linear = dict(OFF, MODE="linear", ACCEL=.0425, INPUT_DPI=3200, YX_RATIO=1.25)
     off = curves.maccel_to_rawaccel(OFF)[0]
-    with tempfile.TemporaryDirectory(dir=scratch) as work:
+    with tempfile.TemporaryDirectory(prefix="mousetool-win-test-") as work:
         rollback = Path(work) / "off.json"
         rollback.write_text(curves.dumps(off), encoding="utf-8")
         env = dict(os.environ, LOCALAPPDATA=work)
@@ -36,7 +39,7 @@ def main():
                                 env=env, stdout=subprocess.PIPE, text=True)
         try:
             if proc.stdout.readline().strip() != "mousetool listening on " + url + "/":
-                raise RuntimeError("Scratch server failed to start")
+                raise RuntimeError("Test server failed to start")
             try:
                 state = api("/api/status")["accel"]
                 print("Driver:", state["driver"], "initial mode:", state.get("mode"), flush=True)
