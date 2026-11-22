@@ -3,28 +3,11 @@ import os
 import select
 import time
 
+from ..registry import get_registry
 from .base import Asleep
 
 LOGI_VID = 0x046D
-LOGI_DEVICES = {
-    0xC088: ("Logitech G Pro Wireless", "USB cable"),
-    0xC08B: ("Logitech G502 Hero", "USB cable"),
-    0xC092: ("Logitech G Pro X Superlight", "USB cable"),
-    0xC093: ("Logitech G502 Lightspeed", "USB cable"),
-    0xC094: ("Logitech G Pro Wireless", "USB cable"),
-    0xC095: ("Logitech G305", "USB"),
-    0xC099: ("Logitech G Pro X Superlight 2", "USB cable"),
-    0xC09D: ("Logitech G502 X Plus", "USB cable"),
-    0xC09E: ("Logitech G502 X Lightspeed", "USB cable"),
-    0xC52B: ("Logitech Unifying Receiver", "Unifying receiver"),
-    0xC539: ("Logitech Lightspeed Receiver", "Lightspeed dongle"),
-    0xC53F: ("Logitech Lightspeed Receiver", "Lightspeed dongle"),
-    0xC547: ("Logitech Superlight Receiver", "Lightspeed dongle"),
-    0xC548: ("Logitech Bolt Receiver", "Bolt receiver"),
-    0xC54D: ("Logitech Superlight 2 Receiver", "Lightspeed 2 dongle"),
-    0xB023: ("Logitech MX Master 3", "Bluetooth"),
-    0xB034: ("Logitech MX Master 3S", "Bluetooth"),
-}
+LOGI_DEVICES = get_registry().build_logi_devices()
 
 HIDPP_SHORT = 0x10
 HIDPP_LONG = 0x11

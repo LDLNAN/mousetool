@@ -32,6 +32,10 @@ class Asleep(Exception):
     pass
 
 
+from ..registry import ReadOnlyTierError  # noqa: E402, F401
+
+
+
 DEVICE_STATE_CACHE = os.path.expanduser("~/.cache/mousetool/device_state.json")
 
 

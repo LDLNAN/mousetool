@@ -23,6 +23,7 @@ from .accel import linux as linux_accel
 ALLOWED_ORIGINS = {"null"}
 REPO_ROOT = Path(__file__).resolve().parent.parent
 WEB_DIR = REPO_ROOT / "web"
+DEVICES_DIR = REPO_ROOT / "devices"
 
 STATIC_MIME_TYPES = {
     ".html": "text/html; charset=utf-8",
@@ -55,8 +56,8 @@ def _has_traversal_tokens(raw_path):
     return False
 
 
-def resolve_static_asset(url_path, web_dir=None, repo_root=None):
-    """Resolve a static URL path strictly inside web/ (plus /icon.svg at repo root).
+def resolve_static_asset(url_path, web_dir=None, repo_root=None, devices_dir=None):
+    """Resolve a static URL path strictly inside web/, /devices/*.json, or /icon.svg at repo root.
 
     Returns (Path, mime_type) for an existing allowed file, None for missing/unsupported files,
     or raises PathTraversalError for any traversal attempt or symlink escaping the root.
@@ -67,6 +68,25 @@ def resolve_static_asset(url_path, web_dir=None, repo_root=None):
     decoded = urllib.parse.unquote(url_path)
     root_dir = Path(repo_root or REPO_ROOT).resolve()
     web_root = Path(web_dir or WEB_DIR).resolve()
+
+    if decoded.startswith("/devices/"):
+        rel_dev = decoded[len("/devices/"):]
+        if not rel_dev:
+            return None
+        posix_dev = PurePosixPath(rel_dev)
+        if posix_dev.is_absolute() or any(part in ("", ".", "..") for part in posix_dev.parts):
+            raise PathTraversalError("forbidden path")
+        dev_root = Path(devices_dir or (root_dir / "devices")).resolve()
+        candidate = dev_root.joinpath(*posix_dev.parts)
+        try:
+            resolved = candidate.resolve()
+        except OSError as exc:
+            raise PathTraversalError("unresolvable path") from exc
+        if not resolved.is_relative_to(dev_root):
+            raise PathTraversalError("path escapes devices root")
+        if not resolved.is_file() or resolved.suffix.lower() != ".json":
+            return None
+        return resolved, STATIC_MIME_TYPES[".json"]
 
     if decoded in ("/", "/index.html"):
         rel = "index.html"

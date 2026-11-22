@@ -5,6 +5,7 @@ import time
 if sys.platform != "win32":
     import fcntl
 
+from ..registry import get_registry
 from .base import (
     HIDIOCGFEATURE_N,
     HIDIOCSFEATURE_N,
@@ -13,60 +14,8 @@ from .base import (
     _save_device_cache,
 )
 
-# Glorious registries across 5 VIDs
-GLORIOUS_SINOWEALTH = {
-    (0x258A, 0x0033): ("Glorious Model D / D-", "USB cable"),
-    (0x258A, 0x0036): ("Glorious Model O / O-", "USB cable"),
-    (0x3794, 0xA000): ("Glorious Model O Eternal", "USB cable"),
-}
-GLORIOUS_CORE2 = {
-    (0x258A, 0x201B): ("Glorious Model O 2 Pro", "USB cable", False, 8000),
-    (0x258A, 0x2035): ("Glorious Model O 2 Pro 4K/8K", "Wireless dongle", True, 4000),
-    (0x258A, 0x201C): ("Glorious Model D 2 Pro", "USB cable", False, 8000),
-    (0x258A, 0x2036): ("Glorious Model D 2 Pro 4K/8K", "Wireless dongle", True, 4000),
-}
-GLORIOUS_CLASSIC = {
-    (0x258A, 0x2011): {"name": "Glorious Model O Wireless", "link": "USB cable", "wireless": True, "gen": "legacy"},
-    (0x258A, 0x2012): {"name": "Glorious Model D Wireless", "link": "USB cable", "wireless": True, "gen": "legacy"},
-    (0x258A, 0x2013): {"name": "Glorious Model O- Wireless", "link": "USB cable", "wireless": True, "gen": "legacy"},
-    (0x258A, 0x2014): {"name": "Glorious Model D- Wireless", "link": "USB cable", "wireless": True, "gen": "legacy"},
-    (0x258A, 0x2015): {"name": "Glorious Series One Pro", "link": "USB cable", "wireless": True, "gen": "legacy"},
-    (0x258A, 0x2018): {"name": "Glorious Model I 2 Wireless", "link": "USB cable", "wireless": True, "gen": "legacy"},
-    (0x258A, 0x2019): {"name": "Glorious Model O 2 Wireless", "link": "USB cable", "wireless": True, "gen": "legacy"},
-    (0x258A, 0x201A): {"name": "Glorious Model D 2 Wireless", "link": "USB cable", "wireless": True, "gen": "legacy"},
-    (0x258A, 0x201D): {"name": "Glorious Model O 2", "link": "USB cable", "wireless": False, "gen": "legacy"},
-    (0x258A, 0x2022): {"name": "Glorious Model O Wireless", "link": "Wireless dongle", "wireless": True, "gen": "legacy"},
-    (0x258A, 0x2023): {"name": "Glorious Model D Wireless", "link": "Wireless dongle", "wireless": True, "gen": "legacy"},
-    (0x258A, 0x2024): {"name": "Glorious Model O- Wireless", "link": "Wireless dongle", "wireless": True, "gen": "legacy"},
-    (0x258A, 0x2025): {"name": "Glorious Model D- Wireless", "link": "Wireless dongle", "wireless": True, "gen": "legacy"},
-    (0x258A, 0x2027): {"name": "Glorious Series One Pro", "link": "Wireless dongle", "wireless": True, "gen": "legacy"},
-    (0x258A, 0x2031): {"name": "Glorious Model I 2 Wireless", "link": "Wireless dongle", "wireless": True, "gen": "legacy"},
-    (0x258A, 0x2033): {"name": "Glorious Model O 2 Wireless", "link": "Wireless dongle", "wireless": True, "gen": "legacy"},
-    (0x258A, 0x2034): {"name": "Glorious Model D 2 Wireless", "link": "Wireless dongle", "wireless": True, "gen": "legacy"},
-    (0x258A, 0x2039): {"name": "Glorious Forge Mouse", "link": "USB / Wireless", "wireless": True, "gen": "legacy"},
-    (0x22D4, 0x1503): {"name": "Glorious Model I", "link": "USB cable", "wireless": False, "gen": "legacy"},
-    (0x320F, 0x821A): {"name": "Glorious Model O 2", "link": "USB cable", "wireless": False, "gen": "legacy"},
-    (0x320F, 0x823A): {"name": "Glorious Model O 2 (v2)", "link": "USB cable", "wireless": False, "gen": "legacy"},
-    (0x320F, 0x831A): {"name": "Glorious Model D 2", "link": "USB cable", "wireless": False, "gen": "legacy"},
-    (0x3794, 0xA300): {"name": "Glorious Classic (CORE 2)", "link": "USB cable", "wireless": True, "gen": "core2"},
-    (0x3794, 0xA312): {"name": "Glorious Classic (CORE 2)", "link": "Wireless dongle", "wireless": True, "gen": "core2"},
-}
-GLORIOUS_PIXART = {
-    (0x093A, 0x821B): ("Glorious Model O 2 Mini", "USB cable", False),
-    (0x093A, 0x821D): ("Glorious Model O 2 Mini", "Wireless dongle", True),
-    (0x093A, 0x822A): ("Glorious Model O 2 Mini Wireless", "USB cable", True),
-    (0x093A, 0x822B): ("Glorious Model O 2 Mini Wireless", "Wireless dongle", True),
-    (0x093A, 0x822D): ("Glorious Series 2 Pro", "USB cable", True),
-    (0x093A, 0x824A): ("Glorious Series 2 Pro", "Wireless dongle", True),
-    (0x093A, 0x824B): ("Glorious Model D 2 Mini", "USB cable", False),
-    (0x093A, 0x824D): ("Glorious Model D 2 Mini", "Wireless dongle", True),
-    (0x093A, 0x825A): ("Glorious Model D 2 Mini Wireless", "Wireless dongle", True),
-    (0x093A, 0x826A): ("Glorious Model O 3", "USB cable", False),
-    (0x093A, 0x826B): ("Glorious Model O 3 Wireless", "USB cable", True),
-    (0x093A, 0x826D): ("Glorious Model O 3 Wireless", "Wireless dongle", True),
-    (0x093A, 0x827A): ("Glorious Model D 3 Wireless", "Wireless dongle", True),
-    (0x093A, 0x832A): ("Glorious Pixart Mouse", "USB / Wireless", True),
-}
+# Glorious registries loaded from shared devices/devices.json
+GLORIOUS_SINOWEALTH, GLORIOUS_CORE2, GLORIOUS_CLASSIC, GLORIOUS_PIXART = get_registry().build_glorious_tables()
 
 SINO_SENSORS = {
     0x06: ("PMW3360", 12000, True),

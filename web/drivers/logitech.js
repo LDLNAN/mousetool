@@ -1,26 +1,8 @@
-// Protocol 3: Logitech HID++ 2.0 driver
+// Protocol 3: Logitech HID++ 2.0 driver (registry-backed)
 import { DevErr, hex, hex4 } from "./common.js";
+import { getLogiDevices, tierMetaFromProfile } from "./registry.js";
 
 const LOGI_VID = 0x046d;
-const LOGI_DEVICES = {
-  0xc088: { name: "Logitech G Pro Wireless", link: "USB cable" },
-  0xc08b: { name: "Logitech G502 Hero", link: "USB cable" },
-  0xc092: { name: "Logitech G Pro X Superlight", link: "USB cable" },
-  0xc093: { name: "Logitech G502 Lightspeed", link: "USB cable" },
-  0xc094: { name: "Logitech G Pro Wireless", link: "USB cable" },
-  0xc095: { name: "Logitech G305", link: "USB" },
-  0xc099: { name: "Logitech G Pro X Superlight 2", link: "USB cable" },
-  0xc09d: { name: "Logitech G502 X Plus", link: "USB cable" },
-  0xc09e: { name: "Logitech G502 X Lightspeed", link: "USB cable" },
-  0xc52b: { name: "Logitech Unifying Receiver", link: "Unifying receiver" },
-  0xc539: { name: "Logitech Lightspeed Receiver", link: "Lightspeed dongle" },
-  0xc53f: { name: "Logitech Lightspeed Receiver", link: "Lightspeed dongle" },
-  0xc547: { name: "Logitech Superlight Receiver", link: "Lightspeed dongle" },
-  0xc548: { name: "Logitech Bolt Receiver", link: "Bolt receiver" },
-  0xc54d: { name: "Logitech Superlight 2 Receiver", link: "Lightspeed 2 dongle" },
-  0xb023: { name: "Logitech MX Master 3", link: "Bluetooth" },
-  0xb034: { name: "Logitech MX Master 3S", link: "Bluetooth" },
-};
 
 function classifyLogitech(d) {
   const vid = d.vendorId, pid = d.productId;
@@ -28,12 +10,14 @@ function classifyLogitech(d) {
   const hasHidpp = d.collections?.some((c) => c.usagePage === 0xff00 || c.usagePage === 0xff43 ||
     (c.outputReports || []).some((r) => r.reportId === 0x10 || r.reportId === 0x11));
   if (!hasHidpp) return null;
-  const known = LOGI_DEVICES[pid] ?? { name: d.productName || "Logitech HID++ Mouse", link: "HID++" };
+  const logiDevices = getLogiDevices();
+  const known = logiDevices[pid] ?? { name: d.productName || "Logitech HID++ Mouse", link: "HID++" };
   return {
     driver: "hidpp", protoLabel: "Logitech HID++ 2.0", protoTag: "HID++",
+    ...tierMetaFromProfile(known.profileId || "logitech_hidpp20"),
     info: { name: known.name, link: known.link, prio: 3, wireless: /dongle|receiver|bluetooth/i.test(known.link), hyper: false, dpiMax: 32000 },
     caps: {
-      stages: false, dpi: false, maxStages: 1, dpiMin: 100, dpiMax: 32000, dpiStepLo: 50, dpiStepHi: 50,
+      stages: false, dpi: false, dpiRead: false, dpiWrite: false, maxStages: 1, dpiMin: 100, dpiMax: 32000, dpiStepLo: 50, dpiStepHi: 50,
       splitXY: false, pollRates: [], lodMode: "none", buttons: false, layers: false,
       wireless: /dongle|receiver|bluetooth/i.test(known.link), powerTune: false, batteryRead: false,
       hyper: false, dongle: false, factoryReset: false, genericDpi: false,
@@ -209,7 +193,7 @@ function makeHidppApi(sess, { isConnected, log }) {
 
 export {
   LOGI_VID,
-  LOGI_DEVICES,
+  getLogiDevices,
   classifyLogitech,
   makeHidppApi,
 };

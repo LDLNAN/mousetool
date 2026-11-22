@@ -1,4 +1,5 @@
-"""HID descriptor parsing and Linux hidraw/sysfs mouse discovery."""
+"""HID descriptor parsing, registry-backed classification, and Linux hidraw/sysfs mouse discovery."""
+import copy
 import glob
 import os
 import re
@@ -22,6 +23,7 @@ from .drivers.pulsar import (
     PULSAR_XS1_DEVICES,
 )
 from .drivers.razer import RAZER_DEVICES, RAZER_VID
+from .registry import get_registry, tier_label
 
 ALL_KNOWN_VENDORS = {
     RAZER_VID: set(RAZER_DEVICES.keys()),
@@ -177,6 +179,15 @@ def _is_logitech_hidpp(rd, cols=None):
     return (b"\x06\x00\xff" in rd or b"\x06\x43\xff" in rd) and (b"\x85\x10" in rd or b"\x85\x11" in rd)
 
 
+def _is_keyboard_only_collections(cols):
+    if not cols:
+        return False
+    has_kbd = any(c["usage_page"] == 0x01 and c["usage"] == 0x06 for c in cols)
+    has_mouse = any(c["usage_page"] == 0x01 and c["usage"] == 0x02 for c in cols)
+    has_vendor = any(c["usage_page"] >= 0xFF00 for c in cols)
+    return has_kbd and not has_mouse and not has_vendor
+
+
 def _read_text(path, default=""):
     if not os.path.exists(path):
         return default
@@ -224,8 +235,293 @@ def _usb_dev_phys(phys):
     return re.sub(r":\d+\.\d+$", "", p)
 
 
+def _attach_profile_meta(entry, profile_id, profile):
+    tier = profile["tier"]
+    entry["tier"] = tier
+    entry["tier_label"] = tier_label(tier)
+    entry["profile_id"] = profile_id
+    entry["write_enabled"] = bool(profile["write_enabled"])
+    entry["evidence_status"] = profile["evidence_status"]
+    entry["operations"] = copy.deepcopy(profile["operations"])
+    return entry
+
+
+def classify_hid_node(
+    vid,
+    pid,
+    rd=b"",
+    cols=None,
+    bus="usb",
+    name="",
+    devpath="/dev/hidraw0",
+    phys="",
+    usb_phys="",
+    uniq="",
+    egg_a1_vps=None,
+    allow_generic=False,
+    registry=None,
+):
+    """Classify one HID node using the shared devices/ registry.
+
+    Returns (entry_dict_or_None, split_notify_tuple_or_None).
+    Unknown Razer VIDs NEVER fall back into the full Razer driver: when allow_generic=True
+    they fall safely to Tier 0 (generic, zero vendor reports); when allow_generic=False they return None.
+    Keyboard models are always excluded.
+    """
+    reg = registry or get_registry()
+    if cols is None:
+        cols = _parse_hid_collections(rd) if rd else []
+    egg_a1_vps = egg_a1_vps or set()
+
+    resolved = reg.resolve_match(vid, pid, bus=bus)
+    if resolved is not None:
+        match, model, profile = resolved
+        if model["kind"] == "keyboard":
+            return None, None
+    else:
+        match = model = profile = None
+
+    if _is_keyboard_only_collections(cols):
+        return None, None
+
+    entry = None
+    split_notify_of = None
+
+    # 1. Razer: strict reviewed registry match ONLY (broad VID fallback closed per MT-012 Item 1)
+    if vid == RAZER_VID:
+        if resolved is not None and profile["driver"] == "razer" and profile["tier"] >= 1 and _is_razer_control(rd, cols):
+            dpi_max = match.get("meta", {}).get("dpi_max", profile["operations"]["dpi"].get("dpi_max", 30000))
+            entry = {
+                "id": f"razer-{vid:04x}:{pid:04x}-{os.path.basename(devpath)}",
+                "driver": "razer", "vid": vid, "pid": pid,
+                "name": model["name"], "link": match["link"], "prio": match["prio"],
+                "wireless": match["wireless"], "hyper": match["hyper"], "dpi_max": dpi_max,
+                "hidraw": devpath, "phys": phys, "uniq": uniq, "bus": bus,
+            }
+            _attach_profile_meta(entry, match["profile_id"], profile)
+            return entry, None
+        # Unknown or Tier 0 Razer device -> NEVER select the Razer driver
+        if allow_generic:
+            t0_prof = reg.profiles["generic_tier0"]
+            gname = model["name"] if model is not None else (name or f"Razer Mouse ({vid:04x}:{pid:04x})")
+            entry = {
+                "id": f"generic-{vid:04x}:{pid:04x}-{os.path.basename(devpath)}",
+                "driver": "generic", "vid": vid, "pid": pid,
+                "name": gname, "link": match["link"] if match else "Generic HID", "prio": 9,
+                "wireless": False, "hyper": False, "dpi_max": 50000,
+                "hidraw": devpath, "phys": phys, "uniq": uniq, "bus": bus,
+            }
+            _attach_profile_meta(entry, "generic_tier0", t0_prof)
+            return entry, None
+        return None, None
+
+    # 2. Endgame Gear 8k
+    if vid == EGG_VID and _is_egg_control(rd, cols):
+        prof = EGG_DEVICES.get(pid, {
+            "name": name or f"Endgame Gear 8k (0x{pid:04x})",
+            "family": "v1",
+            "cpi_min": 50, "cpi_max": 26000, "cpi_step_lo": 50, "cpi_step_hi": 50,
+            "lod_options": ["0.7 mm", "1 mm", "2 mm"],
+            "lod_glass": False, "angle_tuning": False, "force_max_fps": False, "led_liftoff": False,
+            "motion_jitter": True,
+        })
+        pid_key = match["profile_id"] if (match and profile["driver"] == "egg8k") else ("egg8k_v2" if prof.get("family") == "v2" else "egg8k_v1")
+        entry = {
+            "id": f"egg-{vid:04x}:{pid:04x}-{os.path.basename(devpath)}",
+            "driver": "egg8k", "vid": vid, "pid": pid,
+            "name": prof["name"], "link": "USB 8K", "prio": 0,
+            "wireless": False, "hyper": True, "dpi_max": prof["cpi_max"],
+            "profile": prof, "hidraw": devpath, "phys": phys, "uniq": uniq, "bus": "usb",
+        }
+        _attach_profile_meta(entry, pid_key, reg.profiles[pid_key])
+    # 3. Endgame Gear -we
+    elif vid == EGG_VID and pid in EGG_WE_DEVICES and (vid, pid) not in egg_a1_vps:
+        has_feat8 = _cols_has(cols, page=0xFF02, feat_id=0x08) or _cols_has(cols, feat_id=0x08)
+        has_in9 = _cols_has(cols, page=0xFF01, in_id=0x09) or _cols_has(cols, in_id=0x09)
+        mname, link, wireless, prio = EGG_WE_DEVICES[pid]
+        if has_feat8:
+            entry = {
+                "id": f"egg_we-{vid:04x}:{pid:04x}-{os.path.basename(devpath)}",
+                "driver": "egg_we", "vid": vid, "pid": pid,
+                "name": mname, "link": link, "prio": prio,
+                "wireless": wireless, "hyper": False, "dpi_max": 12800, "dpi_min": 50,
+                "hidraw": devpath, "notify_hidraw": devpath if has_in9 else None,
+                "phys": phys, "usb_phys": usb_phys, "uniq": uniq, "bus": bus,
+            }
+            _attach_profile_meta(entry, "egg_we_compx", reg.profiles["egg_we_compx"])
+        elif has_in9:
+            split_notify_of = ("egg_we", vid, pid, usb_phys or devpath, devpath)
+    # 4. Logitech HID++
+    elif vid == LOGI_VID and _is_logitech_hidpp(rd, cols):
+        mname, link = LOGI_DEVICES.get(pid, (name or f"Logitech HID++ (0x{pid:04x})", "HID++"))
+        entry = {
+            "id": f"hidpp-{vid:04x}:{pid:04x}-{os.path.basename(devpath)}",
+            "driver": "hidpp", "vid": vid, "pid": pid,
+            "name": mname, "link": link,
+            "prio": 3 if "receiver" in link.lower() or "dongle" in link.lower() else 1,
+            "wireless": True, "hyper": False, "dpi_max": 32000,
+            "hidraw": devpath, "phys": phys, "uniq": uniq, "bus": bus,
+        }
+        _attach_profile_meta(entry, "logitech_hidpp20", reg.profiles["logitech_hidpp20"])
+    # 5. Pulsar (Pro / XS-1 / CompX)
+    elif vid == PULSAR_VID:
+        if pid in PULSAR_PRO_DEVICES and _cols_has(cols, page=0x0001, usage=0x0000, in_id=0, out_id=0):
+            mname, link, wireless, max_poll = PULSAR_PRO_DEVICES[pid]
+            entry = {
+                "id": f"pulsar_pro-{vid:04x}:{pid:04x}-{os.path.basename(devpath)}",
+                "driver": "pulsar_pro", "vid": vid, "pid": pid,
+                "name": mname, "link": link, "prio": 2,
+                "wireless": wireless, "hyper": max_poll > 1000, "max_poll": max_poll,
+                "dpi_min": 50, "dpi_max": 32000,
+                "hidraw": devpath, "phys": phys, "uniq": uniq, "bus": bus,
+            }
+            _attach_profile_meta(entry, "pulsar_pro", reg.profiles["pulsar_pro"])
+        elif _cols_has(cols, page=0xFFFF, usage=0x0001, feat_id=0) and not _cols_has(cols, in_id=0x08):
+            feat_c = _cols_has(cols, page=0xFFFF, usage=0x0001, feat_id=0)
+            if feat_c["feat_lens"].get(0, 0) >= 64:
+                mname, link, wireless, max_poll = PULSAR_XS1_DEVICES.get(
+                    pid, (name or f"Pulsar XS-1 (0x{pid:04x})", "USB / Wireless", True, 8000 if "8k" in name.lower() else 1000)
+                )
+                entry = {
+                    "id": f"pulsar_xs1-{vid:04x}:{pid:04x}-{os.path.basename(devpath)}",
+                    "driver": "pulsar_xs1", "vid": vid, "pid": pid,
+                    "name": mname, "link": link, "prio": 1 if not wireless else 2,
+                    "wireless": wireless, "hyper": max_poll > 1000, "max_poll": max_poll,
+                    "dpi_min": 50, "dpi_max": 26000,
+                    "hidraw": devpath, "phys": phys, "uniq": uniq, "bus": bus,
+                }
+                _attach_profile_meta(entry, "pulsar_xs1", reg.profiles["pulsar_xs1"])
+        elif _cols_has(cols, in_id=0x08, out_id=0x08):
+            entry = {
+                "id": f"compx-{vid:04x}:{pid:04x}-{os.path.basename(devpath)}",
+                "driver": "compx", "brand": "pulsar_compx", "vid": vid, "pid": pid,
+                "name": name or f"Pulsar CompX (0x{pid:04x})",
+                "link": "Dongle" if "dongle" in name.lower() else "USB / Wireless",
+                "prio": 2, "wireless": True, "hyper": True, "dpi_min": 10, "dpi_max": 32000,
+                "rates": [125, 250, 500, 1000, 2000, 4000, 8000],
+                "hidraw": devpath, "notify_hidraw": devpath,
+                "phys": phys, "usb_phys": usb_phys, "uniq": uniq, "bus": bus,
+            }
+            _attach_profile_meta(entry, "compx_odm", reg.profiles["compx_odm"])
+    # 6. Areson
+    elif vid == ARESON_VID and pid in ARESON_DEVICES and not _cols_has(cols, page=0xFFFF, usage=0x0002):
+        mname, link, wireless = ARESON_DEVICES[pid]
+        has_feat8 = _cols_has(cols, feat_id=0x08)
+        has_in9 = _cols_has(cols, in_id=0x09)
+        if has_feat8:
+            entry = {
+                "id": f"compx-{vid:04x}:{pid:04x}-{os.path.basename(devpath)}",
+                "driver": "compx", "brand": "areson", "vid": vid, "pid": pid,
+                "name": mname, "link": link, "prio": 2 if wireless else 0,
+                "wireless": wireless, "hyper": False, "dpi_min": 50, "dpi_max": 20000,
+                "rates": [125, 250, 500, 1000],
+                "hidraw": devpath, "notify_hidraw": devpath if has_in9 else None,
+                "phys": phys, "usb_phys": usb_phys, "uniq": uniq, "bus": bus,
+            }
+            _attach_profile_meta(entry, "pulsar_areson_compx", reg.profiles["pulsar_areson_compx"])
+        elif has_in9:
+            split_notify_of = ("compx", vid, pid, usb_phys or devpath, devpath)
+    # 7. CompX ODM
+    elif (vid, pid) in COMPX_DEVICES or (vid in (COMPX_VID, ATK_VID) and _cols_has(cols, page=0xFF02, usage=0x0002)):
+        if _cols_has(cols, out_id=0x08) or _cols_has(cols, in_id=0x08):
+            spec = COMPX_DEVICES.get((vid, pid), {
+                "brand": "atk" if vid == ATK_VID else "compx",
+                "name": name or f"CompX Mouse ({vid:04x}:{pid:04x})",
+                "link": "Dongle" if "dongle" in name.lower() else "USB / Wireless",
+                "wireless": True, "dpi_max": 30000,
+                "rates": [125, 250, 500, 1000, 2000, 4000, 8000],
+            })
+            in_c = _cols_has(cols, in_id=0x08)
+            entry = {
+                "id": f"compx-{vid:04x}:{pid:04x}-{os.path.basename(devpath)}",
+                "driver": "compx", "brand": spec["brand"], "model": spec.get("model"),
+                "vid": vid, "pid": pid,
+                "name": spec["name"], "link": spec["link"],
+                "prio": 2 if spec.get("wireless") else 0,
+                "wireless": bool(spec.get("wireless", True)),
+                "hyper": max(spec.get("rates", [1000])) > 1000,
+                "dpi_min": 50, "dpi_max": spec.get("dpi_max", 30000),
+                "rates": spec.get("rates", [125, 250, 500, 1000, 2000, 4000, 8000]),
+                "hidraw": devpath, "notify_hidraw": devpath if in_c else None,
+                "phys": phys, "usb_phys": usb_phys, "uniq": uniq, "bus": bus,
+            }
+            _attach_profile_meta(entry, "compx_odm", reg.profiles["compx_odm"])
+    # 8. Glorious
+    elif (vid, pid) in GLORIOUS_SINOWEALTH:
+        c = _cols_has(cols, page=0xFF00, feat_id=0x05)
+        if c and (0x04 in c["feat_lens"] or 0x06 in c["feat_lens"]):
+            mname, link = GLORIOUS_SINOWEALTH[(vid, pid)]
+            cfg_rid = 0x06 if 0x06 in c["feat_lens"] else 0x04
+            entry = {
+                "id": f"glorious_sino-{vid:04x}:{pid:04x}-{os.path.basename(devpath)}",
+                "driver": "glorious_sinowealth", "vid": vid, "pid": pid,
+                "name": mname, "link": link, "prio": 1,
+                "wireless": False, "hyper": False, "dpi_min": 100, "dpi_max": 16000,
+                "cfg_rid": cfg_rid, "cfg_len": c["feat_lens"][cfg_rid],
+                "cmd_len": c["feat_lens"].get(0x05, 6),
+                "hidraw": devpath, "phys": phys, "uniq": uniq, "bus": bus,
+            }
+            _attach_profile_meta(entry, "glorious_sinowealth", reg.profiles["glorious_sinowealth"])
+    elif (vid, pid) in GLORIOUS_CORE2:
+        c = _cols_has(cols, page=0xFFFF, feat_id=0)
+        if c and c["feat_lens"].get(0, 0) >= 64:
+            mname, link, wireless, max_poll = GLORIOUS_CORE2[(vid, pid)]
+            entry = {
+                "id": f"glorious_core2-{vid:04x}:{pid:04x}-{os.path.basename(devpath)}",
+                "driver": "glorious_core2", "vid": vid, "pid": pid,
+                "name": mname, "link": link, "prio": 2 if wireless else 0,
+                "wireless": wireless, "hyper": max_poll > 1000, "max_poll": max_poll,
+                "dpi_min": 50, "dpi_max": 26000,
+                "hidraw": devpath, "phys": phys, "uniq": uniq, "bus": bus,
+            }
+            _attach_profile_meta(entry, "glorious_core2", reg.profiles["glorious_core2"])
+    elif (vid, pid) in GLORIOUS_CLASSIC:
+        for c in cols:
+            if c["usage_page"] in (0xFF01, 0xFF00, 0xFFFF) and c["feat_lens"]:
+                rid, flen = next(iter(c["feat_lens"].items()))
+                spec = GLORIOUS_CLASSIC[(vid, pid)]
+                entry = {
+                    "id": f"glorious_classic-{vid:04x}:{pid:04x}-{os.path.basename(devpath)}",
+                    "driver": "glorious_classic", "vid": vid, "pid": pid,
+                    "name": spec["name"], "link": spec["link"], "prio": 2 if spec["wireless"] else 0,
+                    "wireless": spec["wireless"], "hyper": False,
+                    "dpi_min": 100, "dpi_max": 19000,
+                    "gen": spec["gen"], "feat_rid": rid, "feat_len": flen,
+                    "hidraw": devpath, "phys": phys, "uniq": uniq, "bus": bus,
+                }
+                _attach_profile_meta(entry, "glorious_classic", reg.profiles["glorious_classic"])
+                break
+    elif (vid, pid) in GLORIOUS_PIXART:
+        c = _cols_has(cols, page=0xFF00, feat_id=0x03)
+        if c:
+            mname, link, wireless = GLORIOUS_PIXART[(vid, pid)]
+            entry = {
+                "id": f"glorious_pixart-{vid:04x}:{pid:04x}-{os.path.basename(devpath)}",
+                "driver": "glorious_pixart", "vid": vid, "pid": pid,
+                "name": mname, "link": link, "prio": 2 if wireless else 0,
+                "wireless": wireless, "hyper": False, "dpi_min": 100, "dpi_max": 26000,
+                "feat_len": c["feat_lens"][0x03],
+                "hidraw": devpath, "phys": phys, "uniq": uniq, "bus": bus,
+            }
+            _attach_profile_meta(entry, "glorious_pixart", reg.profiles["glorious_pixart"])
+
+    if entry is None and split_notify_of is None and allow_generic:
+        t0_prof = reg.profiles["generic_tier0"]
+        gname = model["name"] if model is not None else (name or f"HID Device ({vid:04x}:{pid:04x})")
+        entry = {
+            "id": f"generic-{vid:04x}:{pid:04x}-{os.path.basename(devpath)}",
+            "driver": "generic", "vid": vid, "pid": pid,
+            "name": gname, "link": match["link"] if match else "Generic HID", "prio": 9,
+            "wireless": False, "hyper": False, "dpi_max": 50000,
+            "hidraw": devpath, "phys": phys, "uniq": uniq, "bus": bus,
+        }
+        _attach_profile_meta(entry, "generic_tier0", t0_prof)
+
+    return entry, split_notify_of
+
+
 def discover_mice():
-    """Return list of configurable mice dicts sorted deterministically (one per physical mouse)."""
+    """Return list of matched Tier 1/2 mice dicts sorted deterministically (one per physical mouse)."""
     raw_nodes = []
     egg_a1_vps = set()
     for d in sorted(glob.glob("/sys/class/hidraw/hidraw*")):
@@ -267,191 +563,11 @@ def discover_mice():
     for nd in raw_nodes:
         vid, pid, rd, cols = nd["vid"], nd["pid"], nd["rd"], nd["cols"]
         devpath, name, phys, usb_phys, uniq = nd["devpath"], nd["name"], nd["phys"], nd["usb_phys"], nd["uniq"]
-        entry = None
-        split_notify_of = None
-
-        if vid == RAZER_VID and _is_razer_control(rd, cols):
-            if pid in RAZER_DEVICES:
-                mname, link, prio, wireless, hyper, dpi_max = RAZER_DEVICES[pid]
-            else:
-                mname = name or f"Razer Mouse (0x{pid:04x})"
-                link, prio, wireless, hyper, dpi_max = "USB / Wireless", 5, True, False, 35000
-            entry = {
-                "id": f"razer-{vid:04x}:{pid:04x}-{os.path.basename(devpath)}",
-                "driver": "razer", "vid": vid, "pid": pid,
-                "name": mname, "link": link, "prio": prio,
-                "wireless": wireless, "hyper": hyper, "dpi_max": dpi_max,
-                "hidraw": devpath, "phys": phys, "uniq": uniq, "bus": nd["bus"],
-            }
-        elif vid == EGG_VID and _is_egg_control(rd, cols):
-            prof = EGG_DEVICES.get(pid, {
-                "name": name or f"Endgame Gear 8k (0x{pid:04x})",
-                "family": "v1",
-                "cpi_min": 50, "cpi_max": 26000, "cpi_step_lo": 50, "cpi_step_hi": 50,
-                "lod_options": ["0.7 mm", "1 mm", "2 mm"],
-                "lod_glass": False, "angle_tuning": False, "force_max_fps": False, "led_liftoff": False,
-                "motion_jitter": True,
-            })
-            entry = {
-                "id": f"egg-{vid:04x}:{pid:04x}-{os.path.basename(devpath)}",
-                "driver": "egg8k", "vid": vid, "pid": pid,
-                "name": prof["name"], "link": "USB 8K", "prio": 0,
-                "wireless": False, "hyper": True, "dpi_max": prof["cpi_max"],
-                "profile": prof, "hidraw": devpath, "phys": phys, "uniq": uniq, "bus": "usb",
-            }
-        elif vid == EGG_VID and pid in EGG_WE_DEVICES and (vid, pid) not in egg_a1_vps:
-            has_feat8 = _cols_has(cols, page=0xFF02, feat_id=0x08) or _cols_has(cols, feat_id=0x08)
-            has_in9 = _cols_has(cols, page=0xFF01, in_id=0x09) or _cols_has(cols, in_id=0x09)
-            mname, link, wireless, prio = EGG_WE_DEVICES[pid]
-            if has_feat8:
-                entry = {
-                    "id": f"egg_we-{vid:04x}:{pid:04x}-{os.path.basename(devpath)}",
-                    "driver": "egg_we", "vid": vid, "pid": pid,
-                    "name": mname, "link": link, "prio": prio,
-                    "wireless": wireless, "hyper": False, "dpi_max": 12800, "dpi_min": 50,
-                    "hidraw": devpath, "notify_hidraw": devpath if has_in9 else None,
-                    "phys": phys, "usb_phys": usb_phys, "uniq": uniq, "bus": nd["bus"],
-                }
-            elif has_in9:
-                split_notify_of = ("egg_we", vid, pid, usb_phys or devpath, devpath)
-        elif vid == LOGI_VID and _is_logitech_hidpp(rd, cols):
-            mname, link = LOGI_DEVICES.get(pid, (name or f"Logitech HID++ (0x{pid:04x})", "HID++"))
-            entry = {
-                "id": f"hidpp-{vid:04x}:{pid:04x}-{os.path.basename(devpath)}",
-                "driver": "hidpp", "vid": vid, "pid": pid,
-                "name": mname, "link": link,
-                "prio": 3 if "receiver" in link.lower() or "dongle" in link.lower() else 1,
-                "wireless": True, "hyper": False, "dpi_max": 32000,
-                "hidraw": devpath, "phys": phys, "uniq": uniq, "bus": nd["bus"],
-            }
-        elif vid == PULSAR_VID:
-            if pid in PULSAR_PRO_DEVICES and _cols_has(cols, page=0x0001, usage=0x0000, in_id=0, out_id=0):
-                mname, link, wireless, max_poll = PULSAR_PRO_DEVICES[pid]
-                entry = {
-                    "id": f"pulsar_pro-{vid:04x}:{pid:04x}-{os.path.basename(devpath)}",
-                    "driver": "pulsar_pro", "vid": vid, "pid": pid,
-                    "name": mname, "link": link, "prio": 2,
-                    "wireless": wireless, "hyper": max_poll > 1000, "max_poll": max_poll,
-                    "dpi_min": 50, "dpi_max": 32000,
-                    "hidraw": devpath, "phys": phys, "uniq": uniq, "bus": nd["bus"],
-                }
-            elif _cols_has(cols, page=0xFFFF, usage=0x0001, feat_id=0) and not _cols_has(cols, in_id=0x08):
-                feat_c = _cols_has(cols, page=0xFFFF, usage=0x0001, feat_id=0)
-                if feat_c["feat_lens"].get(0, 0) >= 64:
-                    mname, link, wireless, max_poll = PULSAR_XS1_DEVICES.get(
-                        pid, (name or f"Pulsar XS-1 (0x{pid:04x})", "USB / Wireless", True, 8000 if "8k" in name.lower() else 1000)
-                    )
-                    entry = {
-                        "id": f"pulsar_xs1-{vid:04x}:{pid:04x}-{os.path.basename(devpath)}",
-                        "driver": "pulsar_xs1", "vid": vid, "pid": pid,
-                        "name": mname, "link": link, "prio": 1 if not wireless else 2,
-                        "wireless": wireless, "hyper": max_poll > 1000, "max_poll": max_poll,
-                        "dpi_min": 50, "dpi_max": 26000,
-                        "hidraw": devpath, "phys": phys, "uniq": uniq, "bus": nd["bus"],
-                    }
-            elif _cols_has(cols, in_id=0x08, out_id=0x08):
-                entry = {
-                    "id": f"compx-{vid:04x}:{pid:04x}-{os.path.basename(devpath)}",
-                    "driver": "compx", "brand": "pulsar_compx", "vid": vid, "pid": pid,
-                    "name": name or f"Pulsar CompX (0x{pid:04x})",
-                    "link": "Dongle" if "dongle" in name.lower() else "USB / Wireless",
-                    "prio": 2, "wireless": True, "hyper": True, "dpi_min": 10, "dpi_max": 32000,
-                    "rates": [125, 250, 500, 1000, 2000, 4000, 8000],
-                    "hidraw": devpath, "notify_hidraw": devpath,
-                    "phys": phys, "usb_phys": usb_phys, "uniq": uniq, "bus": nd["bus"],
-                }
-        elif vid == ARESON_VID and pid in ARESON_DEVICES and not _cols_has(cols, page=0xFFFF, usage=0x0002):
-            mname, link, wireless = ARESON_DEVICES[pid]
-            has_feat8 = _cols_has(cols, feat_id=0x08)
-            has_in9 = _cols_has(cols, in_id=0x09)
-            if has_feat8:
-                entry = {
-                    "id": f"compx-{vid:04x}:{pid:04x}-{os.path.basename(devpath)}",
-                    "driver": "compx", "brand": "areson", "vid": vid, "pid": pid,
-                    "name": mname, "link": link, "prio": 2 if wireless else 0,
-                    "wireless": wireless, "hyper": False, "dpi_min": 50, "dpi_max": 20000,
-                    "rates": [125, 250, 500, 1000],
-                    "hidraw": devpath, "notify_hidraw": devpath if has_in9 else None,
-                    "phys": phys, "usb_phys": usb_phys, "uniq": uniq, "bus": nd["bus"],
-                }
-            elif has_in9:
-                split_notify_of = ("compx", vid, pid, usb_phys or devpath, devpath)
-        elif (vid, pid) in COMPX_DEVICES or (vid in (COMPX_VID, ATK_VID) and _cols_has(cols, page=0xFF02, usage=0x0002)):
-            if _cols_has(cols, out_id=0x08) or _cols_has(cols, in_id=0x08):
-                spec = COMPX_DEVICES.get((vid, pid), {
-                    "brand": "atk" if vid == ATK_VID else "compx",
-                    "name": name or f"CompX Mouse ({vid:04x}:{pid:04x})",
-                    "link": "Dongle" if "dongle" in name.lower() else "USB / Wireless",
-                    "wireless": True, "dpi_max": 30000,
-                    "rates": [125, 250, 500, 1000, 2000, 4000, 8000],
-                })
-                in_c = _cols_has(cols, in_id=0x08)
-                entry = {
-                    "id": f"compx-{vid:04x}:{pid:04x}-{os.path.basename(devpath)}",
-                    "driver": "compx", "brand": spec["brand"], "model": spec.get("model"),
-                    "vid": vid, "pid": pid,
-                    "name": spec["name"], "link": spec["link"],
-                    "prio": 2 if spec.get("wireless") else 0,
-                    "wireless": bool(spec.get("wireless", True)),
-                    "hyper": max(spec.get("rates", [1000])) > 1000,
-                    "dpi_min": 50, "dpi_max": spec.get("dpi_max", 30000),
-                    "rates": spec.get("rates", [125, 250, 500, 1000, 2000, 4000, 8000]),
-                    "hidraw": devpath, "notify_hidraw": devpath if in_c else None,
-                    "phys": phys, "usb_phys": usb_phys, "uniq": uniq, "bus": nd["bus"],
-                }
-        elif (vid, pid) in GLORIOUS_SINOWEALTH:
-            c = _cols_has(cols, page=0xFF00, feat_id=0x05)
-            if c and (0x04 in c["feat_lens"] or 0x06 in c["feat_lens"]):
-                mname, link = GLORIOUS_SINOWEALTH[(vid, pid)]
-                cfg_rid = 0x06 if 0x06 in c["feat_lens"] else 0x04
-                entry = {
-                    "id": f"glorious_sino-{vid:04x}:{pid:04x}-{os.path.basename(devpath)}",
-                    "driver": "glorious_sinowealth", "vid": vid, "pid": pid,
-                    "name": mname, "link": link, "prio": 1,
-                    "wireless": False, "hyper": False, "dpi_min": 100, "dpi_max": 16000,
-                    "cfg_rid": cfg_rid, "cfg_len": c["feat_lens"][cfg_rid],
-                    "cmd_len": c["feat_lens"].get(0x05, 6),
-                    "hidraw": devpath, "phys": phys, "uniq": uniq, "bus": nd["bus"],
-                }
-        elif (vid, pid) in GLORIOUS_CORE2:
-            c = _cols_has(cols, page=0xFFFF, feat_id=0)
-            if c and c["feat_lens"].get(0, 0) >= 64:
-                mname, link, wireless, max_poll = GLORIOUS_CORE2[(vid, pid)]
-                entry = {
-                    "id": f"glorious_core2-{vid:04x}:{pid:04x}-{os.path.basename(devpath)}",
-                    "driver": "glorious_core2", "vid": vid, "pid": pid,
-                    "name": mname, "link": link, "prio": 2 if wireless else 0,
-                    "wireless": wireless, "hyper": max_poll > 1000, "max_poll": max_poll,
-                    "dpi_min": 50, "dpi_max": 26000,
-                    "hidraw": devpath, "phys": phys, "uniq": uniq, "bus": nd["bus"],
-                }
-        elif (vid, pid) in GLORIOUS_CLASSIC:
-            for c in cols:
-                if c["usage_page"] in (0xFF01, 0xFF00, 0xFFFF) and c["feat_lens"]:
-                    rid, flen = next(iter(c["feat_lens"].items()))
-                    spec = GLORIOUS_CLASSIC[(vid, pid)]
-                    entry = {
-                        "id": f"glorious_classic-{vid:04x}:{pid:04x}-{os.path.basename(devpath)}",
-                        "driver": "glorious_classic", "vid": vid, "pid": pid,
-                        "name": spec["name"], "link": spec["link"], "prio": 2 if spec["wireless"] else 0,
-                        "wireless": spec["wireless"], "hyper": False,
-                        "dpi_min": 100, "dpi_max": 19000,
-                        "gen": spec["gen"], "feat_rid": rid, "feat_len": flen,
-                        "hidraw": devpath, "phys": phys, "uniq": uniq, "bus": nd["bus"],
-                    }
-                    break
-        elif (vid, pid) in GLORIOUS_PIXART:
-            c = _cols_has(cols, page=0xFF00, feat_id=0x03)
-            if c:
-                mname, link, wireless = GLORIOUS_PIXART[(vid, pid)]
-                entry = {
-                    "id": f"glorious_pixart-{vid:04x}:{pid:04x}-{os.path.basename(devpath)}",
-                    "driver": "glorious_pixart", "vid": vid, "pid": pid,
-                    "name": mname, "link": link, "prio": 2 if wireless else 0,
-                    "wireless": wireless, "hyper": False, "dpi_min": 100, "dpi_max": 26000,
-                    "feat_len": c["feat_lens"][0x03],
-                    "hidraw": devpath, "phys": phys, "uniq": uniq, "bus": nd["bus"],
-                }
+        entry, split_notify_of = classify_hid_node(
+            vid=vid, pid=pid, rd=rd, cols=cols, bus=nd["bus"],
+            name=name, devpath=devpath, phys=phys, usb_phys=usb_phys, uniq=uniq,
+            egg_a1_vps=egg_a1_vps, allow_generic=False,
+        )
 
         if split_notify_of is not None:
             skey = split_notify_of[:4]
@@ -480,6 +596,7 @@ def discover_mice():
 
 def discover_system_mice():
     """Passive sysfs scan of ALL Linux mice (never opens hidraw, safe while WebHID runs)."""
+    reg = get_registry()
     configurable = discover_mice()
     by_phys = {m["phys"]: m for m in configurable if m.get("phys")}
     by_usb_phys = {m["usb_phys"]: m for m in configurable if m.get("usb_phys")}
@@ -514,6 +631,14 @@ def discover_system_mice():
                 vid, pid = int(parts[1], 16), int(parts[2], 16)
             except ValueError:
                 pass
+        bus = "bluetooth" if prod.startswith("5/") else "usb"
+        if vid is not None and pid is not None:
+            resolved = reg.resolve_match(vid, pid, bus=bus)
+            if resolved is not None and resolved[1]["kind"] == "keyboard":
+                continue
+        else:
+            resolved = None
+
         if phys and phys in seen_phys:
             continue
         if phys:
@@ -540,11 +665,16 @@ def discover_system_mice():
                 batt = b
                 break
 
+        tier = cfg.get("tier", 2) if cfg else 0
+        display_name = cfg["name"] if cfg else (resolved[1]["name"] if resolved else name)
         mice.append({
-            "name": cfg["name"] if cfg else name,
+            "name": display_name,
             "vid": f"0x{vid:04x}" if vid is not None else None,
             "pid": f"0x{pid:04x}" if pid is not None else None,
             "driver": cfg["driver"] if cfg else "generic",
+            "tier": tier,
+            "tier_label": tier_label(tier),
+            "write_enabled": bool(cfg.get("write_enabled", tier >= 2)) if cfg else False,
             "configurable": cfg is not None,
             "id": cfg["id"] if cfg else f"sys-{os.path.basename(d)}",
             "hidraw": cfg["hidraw"] if cfg else None,
@@ -554,15 +684,19 @@ def discover_system_mice():
             "charging": batt["charging"] if batt else None,
         })
 
-    # Include any configurable dongle/mouse not yet matched to an input/mouseN node
+    # Include any matched dongle/mouse not yet matched to an input/mouseN node
     for cfg in configurable:
         if cfg["id"] in used_cfg_ids:
             continue
+        tier = cfg.get("tier", 2)
         mice.append({
             "name": cfg["name"],
             "vid": f"0x{cfg['vid']:04x}",
             "pid": f"0x{cfg['pid']:04x}",
             "driver": cfg["driver"],
+            "tier": tier,
+            "tier_label": tier_label(tier),
+            "write_enabled": bool(cfg.get("write_enabled", tier >= 2)),
             "configurable": True,
             "id": cfg["id"],
             "hidraw": cfg["hidraw"],
@@ -575,7 +709,7 @@ def discover_system_mice():
 
 
 def select_mice(selector=None, all_devices=False, driver=None):
-    """Resolve user selector (--device / --all) against discovered configurable mice."""
+    """Resolve user selector (--device / --all) against discovered matched mice."""
     mice = discover_mice()
     if driver:
         if isinstance(driver, (list, tuple, set)):

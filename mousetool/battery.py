@@ -16,6 +16,7 @@ if sys.platform != "win32":
     import fcntl
 
 from . import hid_discovery
+from .registry import assert_operation_allowed
 from .drivers import (
     Asleep,
     _cache_key,
@@ -59,6 +60,7 @@ def _battery_identity(meta):
 
 
 def _read_mouse_battery(meta):
+    assert_operation_allowed(meta, "battery", write=False)
     fd = os.open(meta["hidraw"], os.O_RDWR)
     nfd = _open_notify(meta)
     try:

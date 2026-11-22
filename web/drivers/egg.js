@@ -1,32 +1,9 @@
-// Protocol 2: Endgame Gear 8k (OP1 8k / XM2 8k / Purple Frost / v2) & -we device tables
+// Protocol 2: Endgame Gear 8k (OP1 8k / XM2 8k / Purple Frost / v2) & -we device tables (registry-backed)
 import { DevErr, findCollection, sleep, vpKey } from "./common.js";
+import { getEggDevices, getEggWeDevices, tierMetaFromProfile } from "./registry.js";
 
 const EGG_VID = 0x3367;
-const EGG_DEVICES = {
-  0x1964: { name: "Endgame Gear OP1 8k", family: "v1", cpiMin: 50, cpiMax: 26000, stepLo: 50, stepHi: 50,
-    lodOptions: ["0.7 mm", "1 mm", "2 mm"], lodGlass: false, angleTuning: false, forceMaxFps: false, ledLiftoff: false, motionJitter: true },
-  0x1966: { name: "Endgame Gear XM2 8k", family: "v1", cpiMin: 50, cpiMax: 26000, stepLo: 50, stepHi: 50,
-    lodOptions: ["0.7 mm", "1 mm", "2 mm"], lodGlass: false, angleTuning: false, forceMaxFps: false, ledLiftoff: false, motionJitter: true },
-  0x1976: { name: "Endgame Gear OP1 8k Purple Frost", family: "v1", cpiMin: 50, cpiMax: 30000, stepLo: 50, stepHi: 50,
-    lodOptions: ["0.7 mm", "1 mm", "2 mm"], lodGlass: true, angleTuning: false, forceMaxFps: false, ledLiftoff: false, motionJitter: true },
-  0x1978: { name: "Endgame Gear OP1 8k v2", family: "v2", cpiMin: 10, cpiMax: 30000, stepLo: 10, stepHi: 50,
-    lodOptions: Array.from({ length: 11 }, (_, i) => (0.7 + i * 0.1).toFixed(1) + " mm"),
-    lodGlass: true, angleTuning: true, forceMaxFps: true, ledLiftoff: true, motionJitter: true },
-  0x1980: { name: "Endgame Gear XM2 8k v2", family: "v2", cpiMin: 10, cpiMax: 30000, stepLo: 10, stepHi: 50,
-    lodOptions: Array.from({ length: 11 }, (_, i) => (0.7 + i * 0.1).toFixed(1) + " mm"),
-    lodGlass: true, angleTuning: true, forceMaxFps: true, ledLiftoff: true, motionJitter: true },
-};
 const EGG_GLASS_LOD = ["1.0 mm", "2.0 mm"];
-
-const EGG_WE_DEVICES = {
-  0x1960: { name: "Endgame Gear XM2we", link: "Wireless dongle", wireless: true, prio: 2 },
-  0x1961: { name: "Endgame Gear OP1we", link: "Wireless dongle", wireless: true, prio: 2 },
-  0x1962: { name: "Endgame Gear OP1we", link: "USB cable", wireless: false, prio: 0 },
-  0x1968: { name: "Endgame Gear XM2we", link: "Wireless dongle", wireless: true, prio: 2 },
-  0x1970: { name: "Endgame Gear OP1we", link: "Wireless dongle", wireless: true, prio: 2 },
-  0x1972: { name: "Endgame Gear OP1we", link: "USB cable", wireless: false, prio: 0 },
-  0x1982: { name: "Endgame Gear XM2we", link: "Wireless dongle", wireless: true, prio: 2 },
-};
 
 const EGG_POLL_RATES = [1000, 2000, 4000, 8000];
 const EGG_POLL_DIVS = { 8000: 1, 4000: 2, 2000: 4, 1000: 8 };
@@ -182,30 +159,34 @@ function eggSlotLoc(b, leftHanded) {
 function classifyEgg(d, ctx = {}) {
   const vid = d.vendorId, pid = d.productId;
   const vp = vpKey(vid, pid);
+  const eggDevices = getEggDevices();
+  const eggWeDevices = getEggWeDevices();
 
-  if (vid === EGG_VID && EGG_DEVICES[pid]) {
-    const prof = EGG_DEVICES[pid];
+  if (vid === EGG_VID && eggDevices[pid]) {
+    const prof = eggDevices[pid];
     const hasVendor = d.collections?.some((c) => c.usagePage === 0xff01 && c.usage === 0x02);
     if (!hasVendor) return null;
     return {
       driver: "egg", protoLabel: `Endgame Gear 8k (${prof.family.toUpperCase()})`, protoTag: "EGG 8k",
+      ...tierMetaFromProfile(prof.profileId || (prof.family === "v2" ? "egg8k_v2" : "egg8k_v1")),
       info: { ...prof, link: "USB 8k cable", prio: 0, wireless: false, hyper: true, dpiMax: prof.cpiMax },
       caps: {
-        stages: true, dpi: true, maxStages: 4, dpiMin: prof.cpiMin, dpiMax: prof.cpiMax, dpiStepLo: prof.stepLo, dpiStepHi: prof.stepHi,
+        stages: true, dpi: true, dpiRead: true, dpiWrite: true, maxStages: 4, dpiMin: prof.cpiMin, dpiMax: prof.cpiMax, dpiStepLo: prof.stepLo, dpiStepHi: prof.stepHi,
         splitXY: true, pollRates: EGG_POLL_RATES, lodMode: "egg", buttons: true, layers: false, eggHanded: true,
         wireless: false, powerTune: false, batteryRead: false, hyper: false, dongle: false, factoryReset: true,
       },
     };
   }
 
-  if (vid === EGG_VID && EGG_WE_DEVICES[pid] && !ctx.eggA1Vps?.has(vp)) {
+  if (vid === EGG_VID && eggWeDevices[pid] && !ctx.eggA1Vps?.has(vp)) {
     if (!findCollection(d, { featId: 0x08 })) return null;
-    const prof = EGG_WE_DEVICES[pid];
+    const prof = eggWeDevices[pid];
     return {
       driver: "egg_we", protoLabel: "Endgame Gear -we (CompX 0x08)", protoTag: "EGG -we",
+      ...tierMetaFromProfile(prof.profileId || "egg_we_compx"),
       info: { ...prof, brand: "egg_we", dpiMax: 12800, rates: [125, 250, 500, 1000] },
       caps: {
-        stages: true, dpi: true, maxStages: 4, dpiMin: 50, dpiMax: 12800, dpiStepLo: 50, dpiStepHi: 50,
+        stages: true, dpi: true, dpiRead: true, dpiWrite: true, maxStages: 4, dpiMin: 50, dpiMax: 12800, dpiStepLo: 50, dpiStepHi: 50,
         splitXY: true, pollRates: [125, 250, 500, 1000], lodMode: "preset", lodAsync: false, buttons: false, layers: false,
         wireless: prof.wireless, powerTune: prof.wireless, lowBatt: false, idleMaxMin: 30, batteryRead: prof.wireless,
         hyper: false, dongle: false, factoryReset: false,
@@ -219,7 +200,7 @@ function classifyEgg(d, ctx = {}) {
 
 function makeEggApi(sess, { isConnected, isCurrent, log, render, renderFleet }) {
   const d = sess.dev;
-  const profile = EGG_DEVICES[sess.pid];
+  const profile = getEggDevices()[sess.pid] || sess.info;
   const cfgLen = eggFeatureLen(d, EGG_REPORT.CFG, EGG_CFG_LEN - 1);
   const cmdLen = eggFeatureLen(d, EGG_REPORT.CMD, EGG_CMD_LEN - 1);
   const tag = sess.shortName;
@@ -459,9 +440,9 @@ function makeEggApi(sess, { isConnected, isCurrent, log, render, renderFleet }) 
 
 export {
   EGG_VID,
-  EGG_DEVICES,
+  getEggDevices,
   EGG_GLASS_LOD,
-  EGG_WE_DEVICES,
+  getEggWeDevices,
   EGG_POLL_RATES,
   EGG_POLL_DIVS,
   EGG_REPORT,

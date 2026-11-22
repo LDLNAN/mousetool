@@ -7,73 +7,22 @@ import time
 if sys.platform != "win32":
     import fcntl
 
+from ..registry import get_registry
 from .base import Asleep, HIDIOCGFEATURE_N, HIDIOCSFEATURE_N
 
+_REG = get_registry()
 PULSAR_VID = 0x3710
-PULSAR_XS1_DEVICES = {
-    0x3404: ("Pulsar X2A v3", "USB cable", False, 1000),
-    0x3409: ("Pulsar XS-1 Mouse", "USB cable", False, 1000),
-    0x3410: ("Pulsar XS-1 Mouse", "USB cable", False, 1000),
-    0x5402: ("Pulsar X3 M", "Wireless", True, 1000),
-    0x5403: ("Pulsar 8K Dongle", "8K dongle", True, 8000),
-}
-PULSAR_PRO_DEVICES = {
-    0x5405: ("Pulsar Pro", "8K dongle", True, 8000),
-}
+PULSAR_XS1_DEVICES = _REG.build_pulsar_xs1_devices()
+PULSAR_PRO_DEVICES = _REG.build_pulsar_pro_devices()
 
 ARESON_VID = 0x25A7
-ARESON_DEVICES = {
-    0xFA7B: ("Pulsar Areson (X2 v2 / X2H / Xlite v3)", "USB cable", False),
-    0xFA7C: ("Pulsar Areson (X2 v2 / X2H / Xlite v3)", "Wireless dongle", True),
-}
+ARESON_DEVICES = _REG.build_areson_devices()
 
 COMPX_VID = 0x3554
 ATK_VID = 0x373B
 
-# Subfamily table for known CompX VID:PID pairs
-# kind -> name, link, wireless, dpi_max, dpi_min, dpi_enc, rates, lod_mode
-COMPX_DEVICES = {
-    # Pulsar 4K Wireless Receiver
-    (0x3554, 0xF507): {"brand": "pulsar_4k", "name": "Pulsar 4K Receiver", "link": "4K dongle", "wireless": True, "dpi_max": 26000, "rates": [125, 250, 500, 1000, 2000, 4000]},
-    (0x3554, 0xF508): {"brand": "pulsar_4k", "name": "Pulsar 4K Receiver", "link": "4K dongle", "wireless": True, "dpi_max": 26000, "rates": [125, 250, 500, 1000, 2000, 4000]},
-    (0x3554, 0xF509): {"brand": "pulsar_4k", "name": "Pulsar 4K Receiver", "link": "4K dongle", "wireless": True, "dpi_max": 26000, "rates": [125, 250, 500, 1000, 2000, 4000]},
-    # Scyrox V8 / V8S
-    (0x3554, 0xF515): {"brand": "scyrox", "model": "v8s", "name": "Scyrox V8S", "link": "USB cable", "wireless": False, "dpi_max": 50000, "rates": [125, 250, 500, 1000, 2000, 4000, 8000]},
-    (0x3554, 0xF517): {"brand": "scyrox", "model": "v8s", "name": "Scyrox V8S Turbo", "link": "8K dongle", "wireless": True, "dpi_max": 50000, "rates": [125, 250, 500, 1000, 2000, 4000, 8000]},
-    (0x3554, 0xF5F7): {"brand": "scyrox", "model": "v8", "name": "Scyrox V8", "link": "8K dongle", "wireless": True, "dpi_max": 30000, "rates": [125, 250, 500, 1000, 2000, 4000, 8000]},
-    # Teevolution Terra Pro
-    (0x3554, 0xF520): {"brand": "teevolution", "name": "Teevolution Terra Pro", "link": "Wireless", "wireless": True, "dpi_max": 42000, "rates": [125, 250, 500, 1000, 2000, 4000, 8000]},
-    (0x3554, 0xF522): {"brand": "teevolution", "name": "Teevolution Terra Pro", "link": "USB cable", "wireless": False, "dpi_max": 42000, "rates": [125, 250, 500, 1000, 2000, 4000, 8000]},
-    (0x3554, 0xF523): {"brand": "teevolution", "name": "Teevolution Terra Pro", "link": "8K dongle", "wireless": True, "dpi_max": 42000, "rates": [125, 250, 500, 1000, 2000, 4000, 8000]},
-    (0x3554, 0xF5BB): {"brand": "teevolution", "name": "Teevolution Terra Pro", "link": "Wireless dongle", "wireless": True, "dpi_max": 42000, "rates": [125, 250, 500, 1000, 2000, 4000, 8000]},
-    # VGN F2 Master+
-    (0x3554, 0xFB56): {"brand": "vgn", "name": "VGN F2 Master+", "link": "8K dongle", "wireless": True, "dpi_max": 26000, "rates": [125, 250, 500, 1000, 2000, 4000, 8000]},
-    (0x3554, 0xFB57): {"brand": "vgn", "name": "VGN F2 Master+", "link": "USB cable", "wireless": False, "dpi_max": 26000, "rates": [125, 250, 500, 1000, 2000, 4000, 8000]},
-    # Lamzu Atlantis
-    (0x3554, 0xF50D): {"brand": "lamzu", "name": "Lamzu Atlantis", "link": "1K dongle", "wireless": True, "dpi_max": 26000, "rates": [125, 250, 500, 1000]},
-    (0x3554, 0xF50F): {"brand": "lamzu", "name": "Lamzu Atlantis", "link": "USB cable", "wireless": False, "dpi_max": 26000, "rates": [125, 250, 500, 1000]},
-    (0x3554, 0xF510): {"brand": "lamzu", "name": "Lamzu Atlantis 4K", "link": "4K dongle", "wireless": True, "dpi_max": 26000, "rates": [125, 250, 500, 1000, 2000, 4000]},
-    # ATK / VXE
-    (0x3554, 0xF58A): {"brand": "atk", "name": "ATK / VXE Mouse", "link": "Wireless dongle", "wireless": True, "dpi_max": 30000, "rates": [125, 250, 500, 1000, 2000, 4000, 8000]},
-    (0x3554, 0xF58C): {"brand": "atk", "name": "ATK / VXE Mouse", "link": "USB cable", "wireless": False, "dpi_max": 30000, "rates": [125, 250, 500, 1000, 2000, 4000, 8000]},
-    (0x3554, 0xF58E): {"brand": "atk", "name": "ATK / VXE Mouse", "link": "Wireless dongle", "wireless": True, "dpi_max": 30000, "rates": [125, 250, 500, 1000, 2000, 4000, 8000]},
-    (0x3554, 0xF58F): {"brand": "atk", "name": "ATK / VXE Mouse", "link": "8K dongle", "wireless": True, "dpi_max": 30000, "rates": [125, 250, 500, 1000, 2000, 4000, 8000]},
-    (0x373B, 0x1085): {"brand": "atk", "name": "VXE R1 SE+ (Beken)", "link": "1K dongle", "wireless": True, "dpi_max": 18000, "rates": [250, 500, 1000]},
-    (0x373B, 0x10C9): {"brand": "atk", "name": "ATK NearLink Mouse", "link": "NearLink dongle", "wireless": True, "dpi_max": 30000, "rates": [125, 250, 500, 1000, 2000, 4000, 8000]},
-    (0x373B, 0x11D9): {"brand": "atk", "name": "ATK F1 Ultimate 2.0", "link": "8K dongle", "wireless": True, "dpi_max": 42000, "rates": [125, 250, 500, 1000, 2000, 4000, 8000]},
-}
-
-ATK_PRODUCTS = {
-    (1, 8):   {"name": "ATK Blazing Sky F1 Ultimate 2.0", "sensor": "PAW3950Ultra", "dpi_max": 42000, "rates": [125, 250, 500, 1000, 2000, 4000, 8000], "max_stages": 6, "is_r1": False},
-    (1, 31):  {"name": "ATK A9 Mini+", "sensor": "PAW3955Master", "dpi_max": 50000, "rates": [125, 250, 500, 1000, 2000, 4000, 8000], "max_stages": 6, "is_r1": False, "dpi6": True},
-    (1, 52):  {"name": "ATK A9 Mini+", "sensor": "PAW3955Master", "dpi_max": 50000, "rates": [125, 250, 500, 1000, 2000, 4000, 8000], "max_stages": 6, "is_r1": False, "dpi6": True},
-    (2, 11):  {"name": "VXE R1", "sensor": "PAW3395", "dpi_max": 26000, "rates": [125, 250, 500, 1000, 2000, 4000], "max_stages": 4, "is_r1": True},
-    (2, 12):  {"name": "VXE R1", "sensor": "PAW3395", "dpi_max": 26000, "rates": [125, 250, 500, 1000, 2000, 4000], "max_stages": 4, "is_r1": True},
-    (2, 27):  {"name": "VXE R1 Pro Max", "sensor": "PAW3395", "dpi_max": 26000, "rates": [125, 250, 500, 1000, 2000, 4000], "max_stages": 4, "is_r1": True},
-    (2, 32):  {"name": "VXE R1 SE+", "sensor": "PAW3395SE", "dpi_max": 18000, "rates": [250, 500, 1000], "max_stages": 4, "is_r1": True},
-    (2, 39):  {"name": "ATK Blazing Sky X1 Pro Max", "sensor": "PAW3950", "dpi_max": 42000, "rates": [125, 250, 500, 1000, 2000, 4000, 8000], "max_stages": 6, "is_r1": False},
-    (2, 83):  {"name": "ATK A9 Plus NearLink", "sensor": "PAW3395", "dpi_max": 26000, "rates": [125, 250, 500, 1000], "max_stages": 6, "is_r1": False},
-}
+COMPX_DEVICES = _REG.build_compx_devices()
+ATK_PRODUCTS = _REG.build_atk_products()
 
 
 # ----------------------------------------------------------------------------- CompX Report 0x08 protocol

@@ -16,7 +16,7 @@ if ($Uninstall) {
              @($binaries | ForEach-Object { Join-Path $tools $_ })) {
         if (Test-Path -LiteralPath $item) { Remove-Item -LiteralPath $item }
     }
-    foreach ($dir in @('mousetool','web','platform')) {
+    foreach ($dir in @('mousetool','web','devices','platform')) {
         $p = Join-Path $app $dir
         if (Test-Path -LiteralPath $p) { Remove-Item -LiteralPath $p -Recurse -Force }
     }
@@ -39,7 +39,7 @@ if ($repo -ne $app) {
             Copy-Item -LiteralPath $src -Destination $app -Force
         }
     }
-    foreach ($dir in @('mousetool','web')) {
+    foreach ($dir in @('mousetool','web','devices')) {
         $dst = Join-Path $app $dir
         if (Test-Path -LiteralPath $dst) { Remove-Item -LiteralPath $dst -Recurse -Force }
         Copy-Item -LiteralPath (Join-Path $repo $dir) -Destination $dst -Recurse -Force

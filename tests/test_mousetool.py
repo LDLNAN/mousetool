@@ -48,6 +48,9 @@ class TestRazerProtocol(unittest.TestCase):
         self.assertLess(mousetool.DEVICES[0x00B3][2], mousetool.DEVICES[0x00A6][2])
 
     def test_device_lists_consistent_across_repo(self):
+        from mousetool.registry import get_registry
+
+        reg = get_registry()
         with open(os.path.join(REPO_DIR, "platform", "linux", "60-mousetool.rules")) as f:
             rules_txt = f.read()
         rules_vp = {
@@ -57,56 +60,40 @@ class TestRazerProtocol(unittest.TestCase):
                 rules_txt,
             )
         }
-        web_js_parts = []
+        # Python driver tables must be backed by the single shared devices/devices.json registry
+        self.assertEqual(mousetool.DEVICES, reg.build_razer_devices())
+        self.assertEqual(mousetool.EGG_DEVICES, reg.build_egg_devices())
+        self.assertEqual(mousetool.EGG_WE_DEVICES, reg.build_egg_we_devices())
+        self.assertEqual(mousetool.LOGI_DEVICES, reg.build_logi_devices())
+        self.assertEqual(mousetool.PULSAR_XS1_DEVICES, reg.build_pulsar_xs1_devices())
+        self.assertEqual(mousetool.PULSAR_PRO_DEVICES, reg.build_pulsar_pro_devices())
+        self.assertEqual(mousetool.ARESON_DEVICES, reg.build_areson_devices())
+        self.assertEqual(mousetool.COMPX_DEVICES, reg.build_compx_devices())
+        self.assertEqual(mousetool.ATK_PRODUCTS, reg.build_atk_products())
+        sino, core2, classic, pixart = reg.build_glorious_tables()
+        self.assertEqual(mousetool.GLORIOUS_SINOWEALTH, sino)
+        self.assertEqual(mousetool.GLORIOUS_CORE2, core2)
+        self.assertEqual(mousetool.GLORIOUS_CLASSIC, classic)
+        self.assertEqual(mousetool.GLORIOUS_PIXART, pixart)
+
+        # WebHID drivers must load from devices/devices.json (no duplicated hardcoded PID tables)
         drivers_dir = os.path.join(REPO_DIR, "web", "drivers")
         for fname in sorted(os.listdir(drivers_dir)):
             if fname.endswith(".js"):
                 with open(os.path.join(drivers_dir, fname)) as f:
-                    web_js_parts.append(f.read())
-        html = "\n".join(web_js_parts)
+                    src = f.read()
+                for forbidden in (
+                    "const DEVICES = {",
+                    "const EGG_DEVICES = {",
+                    "const LOGI_DEVICES = {",
+                    "const COMPX_DEVICES = {",
+                    "const GLORIOUS_CLASSIC = {",
+                ):
+                    self.assertNotIn(forbidden, src, f"Duplicated hardcoded table {forbidden} in {fname}")
 
-        single_vid_tables = [
-            ("DEVICES", mousetool.DEVICES, mousetool.RAZER_VID),
-            ("EGG_DEVICES", mousetool.EGG_DEVICES, mousetool.EGG_VID),
-            ("EGG_WE_DEVICES", mousetool.EGG_WE_DEVICES, mousetool.EGG_VID),
-            ("LOGI_DEVICES", mousetool.LOGI_DEVICES, mousetool.LOGI_VID),
-            ("PULSAR_XS1_DEVICES", mousetool.PULSAR_XS1_DEVICES, mousetool.PULSAR_VID),
-            ("PULSAR_PRO_DEVICES", mousetool.PULSAR_PRO_DEVICES, mousetool.PULSAR_VID),
-            ("ARESON_DEVICES", mousetool.ARESON_DEVICES, mousetool.ARESON_VID),
-        ]
-        all_py_vp = set()
-        for js_name, py_map, vid in single_vid_tables:
-            m = re.search(rf"(?:export )?const {js_name} = \{{(.*?)\n\}};", html, re.S)
-            self.assertIsNotNone(m, f"Missing {js_name} in web/drivers/*.js")
-            html_pids = {int(p, 16) for p in re.findall(r"0x([0-9a-fA-F]{4}):", m.group(1))}
-            py_pids = set(py_map.keys())
-            self.assertEqual(py_pids, html_pids, f"web/drivers/*.js mismatch for {js_name}")
-            all_py_vp |= {(vid, pid) for pid in py_pids}
-
-        multi_vid_tables = [
-            ("COMPX_DEVICES", mousetool.COMPX_DEVICES),
-            ("GLORIOUS_SINOWEALTH", mousetool.GLORIOUS_SINOWEALTH),
-            ("GLORIOUS_CORE2", mousetool.GLORIOUS_CORE2),
-            ("GLORIOUS_CLASSIC", mousetool.GLORIOUS_CLASSIC),
-            ("GLORIOUS_PIXART", mousetool.GLORIOUS_PIXART),
-        ]
-        for js_name, py_map in multi_vid_tables:
-            m = re.search(rf"(?:export )?const {js_name} = \{{(.*?)\n\}};", html, re.S)
-            self.assertIsNotNone(m, f"Missing {js_name} in web/drivers/*.js")
-            html_vp = {
-                (int(v, 16), int(p, 16))
-                for v, p in re.findall(r'"([0-9a-fA-F]{4}):([0-9a-fA-F]{4})":', m.group(1))
-            }
-            py_vp = set(py_map.keys())
-            self.assertEqual(py_vp, html_vp, f"web/drivers/*.js mismatch for {js_name}")
-            all_py_vp |= py_vp
-
-        self.assertEqual(all_py_vp, rules_vp, "udev rules mismatch vs Python device registries")
-
-        m_atk = re.search(r"(?:export )?const ATK_PRODUCTS = \{(.*?)\n\};", html, re.S)
-        self.assertIsNotNone(m_atk, "Missing ATK_PRODUCTS in web/drivers/*.js")
-        html_atk = {(int(c), int(mid)) for c, mid in re.findall(r'"(\d+):(\d+)":', m_atk.group(1))}
-        self.assertEqual(set(mousetool.ATK_PRODUCTS.keys()), html_atk, "ATK_PRODUCTS mismatch")
+        # Udev rules match the exact USB-eligible (Tier >= 1, non-keyboard, non-Bluetooth, non-WPID) registry set
+        expected_udev_vp = {(int(m["vid"], 16), int(m["pid"], 16)) for m, _, _ in reg.udev_usb_matches()}
+        self.assertEqual(expected_udev_vp, rules_vp, "udev rules mismatch vs registry USB-eligible matches")
 
 
 class TestEndgameGearProtocol(unittest.TestCase):

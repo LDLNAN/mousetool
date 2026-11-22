@@ -5,63 +5,16 @@ import time
 if sys.platform != "win32":
     import fcntl
 
+from ..registry import get_registry
 from .base import HIDIOCGFEATURE_N, HIDIOCSFEATURE_N
 
 EGG_VID = 0x3367
-EGG_DEVICES = {
-    0x1964: {
-        "name": "Endgame Gear OP1 8k",
-        "family": "v1",
-        "cpi_min": 50, "cpi_max": 26000, "cpi_step_lo": 50, "cpi_step_hi": 50,
-        "lod_options": ["0.7 mm", "1 mm", "2 mm"],
-        "lod_glass": False, "angle_tuning": False, "force_max_fps": False, "led_liftoff": False,
-        "motion_jitter": True,
-    },
-    0x1966: {
-        "name": "Endgame Gear XM2 8k",
-        "family": "v1",
-        "cpi_min": 50, "cpi_max": 26000, "cpi_step_lo": 50, "cpi_step_hi": 50,
-        "lod_options": ["0.7 mm", "1 mm", "2 mm"],
-        "lod_glass": False, "angle_tuning": False, "force_max_fps": False, "led_liftoff": False,
-        "motion_jitter": True,
-    },
-    0x1976: {
-        "name": "Endgame Gear OP1 8k Purple Frost",
-        "family": "v1",
-        "cpi_min": 50, "cpi_max": 30000, "cpi_step_lo": 50, "cpi_step_hi": 50,
-        "lod_options": ["0.7 mm", "1 mm", "2 mm"],
-        "lod_glass": True, "angle_tuning": False, "force_max_fps": False, "led_liftoff": False,
-        "motion_jitter": True,
-    },
-    0x1978: {
-        "name": "Endgame Gear OP1 8k v2",
-        "family": "v2",
-        "cpi_min": 10, "cpi_max": 30000, "cpi_step_lo": 10, "cpi_step_hi": 50,
-        "lod_options": [f"{0.7 + i * 0.1:.1f} mm" for i in range(11)],
-        "lod_glass": True, "angle_tuning": True, "force_max_fps": True, "led_liftoff": True,
-        "motion_jitter": True,
-    },
-    0x1980: {
-        "name": "Endgame Gear XM2 8k v2",
-        "family": "v2",
-        "cpi_min": 10, "cpi_max": 30000, "cpi_step_lo": 10, "cpi_step_hi": 50,
-        "lod_options": [f"{0.7 + i * 0.1:.1f} mm" for i in range(11)],
-        "lod_glass": True, "angle_tuning": True, "force_max_fps": True, "led_liftoff": True,
-        "motion_jitter": True,
-    },
-}
+_REG = get_registry()
+EGG_DEVICES = _REG.build_egg_devices()
 EGG_GLASS_LOD = ["1.0 mm", "2.0 mm"]
 
 # Endgame Gear -we (note: 0x1970 is shared with OP1w 4K v2 dongle which exposes Feature 0xA1)
-EGG_WE_DEVICES = {
-    0x1960: ("Endgame Gear XM2we", "Wireless dongle", True, 2),
-    0x1961: ("Endgame Gear OP1we", "Wireless dongle", True, 2),
-    0x1962: ("Endgame Gear OP1we", "USB cable", False, 0),
-    0x1968: ("Endgame Gear XM2we", "Wireless dongle", True, 2),
-    0x1970: ("Endgame Gear OP1we", "Wireless dongle", True, 2),
-    0x1972: ("Endgame Gear OP1we", "USB cable", False, 0),
-    0x1982: ("Endgame Gear XM2we", "Wireless dongle", True, 2),
-}
+EGG_WE_DEVICES = _REG.build_egg_we_devices()
 
 EGG_CFG_LEN = 1041
 EGG_CMD_LEN = 64
