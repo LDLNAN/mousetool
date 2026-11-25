@@ -1499,6 +1499,11 @@ async function fetchSystemFleet() {
   try {
     const { data } = await fetchHelperStatus();
     systemMice = data.system_mice || [];
+    const accelBtn = $("openAccelOnly");
+    if (accelBtn) {
+      const hasDesktop = Boolean(data.desktop) || (data.setup?.platform !== "windows" && data.accel?.backend?.name !== "rawaccel");
+      accelBtn.textContent = hasDesktop ? "Acceleration & desktop" : "Acceleration";
+    }
     renderFleet();
   } catch {}
 }

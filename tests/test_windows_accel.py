@@ -308,6 +308,7 @@ class WindowsScriptsContractTests(unittest.TestCase):
         self.assertIn("-m mousetool.accel.windows", install_ps1)
         self.assertIn("Unblock-File", install_ps1)
         self.assertIn("Remove-Item", install_ps1)
+        self.assertIn("Get-ChildItem -LiteralPath $dir -Force", install_ps1)
         self.assertIn("[DriverConfig]::GetActive().ToJSON()", read_ps1)
         self.assertEqual(win_accel._read_script_path(), REPO_ROOT / "platform" / "windows" / "read-rawaccel.ps1")
 

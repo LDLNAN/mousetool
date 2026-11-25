@@ -48,13 +48,13 @@ const MODE_PARAMS = {
     { k: "OUTPUT_CAP", label: "Output cap", min: 0, max: 10, step: 0.05, desc: "Highest sensitivity multiplier allowed (0 = no limit)." },
   ],
   natural: [
-    { k: "DECAY_RATE", label: "Decay rate", min: 0.001, max: 2, step: 0.005, desc: "How quickly the curve reaches your top multiplier." },
+    { k: "DECAY_RATE", label: "Decay rate", min: 0.001, max: 2, step: 0.001, desc: "How quickly the curve reaches your top multiplier." },
     { k: "OFFSET", label: "Offset", min: 0, max: 40, step: 0.25, desc: "Hand speed before acceleration starts (0 = immediately)." },
     { k: "LIMIT", label: "Limit", min: 1, max: 10, step: 0.05, desc: "Maximum speed boost on fast swipes." },
   ],
   synchronous: [
-    { k: "SYNC_SPEED", label: "Sync speed", min: 0.1, max: 40, step: 0.25, desc: "Hand speed where sensitivity equals 1.0×." },
-    { k: "MOTIVITY", label: "Motivity", min: 1.01, max: 10, step: 0.05, desc: "Maximum boost on fast swipes (slow aim scales down symmetrically)." },
+    { k: "SYNC_SPEED", label: "Sync speed", min: 0.1, max: 40, step: 0.05, desc: "Hand speed where sensitivity equals 1.0×." },
+    { k: "MOTIVITY", label: "Motivity", min: 1.01, max: 10, step: 0.01, desc: "Maximum boost on fast swipes (slow aim scales down symmetrically)." },
     { k: "GAMMA", label: "Gamma", min: 0.05, max: 10, step: 0.05, desc: "How sharply sensitivity changes around Sync speed." },
     { k: "SMOOTH", label: "Smooth", min: 0, max: 1, step: 0.02, desc: "Softens the bend near the slowest and fastest speeds." },
   ],
@@ -62,7 +62,7 @@ const MODE_PARAMS = {
   no_accel: [],
 };
 const GLOBAL_ACCEL_PARAMS = [
-  { k: "SENS_MULT", label: "Sensitivity multiplier", min: 0.05, max: 5, step: 0.02, desc: "Scales your entire curve up or down." },
+  { k: "SENS_MULT", label: "Sensitivity multiplier", min: 0.05, max: 5, step: 0.01, desc: "Scales your entire curve up or down." },
   { k: "YX_RATIO", label: "Y / X ratio", min: 0.2, max: 3, step: 0.02, desc: "Makes vertical movement faster or slower than horizontal." },
   { k: "INPUT_DPI", label: "Mouse DPI", min: 100, max: 35000, step: 50, desc: "Matches the curve to your mouse's current DPI." },
   { k: "ANGLE_ROTATION", label: "Angle rotation (°)", min: -45, max: 45, step: 0.5, desc: "Tilts horizontal movement to match your natural wrist angle." },

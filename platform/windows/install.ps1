@@ -20,6 +20,11 @@ if ($Uninstall) {
         $p = Join-Path $app $dir
         if (Test-Path -LiteralPath $p) { Remove-Item -LiteralPath $p -Recurse -Force }
     }
+    foreach ($dir in @($tools, "$root\state", $app, $root)) {
+        if ((Test-Path -LiteralPath $dir -PathType Container) -and !(Get-ChildItem -LiteralPath $dir -Force | Select-Object -First 1)) {
+            Remove-Item -LiteralPath $dir
+        }
+    }
     Write-Output 'Removed launcher, logon entry, saved curve and application files.'
     return
 }
