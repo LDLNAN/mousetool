@@ -95,7 +95,7 @@ class TestPurity(unittest.TestCase):
         import mousetool
         self.assertEqual(rx.MODES, mousetool.MODES)
         self.assertEqual(rx.PARAMS, mousetool.PARAMS)
-        with open(os.path.join(REPO, "web", "accel_graph.js")) as f:
+        with open(os.path.join(REPO, "web", "accel_graph.js"), encoding="utf-8") as f:
             js_src = f.read()
         block = re.search(r"const MACCEL_DEFAULTS = \{(.*?)\};", js_src, re.S).group(1)
         ui = dict(re.findall(r"(\w+):\s*(\"?[\w.]+\"?)", block))
@@ -365,7 +365,7 @@ class TestAgainstAppJavaScript(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        with open(os.path.join(REPO, "web", "accel_graph.js")) as f:
+        with open(os.path.join(REPO, "web", "accel_graph.js"), encoding="utf-8") as f:
             src = f.read()
         m = re.search(r"^(?:export )?function maccelEval\(x, cfg\) \{.*?^\}$", src, re.S | re.M)
         assert m, "maccelEval not found in web/accel_graph.js"
@@ -921,7 +921,7 @@ class TestVerifyRound2Regressions(ScratchCli, unittest.TestCase):
 
     @unittest.skipUnless(shutil.which("node"), "node not installed")
     def test_studio_javascript_really_differs_at_the_verifier_point(self):
-        with open(os.path.join(REPO, "web", "accel_graph.js")) as f:
+        with open(os.path.join(REPO, "web", "accel_graph.js"), encoding="utf-8") as f:
             js = re.search(r"^(?:export )?function maccelEval\(x, cfg\) \{.*?^\}$", f.read(), re.S | re.M).group(0).removeprefix("export ")
         limit, decay, x, native, studio = self.NATURAL_EDGES[0]
         c = cfg(MODE="natural", LIMIT=limit, DECAY_RATE=decay, OFFSET=0)
@@ -1099,7 +1099,7 @@ class TestCustomLutMode(ScratchCli, unittest.TestCase):
 
     @unittest.skipUnless(shutil.which("node"), "node not installed")
     def test_js_maccel_eval_matches_python_and_rawaccel_on_lookup_curves(self):
-        with open(os.path.join(REPO, "web", "accel_graph.js")) as f:
+        with open(os.path.join(REPO, "web", "accel_graph.js"), encoding="utf-8") as f:
             src = f.read()
         js = re.search(r"^(?:export )?function maccelEval\(x, cfg\) \{.*?^\}$", src, re.S | re.M).group(0).removeprefix("export ")
         pts64 = [[round(i * 1.5, 3), round(0.5 + 1.8 * math.sin(i / 63.0 * math.pi), 4)] for i in range(64)]

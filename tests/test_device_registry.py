@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest import mock
@@ -165,7 +166,7 @@ class TestDeviceRegistrySchemaAndInvariants(unittest.TestCase):
 class TestUdevRuleGenerator(unittest.TestCase):
     def test_udev_rules_check_is_byte_identical(self):
         res = subprocess.run(
-            ["python3", "-B", str(REPO_ROOT / "tools" / "generate_udev_rules.py"), "--check"],
+            [sys.executable, "-B", str(REPO_ROOT / "tools" / "generate_udev_rules.py"), "--check"],
             capture_output=True,
             text=True,
             timeout=10,
@@ -213,12 +214,13 @@ class TestRazerFallbackGuardAndViperMiniSlice(unittest.TestCase):
         self.assertFalse(t0["write_enabled"])
 
         # Dispatch guard blocks any vendor frame on Tier 0 with 0 ioctl calls
-        with mock.patch.object(razer_mod.fcntl, "ioctl") as m_ioctl:
+        fake_fcntl = mock.Mock()
+        with mock.patch.object(razer_mod, "fcntl", fake_fcntl, create=True):
             with self.assertRaises(ReadOnlyTierError):
                 razer_mod.razer_read_status(99, t0)
             with self.assertRaises(ReadOnlyTierError):
                 razer_mod.xfer(99, 0x00, 0x81, 0x02, (), txn=0x1F, meta=t0)
-            self.assertEqual(m_ioctl.call_count, 0)
+            self.assertEqual(fake_fcntl.ioctl.call_count, 0)
 
     def test_viper_mini_tier1_getters_only_and_write_blocking_at_dispatch(self):
         rd = _razer_90b_rd()
@@ -277,7 +279,7 @@ class TestRazerFallbackGuardAndViperMiniSlice(unittest.TestCase):
                 return 0
             raise AssertionError(f"unexpected ioctl {req_code:#x}")
 
-        with mock.patch.object(razer_mod.fcntl, "ioctl", side_effect=fake_ioctl), \
+        with mock.patch.object(razer_mod, "fcntl", mock.Mock(ioctl=fake_ioctl), create=True), \
              mock.patch.object(razer_mod.time, "sleep"):
             status = razer_mod.razer_read_status(99, meta)
 
@@ -294,7 +296,8 @@ class TestRazerFallbackGuardAndViperMiniSlice(unittest.TestCase):
             self.assertNotIn(forbidden_key, status)
 
         # ALL mutating commands and disallowed getters must reject at dispatch with 0 ioctl calls
-        with mock.patch.object(razer_mod.fcntl, "ioctl") as m_ioctl:
+        fake_fcntl = mock.Mock()
+        with mock.patch.object(razer_mod, "fcntl", fake_fcntl, create=True):
             for fn in (
                 lambda: razer_mod.set_dpi(99, 1600, 1600, 8500, meta=meta),
                 lambda: razer_mod.set_stages(99, 1, [(800, 800)], 8500, meta=meta),
@@ -310,7 +313,7 @@ class TestRazerFallbackGuardAndViperMiniSlice(unittest.TestCase):
             ):
                 with self.assertRaises(ReadOnlyTierError):
                     fn()
-            self.assertEqual(m_ioctl.call_count, 0)
+            self.assertEqual(fake_fcntl.ioctl.call_count, 0)
 
         # CLI write dispatch must also reject BEFORE opening hidraw
         class _Args:

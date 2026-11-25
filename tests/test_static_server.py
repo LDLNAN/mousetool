@@ -167,7 +167,12 @@ class StaticAssetServingTests(unittest.TestCase):
             outside = root / "secret.js"
             outside.write_text("console.log('secret');", encoding="utf-8")
             (web / "ok.js").write_text("export const ok = 1;", encoding="utf-8")
-            (web / "escape.js").symlink_to(outside)
+            try:
+                (web / "escape.js").symlink_to(outside)
+            except OSError as exc:
+                if getattr(exc, "winerror", None) == 1314:
+                    self.skipTest("Windows symlink creation requires Developer Mode or elevated privileges")
+                raise
 
             resolved = resolve_static_asset("/ok.js", web_dir=web, repo_root=root)
             self.assertIsNotNone(resolved)

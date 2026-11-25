@@ -1414,7 +1414,9 @@ def loads(data):
         raise
     except json.JSONDecodeError as e:
         raise RawAccelExportError(f"invalid JSON: {e.msg} at line {e.lineno} column {e.colno}") from None
-    except (ValueError, RecursionError) as e:
+    except RecursionError:
+        raise RawAccelExportError(f"JSON nested deeper than {MAX_JSON_DEPTH} levels") from None
+    except ValueError as e:
         raise RawAccelExportError(f"invalid JSON: {str(e)[:100]}") from None
     return _check_depth(obj)
 

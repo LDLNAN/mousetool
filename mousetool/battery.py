@@ -117,14 +117,16 @@ def _read_mouse_battery(meta):
 def _write_battery_json(path, value):
     directory = os.path.dirname(path)
     os.makedirs(directory, exist_ok=True)
-    with tempfile.NamedTemporaryFile(mode="w", dir=directory, delete=False) as tmp:
-        try:
+    tmp_name = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", dir=directory, delete=False, encoding="utf-8") as tmp:
+            tmp_name = tmp.name
             json.dump(value, tmp)
             tmp.flush()
-            os.replace(tmp.name, path)
-        finally:
-            if os.path.exists(tmp.name):
-                os.unlink(tmp.name)
+        os.replace(tmp_name, path)
+    finally:
+        if tmp_name is not None and os.path.exists(tmp_name):
+            os.unlink(tmp_name)
 
 
 def _write_battery_cache(b, path=None):
@@ -203,7 +205,12 @@ def _battery_lock(suffix):
     return open(CACHE + suffix, "a+")
 
 
+_SETTINGS_THREAD_LOCK = threading.RLock()
+
+
 def _owner_port():
+    if sys.platform == "win32":
+        return None
     with _battery_lock(".owner") as lock:
         try:
             fcntl.flock(lock, fcntl.LOCK_SH | fcntl.LOCK_NB)
@@ -223,6 +230,8 @@ def _cli_sample(meta=None, direct=False):
         return sample
     known_other = meta and sample and sample.get("device_key")
     # Only a positively identified different mouse can bypass an active watcher.
+    if sys.platform == "win32":
+        return dict(battery_snapshot(meta), source="direct")
     with _battery_lock(".reader") as lock:
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -285,6 +294,10 @@ def load_battery_settings(path=None):
 @contextlib.contextmanager
 def _settings_lock(path):
     os.makedirs(os.path.dirname(path), exist_ok=True)
+    if sys.platform == "win32":
+        with _SETTINGS_THREAD_LOCK:
+            yield
+        return
     with open(path + ".lock", "a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         yield
@@ -549,9 +562,12 @@ class BatteryWatcher:
 
     def poll_once(self):
         try:
-            with _battery_lock(".reader") as lock:
-                fcntl.flock(lock, fcntl.LOCK_EX)
+            if sys.platform == "win32":
                 b = self._snapshot()
+            else:
+                with _battery_lock(".reader") as lock:
+                    fcntl.flock(lock, fcntl.LOCK_EX)
+                    b = self._snapshot()
         except Exception as e:  # never let one bad read kill the watcher
             b = {"device": None, "percent": None, "charging": False, "link": None,
                  "stale": True, "age": None, "reason": str(e)}

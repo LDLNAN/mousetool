@@ -4,6 +4,7 @@ import os
 import re
 import struct
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -106,6 +107,9 @@ class TestPublicRepoHygiene(unittest.TestCase):
         self.assertIn("Exec=/usr/bin/env python3 @INSTALL_DIR@/mousetool.py open", desktop_tpl)
         self.assertIn("Icon=@INSTALL_DIR@/icon.svg", desktop_tpl)
         self.assertIn("ExecStart=/usr/bin/env python3 @INSTALL_DIR@/mousetool.py serve", service_tpl)
+
+        if sys.platform == "win32":
+            return
 
         with tempfile.TemporaryDirectory(prefix="mousetool-install-test-") as tmp:
             tmp_path = Path(tmp)

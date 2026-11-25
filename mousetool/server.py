@@ -261,7 +261,15 @@ class Api(BaseHTTPRequestHandler):
         try:
             r, _, _ = select.select([conn], [], [], 0)
             if r:
-                data = conn.recv(1, socket.MSG_PEEK | socket.MSG_DONTWAIT)
+                if hasattr(socket, "MSG_DONTWAIT"):
+                    data = conn.recv(1, socket.MSG_PEEK | socket.MSG_DONTWAIT)
+                else:
+                    old_timeout = conn.gettimeout()
+                    conn.settimeout(0.0)
+                    try:
+                        data = conn.recv(1, socket.MSG_PEEK)
+                    finally:
+                        conn.settimeout(old_timeout)
                 return data == b""
         except BlockingIOError:
             return False

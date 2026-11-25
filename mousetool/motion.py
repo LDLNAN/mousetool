@@ -4,6 +4,7 @@ import math
 import os
 import select
 import struct
+import sys
 import threading
 import time
 
@@ -103,6 +104,9 @@ def accel_speed_device(backend=None):
     return b.get("speed_device") if b.get("loaded") else None
 
 
+_O_RDONLY_NONBLOCK = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0)
+
+
 def read_maccel_speed(dev_path=None):
     """Read (raw_fixed, speed_counts_per_ms) from the detected speed device, or None if unreadable."""
     if dev_path is None:
@@ -110,7 +114,7 @@ def read_maccel_speed(dev_path=None):
         if dev_path is None:
             return None
     try:
-        fd = os.open(dev_path, os.O_RDONLY | os.O_NONBLOCK)
+        fd = os.open(dev_path, _O_RDONLY_NONBLOCK)
     except OSError:
         return None
     try:
@@ -418,7 +422,7 @@ class MotionHub:
         if not path:
             return None
         try:
-            fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
+            fd = os.open(path, _O_RDONLY_NONBLOCK)
         except OSError:
             return None
         with self._lock:
@@ -438,7 +442,7 @@ class MotionHub:
             if path in fds_by_path:
                 continue
             try:
-                fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
+                fd = os.open(path, _O_RDONLY_NONBLOCK)
             except OSError:
                 continue
             fds_by_path[path] = (fd, {"dx": 0, "dy": 0, "buf": b"", "last_ts": None})
@@ -566,17 +570,21 @@ class MotionHub:
                     if rescan:
                         last_scan = 0.0
                 elif maccel_fd is not None:
-                    try:
-                        rlist, _, _ = select.select([wake_r], [], [], 0.016)
-                    except (OSError, ValueError):
-                        break
-                    if wake_r in rlist:
-                        try:
-                            os.read(wake_r, 64)
-                        except OSError:
-                            pass
-                        if self._stop.is_set():
+                    if sys.platform == "win32":
+                        if self._stop.wait(0.016):
                             break
+                    else:
+                        try:
+                            rlist, _, _ = select.select([wake_r], [], [], 0.016)
+                        except (OSError, ValueError):
+                            break
+                        if wake_r in rlist:
+                            try:
+                                os.read(wake_r, 64)
+                            except OSError:
+                                pass
+                            if self._stop.is_set():
+                                break
                     res = _read_maccel_fd(maccel_fd)
                     if res is None:
                         os.close(maccel_fd)
@@ -590,15 +598,19 @@ class MotionHub:
                             self._seq += 1
                             self._cond.notify_all()
                 else:
-                    try:
-                        rlist, _, _ = select.select([wake_r], [], [], 2.0)
-                    except (OSError, ValueError):
-                        break
-                    if wake_r in rlist:
+                    if sys.platform == "win32":
+                        if self._stop.wait(2.0):
+                            break
+                    else:
                         try:
-                            os.read(wake_r, 64)
-                        except OSError:
-                            pass
+                            rlist, _, _ = select.select([wake_r], [], [], 2.0)
+                        except (OSError, ValueError):
+                            break
+                        if wake_r in rlist:
+                            try:
+                                os.read(wake_r, 64)
+                            except OSError:
+                                pass
         finally:
             for fd, _ in fds_by_path.values():
                 try:

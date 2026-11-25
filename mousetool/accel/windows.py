@@ -155,7 +155,7 @@ def _read_script_path():
 def run(args):
     try:
         return subprocess.run(args, cwd=APP, capture_output=True, timeout=15,
-                              creationflags=subprocess.CREATE_NO_WINDOW)
+                              creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     except subprocess.TimeoutExpired as exc:
         raise OSError(f"{Path(args[0]).name} timed out") from exc
 
@@ -194,10 +194,15 @@ def writer_lock(folder):
         if os.name == "nt":
             import msvcrt
             msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+            try:
+                yield
+            finally:
+                handle.seek(0)
+                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
         else:
             import fcntl
             fcntl.flock(handle, fcntl.LOCK_EX)
-        yield  # Closing the handle releases the lock even on failure.
+            yield  # Closing the handle releases the lock even on failure.
 
 
 class WindowsAccel:

@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-import fcntl
 import glob
 import http.client
 import json
@@ -14,6 +13,9 @@ import time
 import unittest
 from http.server import ThreadingHTTPServer
 from unittest import mock
+
+if sys.platform != "win32":
+    import fcntl
 
 import mousetool
 from mousetool import battery as battery_mod
@@ -51,7 +53,7 @@ class TestRazerProtocol(unittest.TestCase):
         from mousetool.registry import get_registry
 
         reg = get_registry()
-        with open(os.path.join(REPO_DIR, "platform", "linux", "60-mousetool.rules")) as f:
+        with open(os.path.join(REPO_DIR, "platform", "linux", "60-mousetool.rules"), encoding="utf-8") as f:
             rules_txt = f.read()
         rules_vp = {
             (int(v, 16), int(p, 16))
@@ -80,7 +82,7 @@ class TestRazerProtocol(unittest.TestCase):
         drivers_dir = os.path.join(REPO_DIR, "web", "drivers")
         for fname in sorted(os.listdir(drivers_dir)):
             if fname.endswith(".js"):
-                with open(os.path.join(drivers_dir, fname)) as f:
+                with open(os.path.join(drivers_dir, fname), encoding="utf-8") as f:
                     src = f.read()
                 for forbidden in (
                     "const DEVICES = {",
@@ -513,7 +515,8 @@ class TestAccelBackend(unittest.TestCase):
                 raw = str(int(round(1.5 * mousetool.FIX)))
                 self.assertEqual(self._read("sys", "module", name, "parameters", "LIMIT"), raw)
                 reset = self._read("var", "opt", name, "resets", "set_last_LIMIT_value.sh")
-                self.assertEqual(reset, f"echo {raw} > {paths['SYS_MODULE']}/{name}/parameters/LIMIT;")
+                expected_params_dir = os.path.join(paths["SYS_MODULE"], name, "parameters")
+                self.assertEqual(reset, f"echo {raw} > {expected_params_dir}/LIMIT;")
                 self.assertFalse(os.path.exists(os.path.join(paths["SYS_MODULE"], other)))
                 self.assertEqual(os.listdir(other_params), [])
 
@@ -630,12 +633,12 @@ class TestMouseaccelUdevHelper(unittest.TestCase):
     HELPER = os.path.join(REPO_DIR, "platform", "linux", "mouseaccel_param_ownership_and_resets")
 
     def test_rule_and_helper_names(self):
-        with open(os.path.join(os.path.dirname(self.HELPER), "99-mouseaccel.rules")) as f:
+        with open(os.path.join(os.path.dirname(self.HELPER), "99-mouseaccel.rules"), encoding="utf-8") as f:
             rules = f.read()
         self.assertIn('DEVPATH=="/module/mouseaccel"', rules)
         self.assertIn('RUN+="/usr/lib/udev/mouseaccel_param_ownership_and_resets"', rules)
         self.assertIn('GROUP="mouseaccel"', rules)
-        with open(self.HELPER) as f:
+        with open(self.HELPER, encoding="utf-8") as f:
             text = f.read()
         self.assertNotIn("maccel/", text.replace("mouseaccel/", ""))
 
@@ -643,7 +646,7 @@ class TestMouseaccelUdevHelper(unittest.TestCase):
         import grp
         from pathlib import Path
         root = Path(tmp)
-        script = Path(self.HELPER).read_text()
+        script = Path(self.HELPER).read_text(encoding="utf-8")
         for setting, value in {
             "PARAMS_DIR=/sys/module/mouseaccel/parameters": "PARAMS_DIR=" + str(root / "params"),
             "SPEED_DEV=/dev/mouseaccel": "SPEED_DEV=" + str(root / "no-such-dev"),
@@ -655,9 +658,10 @@ class TestMouseaccelUdevHelper(unittest.TestCase):
             self.assertIn(setting, script)
             script = script.replace(setting, value)
         helper = root / "helper.sh"
-        helper.write_text(script)
+        helper.write_text(script, encoding="utf-8")
         return helper
 
+    @unittest.skipIf(sys.platform == "win32", "POSIX udev helper script test")
     def test_unsafe_state_paths_rejected_before_log_or_reset_writes(self):
         import subprocess
         from pathlib import Path
@@ -681,6 +685,7 @@ class TestMouseaccelUdevHelper(unittest.TestCase):
                 self.assertEqual(target.stat().st_mode & 0o777, 0o700)
                 self.assertFalse((root / "state/logs/udev.log").is_file())
 
+    @unittest.skipIf(sys.platform == "win32", "POSIX udev helper script test")
     def test_resets_are_parsed_not_executed(self):
         with tempfile.TemporaryDirectory() as tmp:
             params = os.path.join(tmp, "params")
@@ -934,19 +939,20 @@ class TestUniversalProtocols(unittest.TestCase):
             with self.assertRaises(OSError):
                 mousetool.tune_cmd(_Args())
 
+        fake_fcntl = mock.Mock()
         with mock.patch.object(hid_mod, "select_mice", return_value=[core2_meta]), \
              mock.patch.object(os, "open", return_value=99), \
              mock.patch.object(os, "close"), \
-             mock.patch.object(fcntl, "ioctl") as m_ioctl, \
+             mock.patch.object(cli_mod, "fcntl", fake_fcntl, create=True), \
              mock.patch.object(cli_mod, "_save_device_cache"), \
              mock.patch.object(cli_mod, "classic_read_status", return_value={"debounce_ms": 6}), \
              mock.patch("sys.stdout"):
             with self.assertRaises(OSError):
                 mousetool.dpi_cmd(_Args())
-            m_ioctl.assert_not_called()
+            fake_fcntl.ioctl.assert_not_called()
             # CORE 2 Classic DOES allow debounce when feat_len == 64
             mousetool.tune_cmd(_Args())
-            self.assertEqual(m_ioctl.call_count, 1)
+            self.assertEqual(fake_fcntl.ioctl.call_count, 1)
 
     def test_discover_identical_split_mice_and_0xa1_exclusion(self):
         rd_egg_v2_a1 = bytes([
@@ -1068,7 +1074,7 @@ class TestMotionTelemetry(unittest.TestCase):
                 sys_input_glob=os.path.join(tmp, "event*"),
                 dev_dir="/dev/input",
             )
-            self.assertEqual(found, ["/dev/input/event11", "/dev/input/event5"])
+            self.assertEqual(found, [os.path.join("/dev/input", "event11"), os.path.join("/dev/input", "event5")])
 
     def test_speed_and_dpi_normalization(self):
         # 3-4-5 right triangle: distance=5 counts in 1 ms at 1000 DPI => 5.0 counts/ms
@@ -1084,11 +1090,12 @@ class TestMotionTelemetry(unittest.TestCase):
         self.assertEqual(mousetool.compute_normalized_speed(10, 0, float("nan"), 1000.0), 0.0)
 
         # /dev/maccel big-endian Q32.32 fixed-point decoding
-        with tempfile.NamedTemporaryFile() as tf:
+        with tempfile.TemporaryDirectory() as tmp:
+            dev_file = os.path.join(tmp, "maccel")
             raw_fixed = int(round(18.5 * mousetool.FIX))
-            tf.write(struct.pack(">q", raw_fixed))
-            tf.flush()
-            res = mousetool.read_maccel_speed(tf.name)
+            with open(dev_file, "wb") as tf:
+                tf.write(struct.pack(">q", raw_fixed))
+            res = mousetool.read_maccel_speed(dev_file)
             self.assertIsNotNone(res)
             self.assertEqual(res[0], raw_fixed)
             self.assertAlmostEqual(res[1], 18.5, places=6)
@@ -1187,8 +1194,11 @@ class TestMotionTelemetry(unittest.TestCase):
         self.assertEqual(tracker.snapshot(now=10.002, dpi=2000)["speed"], 20)
 
     def test_maccel_only_stable_value_has_unknown_freshness(self):
-        with tempfile.NamedTemporaryFile() as dev:
-            hub = mousetool.MotionHub(lambda: [], dev.name, lambda: 2000)
+        with tempfile.TemporaryDirectory() as tmp:
+            dev_path = os.path.join(tmp, "maccel")
+            with open(dev_path, "wb"):
+                pass
+            hub = mousetool.MotionHub(lambda: [], dev_path, lambda: 2000)
             with mock.patch.object(motion_mod, "_read_maccel_fd", return_value=(123, 20.0)):
                 hub.subscribe()
                 try:
@@ -1204,12 +1214,15 @@ class TestMotionTelemetry(unittest.TestCase):
                 finally:
                     hub.unsubscribe()
 
+    @unittest.skipIf(sys.platform == "win32", "requires POSIX FIFO (os.mkfifo)")
     def test_motion_hub_lazy_lifecycle_and_evdev_fifo(self):
         self._check_evdev_fifo(raw=True)
 
+    @unittest.skipIf(sys.platform == "win32", "requires POSIX FIFO (os.mkfifo)")
     def test_loaded_module_without_speed_device_excludes_evdev_output(self):
         self._check_evdev_fifo(raw=False)
 
+    @unittest.skipIf(sys.platform == "win32", "requires POSIX FIFO (os.mkfifo)")
     def test_short_kernel_read_excludes_evdev_batch(self):
         with tempfile.NamedTemporaryFile() as dev:
             dev.write(b"x")
@@ -1562,6 +1575,7 @@ class TestBatteryIndicator(unittest.TestCase):
             self.real_send("s", "b", run=run, which=lambda name: None)
 
     # --- settings ------------------------------------------------------------------------------------
+    @unittest.skipIf(sys.platform == "win32", "requires POSIX fcntl.flock")
     def test_cli_uses_custom_port_owner_and_unreachable_owner_cache(self):
         port = self._server()
         w = mousetool.BatteryWatcher(snapshot=lambda: self.reading(39), notifier=None)
@@ -1612,7 +1626,7 @@ class TestBatteryIndicator(unittest.TestCase):
 
     def test_waybar_example_escapes_and_all_is_rejected(self):
         import contextlib, io, pathlib
-        readme = (pathlib.Path(REPO_DIR) / "README.md").read_text()
+        readme = (pathlib.Path(REPO_DIR) / "README.md").read_text(encoding="utf-8")
         snippet = readme.split("### Mouse battery in Waybar")[1].split("```json")[1].split("```")[0]
         self.assertTrue(json.loads("{" + snippet + "}")["custom/mouse-battery"]["escape"])
         errors = io.StringIO()

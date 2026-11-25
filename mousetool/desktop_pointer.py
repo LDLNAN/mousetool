@@ -292,7 +292,7 @@ class Cosmic:
             self.text = self.path.read_bytes().decode()
         else:
             dirs = [os.environ.get("XDG_DATA_HOME") or Path.home() / ".local/share",
-                    *(os.environ.get("XDG_DATA_DIRS") or "/usr/local/share:/usr/share").split(":")]
+                    *(os.environ.get("XDG_DATA_DIRS") or "/usr/local/share:/usr/share").split(os.pathsep)]
             source = next((Path(d) / rel for d in dirs if (Path(d) / rel).is_file()), None)
             self.text = source.read_bytes().decode() if source else "(state: Enabled,)\n"
         masked = mask_comments(self.text, hide_strings=True)
@@ -357,20 +357,23 @@ class Cosmic:
 def atomic_config(path, original, text):
     target = path.resolve()
     target.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.NamedTemporaryFile(dir=target.parent, prefix=".atomicwrite", delete=False) as tmp:
-        try:
-            if original is not None:
+    tmp_name = None
+    try:
+        with tempfile.NamedTemporaryFile(dir=target.parent, prefix=".atomicwrite", delete=False) as tmp:
+            tmp_name = tmp.name
+            if original is not None and hasattr(os, "fchmod"):
                 os.fchmod(tmp.fileno(), target.stat().st_mode & 0o777)
             tmp.write(text.encode())
             tmp.flush()
-            if original is None:
-                os.link(tmp.name, target)  # Fail if another writer created it.
-            elif target.read_bytes() == original.encode():
-                os.replace(tmp.name, target)
-            else:
-                raise OSError("Desktop settings changed during edit")
-        finally:
-            Path(tmp.name).unlink(missing_ok=True)
+        if original is None:
+            os.link(tmp_name, target)  # Fail if another writer created it.
+        elif target.read_bytes() == original.encode():
+            os.replace(tmp_name, target)
+        else:
+            raise OSError("Desktop settings changed during edit")
+    finally:
+        if tmp_name is not None:
+            Path(tmp_name).unlink(missing_ok=True)
 
 
 BACKENDS = {"niri": Niri, "gnome": Gnome, "plasma": Plasma, "cosmic": Cosmic, "hyprland": Hyprland}
