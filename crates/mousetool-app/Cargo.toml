@@ -1,0 +1,23 @@
+[package]
+name = "mousetool-app"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[features]
+default = []
+# Optional GPU renderer; tiny-skia CPU rendering is enabled by default for tiny binaries and instant startup.
+gpu = ["iced/wgpu"]
+
+[dependencies]
+mousetool-core = { path = "../mousetool-core" }
+iced = { version = "0.14", default-features = false, features = [
+    "tiny-skia",
+    "canvas",
+    "crisp",
+    "web-colors",
+    "thread-pool",
+    "linux-theme-detection",
+    "x11",
+    "wayland",
+] }
