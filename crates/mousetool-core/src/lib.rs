@@ -1,6 +1,7 @@
 //! Shared core library for Mouse Tool (portable app, installed app, and background helper).
 
 pub mod accel;
+pub mod drivers;
 pub mod hid;
 pub mod registry;
 

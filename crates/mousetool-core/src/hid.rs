@@ -1,4 +1,4 @@
-//! Cross-platform HID transport abstraction and live mouse discovery.
+//! Cross-platform HID transport abstraction, live `hidapi` implementation, and mouse discovery.
 
 use crate::registry::{ClassifiedDevice, DeviceRegistry};
 use std::collections::BTreeMap;
@@ -10,6 +10,51 @@ pub trait HidTransport {
     fn get_feature_report(&mut self, buf: &mut [u8]) -> Result<usize, String>;
     fn write(&mut self, data: &[u8]) -> Result<usize, String>;
     fn read_timeout(&mut self, buf: &mut [u8], timeout_ms: i32) -> Result<usize, String>;
+}
+
+#[cfg(feature = "hid")]
+pub struct HidApiTransport {
+    device: hidapi::HidDevice,
+}
+
+#[cfg(feature = "hid")]
+impl HidApiTransport {
+    pub fn open_path(path: &str) -> Result<Self, String> {
+        let api = hidapi::HidApi::new().map_err(|e| format!("HID initialization failed: {e}"))?;
+        let cpath = std::ffi::CString::new(path)
+            .map_err(|_| format!("invalid HID device path: {path}"))?;
+        let device = api
+            .open_path(&cpath)
+            .map_err(|e| format!("failed to open HID device {path}: {e}"))?;
+        Ok(Self { device })
+    }
+}
+
+#[cfg(feature = "hid")]
+impl HidTransport for HidApiTransport {
+    fn send_feature_report(&mut self, data: &[u8]) -> Result<(), String> {
+        self.device
+            .send_feature_report(data)
+            .map_err(|e| format!("send_feature_report failed: {e}"))
+    }
+
+    fn get_feature_report(&mut self, buf: &mut [u8]) -> Result<usize, String> {
+        self.device
+            .get_feature_report(buf)
+            .map_err(|e| format!("get_feature_report failed: {e}"))
+    }
+
+    fn write(&mut self, data: &[u8]) -> Result<usize, String> {
+        self.device
+            .write(data)
+            .map_err(|e| format!("HID write failed: {e}"))
+    }
+
+    fn read_timeout(&mut self, buf: &mut [u8], timeout_ms: i32) -> Result<usize, String> {
+        self.device
+            .read_timeout(buf, timeout_ms)
+            .map_err(|e| format!("HID read failed: {e}"))
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -47,7 +92,7 @@ impl DetectedMouse {
 /// Enumerate connected HID mice and classify each via `devices/devices.json`.
 ///
 /// Deduplicates multi-interface USB mice (e.g. pointer + vendor control interface)
-/// and prefers the vendor-specific control collection when one is present.
+/// and picks the protocol-specific control interface (matching `mousetool/hid_discovery.py`).
 #[cfg(feature = "hid")]
 pub fn discover_mice(registry: &DeviceRegistry) -> Result<Vec<DetectedMouse>, String> {
     let api = hidapi::HidApi::new().map_err(|e| format!("HID initialization failed: {e}"))?;
@@ -66,7 +111,6 @@ pub fn discover_mice(registry: &DeviceRegistry) -> Result<Vec<DetectedMouse>, St
         let is_generic_mouse = usage_page == 0x0001 && usage == 0x0002;
         let is_vendor_collection = usage_page >= 0xff00;
 
-        // Include every registry-matched mouse/receiver, plus generic HID mice (Usage 0x01:0x02).
         if classified.tier == 0 && !is_generic_mouse {
             continue;
         }
@@ -78,16 +122,16 @@ pub fn discover_mice(registry: &DeviceRegistry) -> Result<Vec<DetectedMouse>, St
             format!("{vid:04x}:{pid:04x}")
         };
 
-        // Rank interfaces: prefer vendor control collection for Tier 1/2 devices.
-        let score = if classified.tier > 0 && is_vendor_collection {
-            3
-        } else if classified.tier > 0 && info.interface_number() > 0 {
-            2
-        } else if is_generic_mouse {
-            1
-        } else {
-            0
-        };
+        let score = interface_score(
+            &classified.driver,
+            classified.tier,
+            &path,
+            usage_page,
+            usage,
+            info.interface_number(),
+            is_vendor_collection,
+            is_generic_mouse,
+        );
 
         let permission_hint = probe_permission_hint(&path, classified.tier);
 
@@ -127,6 +171,66 @@ pub fn discover_mice(registry: &DeviceRegistry) -> Result<Vec<DetectedMouse>, St
 #[cfg(not(feature = "hid"))]
 pub fn discover_mice(_registry: &DeviceRegistry) -> Result<Vec<DetectedMouse>, String> {
     Ok(Vec::new())
+}
+
+#[cfg(feature = "hid")]
+#[allow(clippy::too_many_arguments)]
+fn interface_score(
+    driver: &str,
+    tier: u8,
+    path: &str,
+    usage_page: u16,
+    usage: u16,
+    interface_number: i32,
+    is_vendor_collection: bool,
+    is_generic_mouse: bool,
+) -> u8 {
+    if tier > 0 {
+        if let Some(rd) = read_linux_report_descriptor(path) {
+            if driver == "egg8k"
+                && contains_bytes(&rd, &[0x06, 0x01, 0xFF])
+                && contains_bytes(&rd, &[0x85, 0xA0])
+                && contains_bytes(&rd, &[0x85, 0xA1])
+            {
+                return 6;
+            }
+            if driver == "razer" && contains_bytes(&rd, &[0x95, 0x5A, 0xB1]) {
+                return 6;
+            }
+        }
+        if driver == "egg8k" && usage_page == 0xFF01 {
+            return 5;
+        }
+        if driver == "razer" && interface_number == 0 && usage_page == 0x0001 && usage == 0x0002 {
+            return 5;
+        }
+        if is_vendor_collection {
+            return 4;
+        }
+        if interface_number > 0 {
+            return 2;
+        }
+    }
+    if is_generic_mouse { 1 } else { 0 }
+}
+
+#[cfg(all(feature = "hid", target_os = "linux"))]
+fn read_linux_report_descriptor(path: &str) -> Option<Vec<u8>> {
+    let dev_name = path.strip_prefix("/dev/")?;
+    if !dev_name.starts_with("hidraw") {
+        return None;
+    }
+    std::fs::read(format!("/sys/class/hidraw/{dev_name}/device/report_descriptor")).ok()
+}
+
+#[cfg(all(feature = "hid", not(target_os = "linux")))]
+fn read_linux_report_descriptor(_path: &str) -> Option<Vec<u8>> {
+    None
+}
+
+#[cfg(feature = "hid")]
+fn contains_bytes(haystack: &[u8], needle: &[u8]) -> bool {
+    !needle.is_empty() && haystack.windows(needle.len()).any(|w| w == needle)
 }
 
 #[cfg(all(feature = "hid", target_os = "linux"))]

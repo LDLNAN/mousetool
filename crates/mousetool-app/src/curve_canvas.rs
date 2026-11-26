@@ -1,35 +1,124 @@
-//! Crisp vector Canvas widget rendering the acceleration curve graph matching `web/accel_graph.js`.
+//! Crisp interactive vector Canvas rendering the acceleration curve graph matching `web/accel_graph.js`.
+//! Supports dragging custom LUT control points directly on the chart.
 
 use crate::theme::Tokens;
 use iced::mouse;
-use iced::widget::canvas::{self, Canvas, Frame, Geometry, Path, Stroke, Text};
+use iced::widget::canvas::{self, Canvas, Event, Frame, Geometry, Path, Stroke, Text};
 use iced::{Color, Element, Length, Point, Rectangle, Renderer, Size, Theme};
 use mousetool_core::accel::{AccelConfig, AccelMode, evaluate_sensitivity};
 
-pub struct CurveGraph {
+pub struct CurveGraph<Message> {
     config: AccelConfig,
     tokens: Tokens,
+    on_drag_lut: fn(usize, f64, f64) -> Message,
 }
 
-impl CurveGraph {
-    pub fn new(config: AccelConfig, tokens: Tokens) -> Self {
-        Self { config, tokens }
+#[derive(Default)]
+pub struct CurveGraphState {
+    dragging_lut: Option<usize>,
+}
+
+impl<Message: 'static> CurveGraph<Message> {
+    pub fn new(
+        config: AccelConfig,
+        tokens: Tokens,
+        on_drag_lut: fn(usize, f64, f64) -> Message,
+    ) -> Self {
+        Self {
+            config,
+            tokens,
+            on_drag_lut,
+        }
     }
 
-    pub fn view<Message: 'static>(self) -> Element<'static, Message> {
+    pub fn view(self) -> Element<'static, Message> {
         Canvas::new(self)
             .width(Length::Fill)
             .height(Length::Fixed(230.0))
             .into()
     }
+
+    fn layout(bounds: Rectangle, cfg: &AccelConfig) -> (f32, f32, f32, f32, f64, f64) {
+        let pad_l = 42.0_f32;
+        let pad_r = 16.0_f32;
+        let pad_t = 14.0_f32;
+        let pad_b = 26.0_f32;
+        let plot_w = (bounds.width - pad_l - pad_r).max(40.0);
+        let plot_h = (bounds.height - pad_t - pad_b).max(40.0);
+        let x_max = 60.0_f64;
+
+        let mut y_max = 2.5_f64;
+        for i in 0..=60 {
+            let x = (i as f64 / 60.0) * x_max;
+            let (sx, sy) = evaluate_sensitivity(x, cfg);
+            y_max = y_max.max(sx).max(sy);
+        }
+        let y_top = (y_max * 1.15).ceil().max(2.5);
+        (pad_l, pad_t, plot_w, plot_h, x_max, y_top)
+    }
 }
 
-impl<Message> canvas::Program<Message> for CurveGraph {
-    type State = ();
+impl<Message: 'static> canvas::Program<Message> for CurveGraph<Message> {
+    type State = CurveGraphState;
+
+    fn update(
+        &self,
+        state: &mut Self::State,
+        event: &Event,
+        bounds: Rectangle,
+        cursor: mouse::Cursor,
+    ) -> Option<canvas::Action<Message>> {
+        if self.config.mode != AccelMode::Lookup {
+            state.dragging_lut = None;
+            return None;
+        }
+        let (pad_l, pad_t, plot_w, plot_h, x_max, y_top) = Self::layout(bounds, &self.config);
+        let to_px = |x: f64, y: f64| -> Point {
+            let nx = (x / x_max).clamp(0.0, 1.0) as f32;
+            let ny = (y / y_top).clamp(0.0, 1.0) as f32;
+            Point::new(pad_l + nx * plot_w, pad_t + (1.0 - ny) * plot_h)
+        };
+
+        match event {
+            Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
+                let pos = cursor.position_in(bounds)?;
+                let mut best: Option<(usize, f32)> = None;
+                for (idx, &[lx, ly]) in self.config.lut_points.iter().enumerate() {
+                    let pt = to_px(lx, ly * self.config.sens_mult);
+                    let d = ((pos.x - pt.x).powi(2) + (pos.y - pt.y).powi(2)).sqrt();
+                    if d <= 13.0 && best.is_none_or(|(_, bd)| d < bd) {
+                        best = Some((idx, d));
+                    }
+                }
+                if let Some((idx, _)) = best {
+                    state.dragging_lut = Some(idx);
+                    return Some(canvas::Action::capture());
+                }
+                None
+            }
+            Event::Mouse(mouse::Event::CursorMoved { .. }) => {
+                let idx = state.dragging_lut?;
+                let pos = cursor.position_in(bounds)?;
+                let nx = ((pos.x - pad_l) / plot_w).clamp(0.0, 1.0) as f64;
+                let ny = (1.0 - (pos.y - pad_t) / plot_h).clamp(0.0, 1.0) as f64;
+                let x = (nx * x_max * 2.0).round() / 2.0;
+                let raw_y = (ny * y_top) / self.config.sens_mult.max(0.01);
+                let y = ((raw_y * 20.0).round() / 20.0).clamp(0.1, 10.0);
+                Some(canvas::Action::publish((self.on_drag_lut)(idx, x, y)).and_capture())
+            }
+            Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
+                if state.dragging_lut.take().is_some() {
+                    return Some(canvas::Action::capture());
+                }
+                None
+            }
+            _ => None,
+        }
+    }
 
     fn draw(
         &self,
-        _state: &Self::State,
+        state: &Self::State,
         renderer: &Renderer,
         _theme: &Theme,
         bounds: Rectangle,
@@ -38,33 +127,19 @@ impl<Message> canvas::Program<Message> for CurveGraph {
         let mut frame = Frame::new(renderer, bounds.size());
         let t = self.tokens;
 
-        // Inset chart background
         frame.fill_rectangle(Point::ORIGIN, bounds.size(), t.inset);
+        let (pad_l, pad_t, plot_w, plot_h, x_max, y_top) = Self::layout(bounds, &self.config);
+        let y_bot = 0.0_f64;
 
-        let pad_l = 42.0_f32;
-        let pad_r = 16.0_f32;
-        let pad_t = 14.0_f32;
-        let pad_b = 26.0_f32;
-        let plot_w = (bounds.width - pad_l - pad_r).max(40.0);
-        let plot_h = (bounds.height - pad_t - pad_b).max(40.0);
-
-        let x_max = 60.0_f64;
         let samples = 180usize;
-
         let mut pts_x = Vec::with_capacity(samples + 1);
         let mut pts_y = Vec::with_capacity(samples + 1);
-        let mut y_max = 2.0_f64;
-
         for i in 0..=samples {
             let x = (i as f64 / samples as f64) * x_max;
             let (sx, sy) = evaluate_sensitivity(x, &self.config);
-            y_max = y_max.max(sx).max(sy);
             pts_x.push((x, sx));
             pts_y.push((x, sy));
         }
-        // Nice headroom above peak
-        let y_top = (y_max * 1.15).ceil().max(2.0);
-        let y_bot = 0.0_f64;
 
         let to_px = |x: f64, y: f64| -> Point {
             let nx = (x / x_max).clamp(0.0, 1.0) as f32;
@@ -91,7 +166,7 @@ impl<Message> canvas::Program<Message> for CurveGraph {
             });
         }
 
-        // Vertical gridlines + labels (hand speed)
+        // Vertical gridlines + labels
         for tick in [0.0, 15.0, 30.0, 45.0, 60.0] {
             let p0 = to_px(tick, y_bot);
             let p1 = to_px(tick, y_top);
@@ -164,24 +239,51 @@ impl<Message> canvas::Program<Message> for CurveGraph {
             Stroke::default().with_color(t.accent).with_width(2.2),
         );
 
-        // Custom LUT control point handles
+        // Draggable Custom LUT control point handles
         if self.config.mode == AccelMode::Lookup {
-            for &[lx, ly] in &self.config.lut_points {
+            for (idx, &[lx, ly]) in self.config.lut_points.iter().enumerate() {
                 let pt = to_px(lx, ly * self.config.sens_mult);
-                frame.fill(&Path::circle(pt, 5.0), t.surface);
+                let active = state.dragging_lut == Some(idx);
+                let r = if active { 6.5 } else { 5.0 };
+                frame.fill(&Path::circle(pt, r), if active { t.accent } else { t.surface });
                 frame.stroke(
-                    &Path::circle(pt, 5.0),
+                    &Path::circle(pt, r),
                     Stroke::default().with_color(t.accent).with_width(2.0),
                 );
             }
         }
 
-        // Subtle outer plot border
         frame.stroke(
             &Path::rectangle(Point::new(pad_l, pad_t), Size::new(plot_w, plot_h)),
             Stroke::default().with_color(t.line_strong).with_width(1.0),
         );
 
         vec![frame.into_geometry()]
+    }
+
+    fn mouse_interaction(
+        &self,
+        state: &Self::State,
+        bounds: Rectangle,
+        cursor: mouse::Cursor,
+    ) -> mouse::Interaction {
+        if state.dragging_lut.is_some() {
+            return mouse::Interaction::Grabbing;
+        }
+        if self.config.mode == AccelMode::Lookup {
+            if let Some(pos) = cursor.position_in(bounds) {
+                let (pad_l, pad_t, plot_w, plot_h, x_max, y_top) =
+                    Self::layout(bounds, &self.config);
+                for &[lx, ly] in &self.config.lut_points {
+                    let nx = (lx / x_max).clamp(0.0, 1.0) as f32;
+                    let ny = ((ly * self.config.sens_mult) / y_top).clamp(0.0, 1.0) as f32;
+                    let pt = Point::new(pad_l + nx * plot_w, pad_t + (1.0 - ny) * plot_h);
+                    if ((pos.x - pt.x).powi(2) + (pos.y - pt.y).powi(2)).sqrt() <= 13.0 {
+                        return mouse::Interaction::Grab;
+                    }
+                }
+            }
+        }
+        mouse::Interaction::default()
     }
 }

@@ -1870,6 +1870,7 @@ dependencies = [
  "hidapi",
  "serde",
  "serde_json",
+ "tempfile",
 ]
 
 [[package]]

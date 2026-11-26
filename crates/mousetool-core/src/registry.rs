@@ -31,6 +31,14 @@ pub struct OperationCaps {
     pub write: bool,
     #[serde(default)]
     pub dpi_max: Option<u32>,
+    #[serde(default)]
+    pub txn: Option<String>,
+    #[serde(default)]
+    pub storage: Option<String>,
+    #[serde(default)]
+    pub cmd_class: Option<String>,
+    #[serde(default)]
+    pub cmd_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -81,8 +89,22 @@ pub struct ClassifiedDevice {
     pub status_note: String,
     pub link: String,
     pub wireless: bool,
+    pub hyper: bool,
     pub dpi_max: u32,
     pub operations: HashMap<String, OperationCaps>,
+    pub meta: serde_json::Value,
+}
+
+pub fn parse_hex_u8(val: Option<&str>, default: u8) -> u8 {
+    val.and_then(|s| {
+        let trimmed = s.trim();
+        let hex = trimmed
+            .strip_prefix("0x")
+            .or_else(|| trimmed.strip_prefix("0X"))
+            .unwrap_or(trimmed);
+        u8::from_str_radix(hex, 16).ok()
+    })
+    .unwrap_or(default)
 }
 
 impl ClassifiedDevice {
@@ -102,6 +124,43 @@ impl ClassifiedDevice {
         self.tier >= 2
             && self.write_enabled
             && self.operations.get(op).is_some_and(|c| c.write)
+    }
+
+    pub fn op_txn(&self, op: &str, default: u8) -> u8 {
+        parse_hex_u8(self.operations.get(op).and_then(|c| c.txn.as_deref()), default)
+    }
+
+    pub fn op_storage(&self, op: &str, default: u8) -> u8 {
+        parse_hex_u8(
+            self.operations.get(op).and_then(|c| c.storage.as_deref()),
+            default,
+        )
+    }
+
+    /// Enforce Tier 0/1 allowlist for Razer 90-byte feature commands.
+    pub fn is_razer_cmd_allowed(&self, cls: u8, cmd: u8, txn: u8) -> bool {
+        if self.tier == 0 {
+            return false;
+        }
+        if self.tier >= 2 && self.write_enabled {
+            return true;
+        }
+        // Tier 1 read-only: only commands explicitly allowlisted in operations with read=true & write=false.
+        self.operations.values().any(|spec| {
+            if !spec.read || spec.write {
+                return false;
+            }
+            let Some(c_str) = spec.cmd_class.as_deref() else {
+                return false;
+            };
+            let Some(i_str) = spec.cmd_id.as_deref() else {
+                return false;
+            };
+            let allowed_cls = parse_hex_u8(Some(c_str), 0xFF);
+            let allowed_cmd = parse_hex_u8(Some(i_str), 0xFF);
+            let allowed_txn = parse_hex_u8(spec.txn.as_deref(), txn);
+            cls == allowed_cls && cmd == allowed_cmd && txn == allowed_txn
+        })
     }
 }
 
@@ -237,8 +296,10 @@ impl DeviceRegistry {
             status_note: prof.status_note.clone().unwrap_or_default(),
             link: m.link.clone().unwrap_or_default(),
             wireless: m.wireless,
+            hyper: m.hyper,
             dpi_max,
             operations: prof.operations.clone(),
+            meta: m.meta.clone(),
         })
     }
 
@@ -269,8 +330,10 @@ impl DeviceRegistry {
             status_note,
             link: link.into(),
             wireless: link == "Bluetooth",
+            hyper: false,
             dpi_max: 30_000,
             operations: HashMap::new(),
+            meta: serde_json::Value::Null,
         }
     }
 }
