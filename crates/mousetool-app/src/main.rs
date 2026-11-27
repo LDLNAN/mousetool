@@ -4,10 +4,12 @@
 //! zero files written to disk), with live native HID drivers and kernel acceleration control.
 
 mod curve_canvas;
+mod device_io;
 mod dpi_track;
 mod theme;
 
 use curve_canvas::CurveGraph;
+use device_io::{DeviceKey, Job, Outcome, Reply, Tag, Worker};
 use dpi_track::DpiTrack;
 use iced::widget::{Space, button, column, container, row, scrollable, slider, text};
 use iced::{Alignment, Element, Length, Padding, Task, Theme};
@@ -15,10 +17,8 @@ use mousetool_core::RuntimeMode;
 use mousetool_core::accel::{
     AccelBackendStatus, AccelConfig, AccelMode, LutPreset, apply_live_accel, detect_accel_backend,
 };
-use mousetool_core::drivers::{
-    LodState, MouseStatus, MouseUpdates, apply_mouse_updates, has_native_driver, read_mouse_status,
-};
-use mousetool_core::hid::{DetectedMouse, discover_mice};
+use mousetool_core::drivers::{LodState, MouseStatus, MouseUpdates, has_native_driver};
+use mousetool_core::hid::DetectedMouse;
 use mousetool_core::registry::DeviceRegistry;
 use theme::{Appearance, MAX_CONTENT_WIDTH, Tokens};
 
@@ -43,21 +43,32 @@ fn run_readonly_probe() {
         reg.profile_count(),
         reg.match_count()
     );
-    match discover_mice(&reg) {
-        Ok(mice) => {
+    let worker = Worker::native(reg.into());
+    let run = |device, sequence, job| {
+        iced::futures::executor::block_on(worker.submit(
+            Tag {
+                device,
+                generation: 0,
+                sequence,
+            },
+            job,
+        ))
+        .outcome
+    };
+    match run(None, 0, Job::Discover) {
+        Outcome::Fleet(mice) => {
             println!("Detected mice: {}", mice.len());
-            for m in &mice {
+            for (i, m) in mice.iter().enumerate() {
                 println!(
-                    "  - {} [{}] ({}, {}, path={})",
+                    "  - {} [{}] ({}, {})",
                     m.display_name(),
                     m.classified.driver,
                     m.vid_pid(),
-                    m.classified.tier_label(),
-                    m.path
+                    m.classified.tier_label()
                 );
                 if m.classified.tier > 0 && has_native_driver(&m.classified.driver) {
-                    match read_mouse_status(m) {
-                        Ok(st) => {
+                    match run(Some(DeviceKey::of(m)), i as u64 + 1, Job::Read(m.clone())) {
+                        Outcome::Readback { status: st, .. } => {
                             println!(
                                 "      live read: dpi={:?} active={:?} stages={:?} poll={:?}Hz lod={:?} fw={:?} motion_sync={:?} spdt={:?}",
                                 st.dpi,
@@ -70,12 +81,12 @@ fn run_readonly_probe() {
                                 st.spdt
                             );
                         }
-                        Err(e) => println!("      live read error: {e}"),
+                        _ => println!("      live read unavailable"),
                     }
                 }
             }
         }
-        Err(e) => println!("HID discovery error: {e}"),
+        _ => println!("HID discovery failed"),
     }
     let accel = detect_accel_backend();
     println!(
@@ -131,6 +142,7 @@ impl Tab {
 #[derive(Debug, Clone)]
 enum Message {
     Refresh,
+    DeviceReply(Reply),
     SelectMouse(usize),
     SelectTab(Tab),
     ToggleAppearance,
@@ -178,20 +190,61 @@ enum Message {
     RevertAccel,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum DeviceState {
+    Ready,
+    Busy,
+    Disconnected,
+    DiscoveryFailed,
+    Stale { after_write: bool },
+    WorkerUnavailable,
+}
+
+impl DeviceState {
+    fn presentation(self, t: Tokens) -> (&'static str, iced::Color, iced::Color, iced::Color) {
+        match self {
+            DeviceState::Ready => ("Connected / Ready", t.ok_soft, t.ok, t.ok_ink),
+            DeviceState::Busy => ("Device busy", t.warn_soft, t.warn, t.warn_ink),
+            DeviceState::Disconnected => ("Disconnected", t.surface_2, t.line_strong, t.ink),
+            DeviceState::DiscoveryFailed => ("Discovery failed", t.warn_soft, t.warn, t.warn_ink),
+            DeviceState::Stale { after_write: true } => (
+                "Stale / Write outcome unknown",
+                t.warn_soft,
+                t.warn,
+                t.warn_ink,
+            ),
+            DeviceState::Stale { after_write: false } => {
+                ("Stale / Readback failed", t.warn_soft, t.warn, t.warn_ink)
+            }
+            DeviceState::WorkerUnavailable => {
+                ("Device worker unavailable", t.warn_soft, t.warn, t.warn_ink)
+            }
+        }
+    }
+}
+
 struct App {
-    registry: DeviceRegistry,
+    worker: Worker,
+    registry: std::sync::Arc<DeviceRegistry>,
+    device_state: DeviceState,
+    generation: u64,
+    sequence: u64,
+    pending: Option<Tag>,
+    discover_requested: bool,
+    discovering: bool,
+    draft_device: Option<DeviceKey>,
+    write_uncertain: bool,
     runtime_mode: RuntimeMode,
     appearance: Appearance,
     mice: Vec<DetectedMouse>,
     selected_mouse: Option<usize>,
     mouse_status: Option<MouseStatus>,
-    mouse_error: Option<String>,
     stage_draft: Vec<(u32, u32)>,
     active_stage_draft: usize,
     stages_dirty: bool,
     status_toast: Option<(String, bool)>,
-    hid_error: Option<String>,
     active_tab: Tab,
+    tab_chosen: bool,
     accel_backend: AccelBackendStatus,
     accel_live_cfg: AccelConfig,
     accel_cfg: AccelConfig,
@@ -199,43 +252,50 @@ struct App {
 
 impl App {
     fn new(_portable_only: bool) -> (Self, Task<Message>) {
-        let registry = DeviceRegistry::load_embedded().expect("embedded devices.json is valid");
-        let (mice, hid_error) = match discover_mice(&registry) {
-            Ok(list) => (list, None),
-            Err(err) => (Vec::new(), Some(err)),
-        };
-        let selected_mouse = (!mice.is_empty()).then_some(0);
-        let accel_backend = detect_accel_backend();
-        let accel_live_cfg = accel_backend
-            .live_config
-            .clone()
-            .unwrap_or_default();
-        let active_tab = if selected_mouse.is_some() {
-            Tab::Sensitivity
-        } else {
-            Tab::Acceleration
-        };
-
-        let mut app = Self {
+        let registry = std::sync::Arc::new(
+            DeviceRegistry::load_embedded().expect("embedded devices.json is valid"),
+        );
+        Self::with_worker(
+            Worker::native(registry.clone()),
             registry,
+            detect_accel_backend(),
+        )
+    }
+
+    fn with_worker(
+        worker: Worker,
+        registry: std::sync::Arc<DeviceRegistry>,
+        accel_backend: AccelBackendStatus,
+    ) -> (Self, Task<Message>) {
+        let accel_live_cfg = accel_backend.live_config.clone().unwrap_or_default();
+        let mut app = Self {
+            worker,
+            registry,
+            device_state: DeviceState::Busy,
+            generation: 0,
+            sequence: 0,
+            pending: None,
+            discover_requested: true,
+            discovering: false,
+            draft_device: None,
+            write_uncertain: false,
             runtime_mode: RuntimeMode::PortableInProcess,
             appearance: Appearance::Dark,
-            mice,
-            selected_mouse,
+            mice: Vec::new(),
+            selected_mouse: None,
             mouse_status: None,
-            mouse_error: None,
             stage_draft: Vec::new(),
             active_stage_draft: 1,
             stages_dirty: false,
             status_toast: None,
-            hid_error,
-            active_tab,
+            active_tab: Tab::Sensitivity,
+            tab_chosen: false,
             accel_backend,
             accel_cfg: accel_live_cfg.clone(),
             accel_live_cfg,
         };
-        app.reload_selected_mouse();
-        (app, Task::none())
+        let task = app.schedule_device_job();
+        (app, task)
     }
 
     fn theme(&self) -> Theme {
@@ -258,52 +318,139 @@ impl App {
         }
     }
 
-    fn reload_selected_mouse(&mut self) {
-        self.mouse_status = None;
-        self.mouse_error = None;
-        let Some(mouse) = self.current_mouse().cloned() else {
-            self.sync_stage_draft_from_status();
-            return;
-        };
-        if mouse.classified.tier == 0 {
-            self.sync_stage_draft_from_status();
-            return;
-        }
-        if !has_native_driver(&mouse.classified.driver) {
-            self.mouse_error = Some(format!(
-                "Native Rust driver for `{}` is queued next; device metadata is shown below.",
-                mouse.classified.driver
-            ));
-            self.sync_stage_draft_from_status();
-            return;
-        }
-        match read_mouse_status(&mouse) {
-            Ok(st) => {
-                self.mouse_status = Some(st);
-                self.sync_stage_draft_from_status();
-            }
-            Err(err) => {
-                self.mouse_error = Some(err);
-                self.sync_stage_draft_from_status();
-            }
-        }
+    fn device_key(&self) -> Option<DeviceKey> {
+        self.current_mouse().map(DeviceKey::of)
     }
 
-    fn apply_mouse_update(&mut self, updates: MouseUpdates, ok_msg: &str) {
-        let Some(mouse) = self.current_mouse().cloned() else {
-            return;
+    fn dispatch(&mut self, job: Job) -> Task<Message> {
+        self.sequence += 1;
+        let tag = Tag {
+            device: self.device_key(),
+            generation: self.generation,
+            sequence: self.sequence,
         };
-        match apply_mouse_updates(&mouse, &updates) {
-            Ok(st) => {
-                self.mouse_status = Some(st);
-                self.mouse_error = None;
-                self.sync_stage_draft_from_status();
-                self.status_toast = Some((ok_msg.to_string(), false));
-            }
-            Err(err) => {
-                self.status_toast = Some((err, true));
-            }
+        self.pending = Some(tag.clone());
+        self.discovering = matches!(job, Job::Discover);
+        self.device_state = DeviceState::Busy;
+        Task::perform(self.worker.submit(tag, job), Message::DeviceReply)
+    }
+
+    fn schedule_device_job(&mut self) -> Task<Message> {
+        if self.pending.is_some() {
+            return Task::none();
         }
+        if self.discover_requested {
+            self.discover_requested = false;
+            return self.dispatch(Job::Discover);
+        }
+        let Some(mouse) = self.current_mouse().cloned() else {
+            self.device_state = DeviceState::Disconnected;
+            return Task::none();
+        };
+        let key = Some(DeviceKey::of(&mouse));
+        if self.draft_device != key {
+            self.draft_device = key;
+            self.write_uncertain = false;
+            self.sync_stage_draft_from_status();
+        }
+        if mouse.classified.tier > 0 && has_native_driver(&mouse.classified.driver) {
+            return self.dispatch(Job::Read(mouse));
+        }
+        self.device_state = DeviceState::Ready;
+        Task::none()
+    }
+
+    fn finish_device_job(&mut self, reply: Reply) -> Task<Message> {
+        if self.pending.as_ref() != Some(&reply.tag) {
+            return Task::none();
+        }
+        self.pending = None;
+        self.discovering = false;
+        if reply.tag.generation != self.generation || reply.tag.device != self.device_key() {
+            return self.schedule_device_job();
+        }
+
+        if reply.tag.sequence == 1
+            && !self.tab_chosen
+            && !matches!(&reply.outcome, Outcome::Fleet(mice) if !mice.is_empty())
+        {
+            self.active_tab = Tab::Acceleration;
+        }
+        match reply.outcome {
+            Outcome::Fleet(mice) => {
+                let previous = self.device_key().or_else(|| self.draft_device.clone());
+                self.selected_mouse = previous
+                    .and_then(|key| mice.iter().position(|mouse| DeviceKey::of(mouse) == key))
+                    .or_else(|| (!mice.is_empty()).then_some(0));
+                self.mice = mice;
+                return self.schedule_device_job();
+            }
+            Outcome::DiscoveryFailed => self.device_state = DeviceState::DiscoveryFailed,
+            Outcome::Disconnected => {
+                if let Some(index) = self.selected_mouse.take() {
+                    self.mice.remove(index);
+                }
+                self.device_state = DeviceState::Disconnected;
+            }
+            Outcome::Readback {
+                status,
+                write_verified,
+            } => {
+                self.mouse_status = Some(status);
+                self.write_uncertain = false;
+                self.device_state = DeviceState::Ready;
+                if !self.stages_dirty
+                    || self.mouse_status.as_ref().is_some_and(|status| {
+                        status.stages == self.stage_draft
+                            && status.active_stage == Some(self.active_stage_draft)
+                    })
+                {
+                    self.sync_stage_draft_from_status();
+                }
+                if let Some(verified) = write_verified {
+                    let message = if verified {
+                        "Settings verified on the mouse."
+                    } else {
+                        "The mouse readback differs from the requested settings."
+                    };
+                    self.status_toast = Some((message.into(), !verified));
+                }
+            }
+            Outcome::Stale { after_write } => {
+                self.device_state = DeviceState::Stale {
+                    after_write: after_write || self.write_uncertain,
+                };
+            }
+            Outcome::WorkerUnavailable => self.device_state = DeviceState::WorkerUnavailable,
+        }
+        Task::none()
+    }
+
+    fn can_write_mouse(&self) -> bool {
+        self.device_state == DeviceState::Ready
+            && self.pending.is_none()
+            && self.mouse_status.is_some()
+            && self
+                .current_mouse()
+                .is_some_and(|mouse| mouse.classified.tier >= 2 && mouse.classified.write_enabled)
+    }
+
+    fn apply_mouse_update(&mut self, updates: MouseUpdates) -> Task<Message> {
+        if !self.can_write_mouse() {
+            return Task::none();
+        }
+        let mouse = self.current_mouse().expect("writable selection").clone();
+        self.status_toast = None;
+        self.mouse_status = None;
+        self.write_uncertain = true;
+        self.dispatch(Job::Write(mouse, updates))
+    }
+
+    fn invalidate_device_status(&mut self) {
+        self.generation += 1;
+        self.mouse_status = None;
+        self.status_toast = None;
+        self.device_state = DeviceState::Busy;
     }
 
     fn accel_dirty(&self) -> bool {
@@ -313,35 +460,30 @@ impl App {
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::Refresh => {
-                let prev_id = self.current_mouse().map(|m| m.id.clone());
-                match discover_mice(&self.registry) {
-                    Ok(list) => {
-                        self.mice = list;
-                        self.hid_error = None;
-                        self.selected_mouse = prev_id
-                            .and_then(|id| self.mice.iter().position(|m| m.id == id))
-                            .or_else(|| (!self.mice.is_empty()).then_some(0));
-                    }
-                    Err(err) => {
-                        self.hid_error = Some(err);
-                    }
-                }
-                self.reload_selected_mouse();
+                self.invalidate_device_status();
+                self.discover_requested = true;
                 self.accel_backend = detect_accel_backend();
                 if let Some(live) = self.accel_backend.live_config.clone() {
                     self.accel_live_cfg = live.clone();
                     self.accel_cfg = live;
                 }
-                self.status_toast = Some(("Refreshed live hardware state".into(), false));
+                return self.schedule_device_job();
             }
+            Message::DeviceReply(reply) => return self.finish_device_job(reply),
             Message::SelectMouse(idx) => {
                 if idx < self.mice.len() {
+                    // Reissue discovery under the latest selection if Refresh was in flight.
+                    self.discover_requested |=
+                        self.device_state == DeviceState::DiscoveryFailed || self.discovering;
                     self.selected_mouse = Some(idx);
-                    self.status_toast = None;
-                    self.reload_selected_mouse();
+                    self.invalidate_device_status();
+                    return self.schedule_device_job();
                 }
             }
-            Message::SelectTab(tab) => self.active_tab = tab,
+            Message::SelectTab(tab) => {
+                self.active_tab = tab;
+                self.tab_chosen = true;
+            }
             Message::ToggleAppearance => {
                 self.appearance = match self.appearance {
                     Appearance::Dark => Appearance::Light,
@@ -399,35 +541,39 @@ impl App {
                     self.stages_dirty = true;
                 }
             }
-            Message::RevertStages => self.sync_stage_draft_from_status(),
+            Message::RevertStages => {
+                if self.mouse_status.is_some() {
+                    self.sync_stage_draft_from_status();
+                }
+            }
             Message::SaveStages => {
                 let updates = MouseUpdates {
                     stages: Some(self.stage_draft.clone()),
                     active_stage: Some(self.active_stage_draft),
                     ..Default::default()
                 };
-                self.apply_mouse_update(updates, "Saved DPI stages to mouse onboard memory");
+                return self.apply_mouse_update(updates);
             }
             Message::SetPollingHz(hz) => {
                 let updates = MouseUpdates {
                     polling_hz: Some(hz),
                     ..Default::default()
                 };
-                self.apply_mouse_update(updates, &format!("Polling rate set to {hz} Hz"));
+                return self.apply_mouse_update(updates);
             }
             Message::SetLodIndex(idx) => {
                 let updates = MouseUpdates {
                     lod_index: Some(idx),
                     ..Default::default()
                 };
-                self.apply_mouse_update(updates, "Updated lift-off distance");
+                return self.apply_mouse_update(updates);
             }
             Message::SetLodPreset(level) => {
                 let updates = MouseUpdates {
                     lod_preset: Some(level.clone()),
                     ..Default::default()
                 };
-                self.apply_mouse_update(updates, &format!("Lift-off set to {level}"));
+                return self.apply_mouse_update(updates);
             }
             Message::ToggleMotionSync => {
                 if let Some(cur) = self.mouse_status.as_ref().and_then(|s| s.motion_sync) {
@@ -435,7 +581,7 @@ impl App {
                         motion_sync: Some(!cur),
                         ..Default::default()
                     };
-                    self.apply_mouse_update(updates, "Updated Motion Sync");
+                    return self.apply_mouse_update(updates);
                 }
             }
             Message::ToggleAngleSnapping => {
@@ -444,7 +590,7 @@ impl App {
                         angle_snapping: Some(!cur),
                         ..Default::default()
                     };
-                    self.apply_mouse_update(updates, "Updated Angle Snapping");
+                    return self.apply_mouse_update(updates);
                 }
             }
             Message::ToggleRippleControl => {
@@ -453,7 +599,7 @@ impl App {
                         ripple_control: Some(!cur),
                         ..Default::default()
                     };
-                    self.apply_mouse_update(updates, "Updated Ripple Control");
+                    return self.apply_mouse_update(updates);
                 }
             }
             Message::ToggleSlamclick => {
@@ -462,7 +608,7 @@ impl App {
                         slamclick: Some(!cur),
                         ..Default::default()
                     };
-                    self.apply_mouse_update(updates, "Updated Slamclick Filter");
+                    return self.apply_mouse_update(updates);
                 }
             }
             Message::ToggleMotionJitter => {
@@ -471,7 +617,7 @@ impl App {
                         motion_jitter: Some(!cur),
                         ..Default::default()
                     };
-                    self.apply_mouse_update(updates, "Updated Motion Jitter Filter");
+                    return self.apply_mouse_update(updates);
                 }
             }
             Message::ToggleLeftHanded => {
@@ -480,7 +626,7 @@ impl App {
                         left_handed: Some(!cur),
                         ..Default::default()
                     };
-                    self.apply_mouse_update(updates, "Updated Left-Handed button swap");
+                    return self.apply_mouse_update(updates);
                 }
             }
             Message::SetSpdt(mode) => {
@@ -488,7 +634,7 @@ impl App {
                     spdt: Some(mode.clone()),
                     ..Default::default()
                 };
-                self.apply_mouse_update(updates, &format!("SPDT mode set to {mode}"));
+                return self.apply_mouse_update(updates);
             }
 
             // Acceleration
@@ -601,7 +747,7 @@ impl App {
 
         if let Some((msg, is_err)) = &self.status_toast {
             let (bg, border, fg) = if *is_err {
-                (t.bad_soft, t.bad, t.bad)
+                (t.bad_soft, t.bad, t.ink)
             } else {
                 (t.ok_soft, t.ok, t.ok_ink)
             };
@@ -638,20 +784,12 @@ impl App {
     }
 
     fn view_header(&self, t: Tokens) -> Element<'_, Message> {
-        let (conn_text, conn_bg, conn_border, conn_fg) = if let Some(m) = self.current_mouse() {
-            (
-                format!("{} ({})", m.display_name(), m.vid_pid()),
-                t.ok_soft,
-                t.ok,
-                t.ok_ink,
-            )
-        } else {
-            ("No mouse detected".into(), t.surface_2, t.line_strong, t.muted)
-        };
+        let (conn_text, conn_bg, conn_border, conn_fg) = self.device_state.presentation(t);
 
         let mut left = row![
             text("mousetool").size(18).color(t.ink),
             container(text(conn_text).size(12).color(conn_fg))
+                .width(200)
                 .padding([4, 10])
                 .style(move |_| theme::pill_style(conn_bg, conn_border, conn_fg)),
         ]
@@ -703,11 +841,14 @@ impl App {
 
     fn view_fleet(&self, t: Tokens) -> Element<'_, Message> {
         if self.mice.is_empty() {
-            let msg = self.hid_error.as_deref().unwrap_or(
-                "No USB or Bluetooth mouse found yet. Connect a mouse and click Refresh, or tune Acceleration below.",
-            );
-            return container(text(msg).size(12.5).color(t.muted))
-                .padding([10, 14])
+            let msg = match self.device_state {
+                DeviceState::Busy => "Checking for USB and Bluetooth mice.",
+                DeviceState::DiscoveryFailed => "Device discovery failed. Click Refresh to retry.",
+                _ => "Connect a mouse and click Refresh, or tune Acceleration below.",
+            };
+            return container(text(msg).size(12.5).color(t.ink_2))
+                .center_y(46)
+                .padding([8, 14])
                 .width(Length::Fill)
                 .style(move |_| theme::card_style(t))
                 .into();
@@ -725,11 +866,14 @@ impl App {
             );
         }
 
-        container(bar)
-            .padding([8, 10])
-            .width(Length::Fill)
-            .style(move |_| theme::card_style(t))
-            .into()
+        container(scrollable(bar).direction(scrollable::Direction::Horizontal(
+            scrollable::Scrollbar::new(),
+        )))
+        .center_y(46)
+        .padding([8, 10])
+        .width(Length::Fill)
+        .style(move |_| theme::card_style(t))
+        .into()
     }
 
     fn view_hero(&self, t: Tokens) -> Element<'_, Message> {
@@ -738,10 +882,19 @@ impl App {
 
         let dpi_text = st
             .and_then(|s| s.dpi)
-            .map(|(x, y)| if x == y { format!("{x}") } else { format!("{x}×{y}") })
+            .map(|(x, y)| {
+                if x == y {
+                    format!("{x}")
+                } else {
+                    format!("{x}×{y}")
+                }
+            })
             .unwrap_or_else(|| "–".into());
         let dpi_sub = st
-            .and_then(|s| s.active_stage.map(|a| format!("Stage {a}/{}", s.stages.len())))
+            .and_then(|s| {
+                s.active_stage
+                    .map(|a| format!("Stage {a}/{}", s.stages.len()))
+            })
             .unwrap_or_else(|| {
                 m.map(|d| format!("max {}", d.classified.dpi_max))
                     .unwrap_or_else(|| "No sensor read".into())
@@ -781,7 +934,12 @@ impl App {
             .unwrap_or_else(|| "None".into());
         let link_text = st
             .and_then(|s| s.firmware.as_ref())
-            .map(|fw| format!("{fw} · {}", m.map(|d| d.classified.link.as_str()).unwrap_or("")))
+            .map(|fw| {
+                format!(
+                    "{fw} · {}",
+                    m.map(|d| d.classified.link.as_str()).unwrap_or("")
+                )
+            })
             .unwrap_or_else(|| {
                 m.map(|d| format!("{} · {}", d.classified.link, d.vid_pid()))
                     .unwrap_or_else(|| "Portable native core".into())
@@ -843,29 +1001,28 @@ impl App {
 
         let mut sections = column![].spacing(12);
 
-        if let Some(err) = &self.mouse_error {
+        if mouse.permission_hint.is_some() {
             sections = sections.push(
-                container(text(err).size(12.5).color(t.warn_ink))
-                    .padding([10, 14])
-                    .width(Length::Fill)
-                    .style(move |_| theme::pill_style(t.warn_soft, t.warn, t.warn_ink)),
-            );
-        }
-
-        if let Some(hint) = &mouse.permission_hint {
-            sections = sections.push(
-                container(text(hint).size(12.5).color(t.warn_ink))
-                    .padding([10, 14])
-                    .width(Length::Fill)
-                    .style(move |_| theme::pill_style(t.warn_soft, t.warn, t.warn_ink)),
+                container(
+                    text("HID access denied. Apply the udev rules and reconnect the mouse.")
+                        .size(12.5)
+                        .color(t.warn_ink),
+                )
+                .padding([10, 14])
+                .width(Length::Fill)
+                .style(move |_| theme::pill_style(t.warn_soft, t.warn, t.warn_ink)),
             );
         }
 
         let Some(st) = &self.mouse_status else {
             let note = if mouse.classified.tier == 0 {
                 mouse.classified.status_note.as_str()
+            } else if !has_native_driver(&mouse.classified.driver) {
+                "A native settings driver is unavailable for this mouse."
+            } else if self.device_state == DeviceState::Busy {
+                "Waiting for device readback."
             } else {
-                "Waiting for live hardware readout. Click Refresh once permissions are ready."
+                "Click Refresh to read the current settings and enable supported controls."
             };
             sections = sections.push(
                 container(text(note).size(12.5).color(t.muted))
@@ -876,7 +1033,7 @@ impl App {
             return sections.into();
         };
 
-        let writable = mouse.classified.tier >= 2 && mouse.classified.write_enabled;
+        let writable = self.can_write_mouse();
 
         // 01.1 DPI Stages
         if !self.stage_draft.is_empty() {
@@ -1519,23 +1676,22 @@ impl App {
                     format!("{} ({})", m.classified.proto_label, m.classified.driver),
                 ),
                 kv_row(t, "Connection", m.classified.link.clone()),
-                kv_row(t, "Device Path", m.path.clone()),
             ]
             .spacing(6);
 
             if let Some(fw) = self.mouse_status.as_ref().and_then(|s| s.firmware.as_ref()) {
                 details = details.push(kv_row(t, "Firmware", fw.clone()));
             }
-            if let Some(sn) = self.mouse_status.as_ref().and_then(|s| s.serial.as_ref()) {
-                details = details.push(kv_row(t, "Serial", sn.clone()));
-            }
-
-            if let Some(hint) = &m.permission_hint {
+            if m.permission_hint.is_some() {
                 details = details.push(
-                    container(text(hint).size(12).color(t.warn_ink))
-                        .padding([8, 10])
-                        .width(Length::Fill)
-                        .style(move |_| theme::pill_style(t.warn_soft, t.warn, t.warn_ink)),
+                    container(
+                        text("HID access denied. Apply the udev rules and reconnect the mouse.")
+                            .size(12)
+                            .color(t.warn_ink),
+                    )
+                    .padding([8, 10])
+                    .width(Length::Fill)
+                    .style(move |_| theme::pill_style(t.warn_soft, t.warn, t.warn_ink)),
                 );
             }
 
@@ -1653,4 +1809,253 @@ fn kv_row<'a>(t: Tokens, key: &'static str, val: String) -> Element<'a, Message>
     .spacing(12)
     .align_y(Alignment::Center)
     .into()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::mpsc::{Receiver, channel};
+    use std::time::Duration;
+
+    const WAIT: Duration = Duration::from_secs(5);
+
+    fn mouse(id: &str) -> DetectedMouse {
+        DetectedMouse {
+            id: id.into(),
+            path: format!("fixture-{id}"),
+            vid: 0x3367,
+            pid: 0x1964,
+            manufacturer: String::new(),
+            product: String::new(),
+            serial: String::new(),
+            usage_page: 1,
+            usage: 2,
+            interface_number: 0,
+            classified: DeviceRegistry::load_embedded()
+                .unwrap()
+                .classify_usb(0x3367, 0x1964, None),
+            permission_hint: None,
+        }
+    }
+
+    fn status(dpi: u32) -> MouseStatus {
+        MouseStatus {
+            dpi: Some((dpi, dpi)),
+            dpi_min: 50,
+            dpi_max: 30_000,
+            dpi_step: 50,
+            active_stage: Some(1),
+            stages: vec![(dpi, dpi)],
+            max_stages: 4,
+            ..Default::default()
+        }
+    }
+
+    fn readback(dpi: u32) -> Outcome {
+        Outcome::Readback {
+            status: status(dpi),
+            write_verified: None,
+        }
+    }
+
+    fn app(worker: Worker) -> App {
+        let backend = AccelBackendStatus {
+            name: "fixture".into(),
+            label: "Fixture".into(),
+            loaded: false,
+            writable: false,
+            lut_supported: false,
+            lut_writable: false,
+            detail: String::new(),
+            active_mode: None,
+            live_config: None,
+            params_dir: None,
+            resets_dir: None,
+        };
+        App::with_worker(
+            worker,
+            DeviceRegistry::load_embedded().unwrap().into(),
+            backend,
+        )
+        .0
+    }
+
+    fn receive(app: &mut App) {
+        let reply = app.worker.replies.recv_timeout(WAIT).unwrap();
+        let _ = app.update(Message::DeviceReply(reply));
+    }
+
+    fn wait_for_job(gate: &Receiver<()>) {
+        gate.recv_timeout(WAIT).unwrap();
+    }
+
+    #[test]
+    fn delayed_write_allows_navigation_and_blocks_duplicate_apply() {
+        let (started, jobs) = channel();
+        let (release, gate) = channel();
+        let mut app = app(Worker::start(move |job| match job {
+            Job::Discover => Outcome::Fleet(vec![mouse("a")]),
+            Job::Read(_) => readback(800),
+            Job::Write(mouse, updates) => {
+                started.send(()).unwrap();
+                wait_for_job(&gate);
+                device_io::assess_readback(&mouse, Some(&updates), Err("readback failed".into()))
+            }
+        }));
+        receive(&mut app);
+        receive(&mut app);
+        assert!(app.can_write_mouse());
+        let _ = app.update(Message::DragStageDpi(0, 1600));
+        let _ = app.update(Message::SaveStages);
+        wait_for_job(&jobs);
+        let sequence = app.sequence;
+        let _ = app.update(Message::SaveStages);
+        assert_eq!(app.sequence, sequence);
+        assert!(!app.can_write_mouse());
+        assert_eq!(app.device_state, DeviceState::Busy);
+
+        let _ = app.update(Message::ToggleAppearance);
+        let _ = app.update(Message::SelectTab(Tab::Device));
+        assert_eq!(app.appearance, Appearance::Light);
+        assert_eq!(app.active_tab, Tab::Device);
+        let _ = app.view();
+
+        release.send(()).unwrap();
+        receive(&mut app);
+        assert!(jobs.try_recv().is_err());
+        assert_eq!(app.device_state, DeviceState::Stale { after_write: true });
+        assert!(app.mouse_status.is_none());
+        assert_eq!(app.stage_draft, vec![(1600, 1600)]);
+        assert!(app.stages_dirty);
+        assert!(!app.can_write_mouse());
+
+        let _ = app.update(Message::Refresh);
+        receive(&mut app);
+        receive(&mut app);
+        assert!(app.can_write_mouse());
+        assert_eq!(app.stage_draft, vec![(1600, 1600)]);
+    }
+
+    #[test]
+    fn reselection_discards_delayed_read() {
+        let (started, jobs) = channel();
+        let (release, gate) = channel();
+        let mut app = app(Worker::start(move |job| match job {
+            Job::Discover => Outcome::Fleet(vec![mouse("a"), mouse("b")]),
+            Job::Read(mouse) if mouse.id == "a" => {
+                started.send(()).unwrap();
+                wait_for_job(&gate);
+                readback(800)
+            }
+            Job::Read(_) => readback(3200),
+            Job::Write(..) => panic!("unexpected write"),
+        }));
+        receive(&mut app);
+        wait_for_job(&jobs);
+        let _ = app.update(Message::SelectMouse(1));
+        release.send(()).unwrap();
+        let stale = app.worker.replies.recv_timeout(WAIT).unwrap();
+        let _ = app.update(Message::DeviceReply(stale.clone()));
+        assert!(app.mouse_status.is_none());
+        receive(&mut app);
+        let _ = app.update(Message::DeviceReply(stale));
+        assert_eq!(app.current_mouse().unwrap().id, "b");
+        assert_eq!(app.stage_draft, vec![(3200, 3200)]);
+    }
+
+    #[test]
+    fn refresh_during_write_discards_completion_after_unplug() {
+        let (started, jobs) = channel();
+        let (release, gate) = channel();
+        let mut unplugged = false;
+        let mut app = app(Worker::start(move |job| match job {
+            Job::Discover if unplugged => Outcome::Fleet(vec![]),
+            Job::Discover => Outcome::Fleet(vec![mouse("a")]),
+            Job::Read(_) => readback(800),
+            Job::Write(..) => {
+                started.send(()).unwrap();
+                wait_for_job(&gate);
+                unplugged = true;
+                Outcome::Readback {
+                    status: status(1600),
+                    write_verified: Some(true),
+                }
+            }
+        }));
+        receive(&mut app);
+        receive(&mut app);
+        let _ = app.update(Message::SetPollingHz(1000));
+        wait_for_job(&jobs);
+        let _ = app.update(Message::Refresh);
+        release.send(()).unwrap();
+        receive(&mut app);
+        assert_eq!(app.device_state, DeviceState::Busy);
+        assert!(app.mouse_status.is_none());
+        assert!(app.status_toast.is_none());
+        receive(&mut app);
+        assert_eq!(app.device_state, DeviceState::Disconnected);
+        assert!(app.current_mouse().is_none());
+        assert!(app.mouse_status.is_none());
+        assert!(!app.can_write_mouse());
+    }
+
+    #[test]
+    fn failed_refresh_invalidates_previous_snapshot() {
+        let mut discovered = false;
+        let mut app = app(Worker::start(move |job| match job {
+            Job::Discover if discovered => Outcome::DiscoveryFailed,
+            Job::Discover => {
+                discovered = true;
+                Outcome::Fleet(vec![mouse("a")])
+            }
+            Job::Read(_) => readback(800),
+            Job::Write(..) => panic!("unexpected write"),
+        }));
+        receive(&mut app);
+        receive(&mut app);
+        let _ = app.update(Message::Refresh);
+        receive(&mut app);
+        assert_eq!(app.device_state, DeviceState::DiscoveryFailed);
+        assert!(app.status_toast.is_none());
+        assert!(app.mouse_status.is_none());
+        assert!(!app.can_write_mouse());
+    }
+
+    #[test]
+    fn device_status_text_meets_aa_in_both_themes() {
+        fn luminance(rgb: [f32; 3]) -> f32 {
+            let [r, g, b] = rgb.map(|value| {
+                if value <= 0.04045 {
+                    value / 12.92
+                } else {
+                    ((value + 0.055) / 1.055).powf(2.4)
+                }
+            });
+            0.2126 * r + 0.7152 * g + 0.0722 * b
+        }
+
+        for appearance in [Appearance::Dark, Appearance::Light] {
+            let tokens = theme::tokens(appearance);
+            for state in [
+                DeviceState::Ready,
+                DeviceState::Busy,
+                DeviceState::Disconnected,
+                DeviceState::DiscoveryFailed,
+                DeviceState::Stale { after_write: false },
+                DeviceState::Stale { after_write: true },
+                DeviceState::WorkerUnavailable,
+            ] {
+                let (_, bg, _, fg) = state.presentation(tokens);
+                let background = luminance([
+                    bg.r * bg.a + tokens.bg.r * (1.0 - bg.a),
+                    bg.g * bg.a + tokens.bg.g * (1.0 - bg.a),
+                    bg.b * bg.a + tokens.bg.b * (1.0 - bg.a),
+                ]);
+                let foreground = luminance([fg.r, fg.g, fg.b]);
+                let ratio =
+                    (background.max(foreground) + 0.05) / (background.min(foreground) + 0.05);
+                assert!(ratio >= 4.5, "{appearance:?} {state:?}: {ratio:.2}");
+            }
+        }
+    }
 }
