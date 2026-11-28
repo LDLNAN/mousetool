@@ -2,13 +2,16 @@
 //! plus live Linux `mouseaccel`/`maccel` sysfs reader & validated writer.
 
 use serde::{Deserialize, Serialize};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 pub const Q32_SCALE: f64 = 4_294_967_296.0; // 1 << 32
 pub const LUT_MIN_POINTS: usize = 2;
 pub const LUT_MAX_POINTS: usize = 64;
 pub const LUT_STR_MAX: usize = 3072;
-pub const LUT_DX_MIN: f64 = 1e-4;
+pub const LUT_DX_MIN: f64 = 0.001;
+const LUT_X_MAX: f64 = 1000.0;
+const LUT_Y_MIN: f64 = 0.05;
+const LUT_Y_MAX: f64 = 10.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -66,20 +69,26 @@ impl AccelMode {
             Self::Synchronous => {
                 "S-shaped curve that feels slower for fine aim and faster for big swipes."
             }
-            Self::Lookup => "Draw your own curve directly on the graph with draggable control points.",
+            Self::Lookup => {
+                "Draw your own curve directly on the graph with draggable control points."
+            }
             Self::NoAccel => "No speed boost — constant sensitivity at every hand speed.",
         }
     }
 
     pub fn from_kernel_mode(raw: &str) -> Self {
-        match raw.trim().to_ascii_lowercase().as_str() {
+        Self::parse_kernel_mode(raw).unwrap_or(Self::Linear)
+    }
+
+    fn parse_kernel_mode(raw: &str) -> Option<Self> {
+        Some(match raw.trim().to_ascii_lowercase().as_str() {
             "0" | "linear" => Self::Linear,
             "1" | "natural" => Self::Natural,
             "2" | "synchronous" => Self::Synchronous,
             "3" | "no_accel" | "noaccel" => Self::NoAccel,
             "4" | "lookup" | "lut" => Self::Lookup,
-            _ => Self::Linear,
-        }
+            _ => return None,
+        })
     }
 }
 
@@ -248,6 +257,10 @@ pub fn evaluate_sensitivity(x: f64, cfg: &AccelConfig) -> (f64, f64) {
     (sx, sx * cfg.yx_ratio)
 }
 
+fn encode_q32(value: f64) -> i64 {
+    (value * Q32_SCALE).round() as i64
+}
+
 pub fn parse_lut_points_sysfs(raw: &str) -> Result<Vec<[f64; 2]>, String> {
     let text = raw.trim();
     if text.is_empty() || text.len() > LUT_STR_MAX {
@@ -263,27 +276,37 @@ pub fn parse_lut_points_sysfs(raw: &str) -> Result<Vec<[f64; 2]>, String> {
         let yr: i64 = ys.parse().map_err(|_| format!("invalid LUT y: {ys:?}"))?;
         out.push([xr as f64 / Q32_SCALE, yr as f64 / Q32_SCALE]);
     }
-    validate_lut_points(&out)?;
+    // Decoded values are exact here because the LUT bounds fit within f64's
+    // integer precision in Q32.32.
+    validate_lut_bounds(&out, encode_q32(LUT_Y_MIN) as f64 / Q32_SCALE)?;
     Ok(out)
 }
 
 pub fn validate_lut_points(points: &[[f64; 2]]) -> Result<(), String> {
+    validate_lut_bounds(points, LUT_Y_MIN)
+}
+
+fn validate_lut_bounds(points: &[[f64; 2]], min_y: f64) -> Result<(), String> {
     if !(LUT_MIN_POINTS..=LUT_MAX_POINTS).contains(&points.len()) {
         return Err(format!(
             "LUT_POINTS must have between {LUT_MIN_POINTS} and {LUT_MAX_POINTS} points"
         ));
     }
+    // Use the exact kernel threshold so a decoded boundary can be re-encoded.
+    let min_dx = encode_q32(LUT_DX_MIN) as f64 / Q32_SCALE;
     let mut prev_x = None;
     for &[x, y] in points {
         if !x.is_finite() || !y.is_finite() {
             return Err("LUT_POINTS values must be finite".into());
         }
-        if !(0.0..=500.0).contains(&x) || !(0.01..=50.0).contains(&y) {
+        if !(0.0..=LUT_X_MAX).contains(&x) || !(min_y..=LUT_Y_MAX).contains(&y) {
             return Err(format!("LUT point ({x}, {y}) out of bounds"));
         }
         if let Some(px) = prev_x {
-            if x - px < LUT_DX_MIN {
-                return Err(format!("LUT_POINTS x values must increase by at least {LUT_DX_MIN}"));
+            if x - px < min_dx {
+                return Err(format!(
+                    "LUT_POINTS x values must increase by at least {LUT_DX_MIN}"
+                ));
             }
         }
         prev_x = Some(x);
@@ -293,24 +316,12 @@ pub fn validate_lut_points(points: &[[f64; 2]]) -> Result<(), String> {
 
 pub fn encode_lut_points_sysfs(points: &[[f64; 2]]) -> Result<String, String> {
     validate_lut_points(points)?;
-    let min_dx_raw = (LUT_DX_MIN * Q32_SCALE).round() as i64;
-    let mut parts = Vec::with_capacity(points.len());
-    let mut prev_raw = None;
-    for &[x, y] in points {
-        let xr = (x * Q32_SCALE).round() as i64;
-        let yr = (y * Q32_SCALE).round() as i64;
-        if let Some(px) = prev_raw {
-            if xr - px < min_dx_raw {
-                return Err(format!("LUT_POINTS x values must increase by at least {LUT_DX_MIN}"));
-            }
-        }
-        prev_raw = Some(xr);
-        parts.push(format!("{xr},{yr}"));
-    }
-    let text = parts.join(";");
-    if text.len() > LUT_STR_MAX {
-        return Err(format!("encoded LUT_POINTS exceeds {LUT_STR_MAX} bytes"));
-    }
+    let text = points
+        .iter()
+        .map(|&[x, y]| format!("{},{}", encode_q32(x), encode_q32(y)))
+        .collect::<Vec<_>>()
+        .join(";");
+    parse_lut_points_sysfs(&text)?;
     Ok(text)
 }
 
@@ -329,128 +340,9 @@ pub struct AccelBackendStatus {
     pub resets_dir: Option<PathBuf>,
 }
 
-fn read_q32(dir: &Path, name: &str) -> Option<f64> {
-    let raw = std::fs::read_to_string(dir.join(name)).ok()?;
-    let val: i64 = raw.trim().parse().ok()?;
-    Some(val as f64 / Q32_SCALE)
-}
-
-pub fn read_linux_accel_from_dir(params_dir: &Path) -> Option<AccelConfig> {
-    let mode_raw = std::fs::read_to_string(params_dir.join("MODE")).ok()?;
-    let mut cfg = AccelConfig::default();
-    cfg.mode = AccelMode::from_kernel_mode(&mode_raw);
-    if let Some(v) = read_q32(params_dir, "SENS_MULT") {
-        cfg.sens_mult = v;
-    }
-    if let Some(v) = read_q32(params_dir, "YX_RATIO") {
-        cfg.yx_ratio = v;
-    }
-    if let Some(v) = read_q32(params_dir, "INPUT_DPI") {
-        cfg.input_dpi = v;
-    }
-    if let Some(v) = read_q32(params_dir, "ANGLE_ROTATION") {
-        cfg.angle_rotation = v;
-    }
-    if let Some(v) = read_q32(params_dir, "ACCEL") {
-        cfg.accel = v;
-    }
-    if let Some(v) = read_q32(params_dir, "OFFSET") {
-        cfg.offset = v;
-    }
-    if let Some(v) = read_q32(params_dir, "OUTPUT_CAP") {
-        cfg.output_cap = v;
-    }
-    if let Some(v) = read_q32(params_dir, "DECAY_RATE") {
-        cfg.decay_rate = v;
-    }
-    if let Some(v) = read_q32(params_dir, "LIMIT") {
-        cfg.limit = v;
-    }
-    if let Some(v) = read_q32(params_dir, "GAMMA") {
-        cfg.gamma = v;
-    }
-    if let Some(v) = read_q32(params_dir, "SMOOTH") {
-        cfg.smooth = v;
-    }
-    if let Some(v) = read_q32(params_dir, "MOTIVITY") {
-        cfg.motivity = v;
-    }
-    if let Some(v) = read_q32(params_dir, "SYNC_SPEED") {
-        cfg.sync_speed = v;
-    }
-    if let Ok(raw_lut) = std::fs::read_to_string(params_dir.join("LUT_POINTS")) {
-        if let Ok(pts) = parse_lut_points_sysfs(&raw_lut) {
-            cfg.lut_points = pts;
-        }
-    }
-    Some(cfg)
-}
-
-/// Write validated `AccelConfig` to a Linux `mouseaccel`/`maccel` sysfs directory.
-/// Always writes `LUT_POINTS` before `MODE` (atomic custom curve activation) and skips
-/// reset script generation for `LUT_POINTS` to match `mousetool/accel/linux.py`.
-pub fn apply_linux_accel_to_dir(
-    params_dir: &Path,
-    resets_dir: Option<&Path>,
-    cfg: &AccelConfig,
-) -> Result<AccelConfig, String> {
-    let scalar_pairs: [(&str, f64, f64, f64); 13] = [
-        ("SENS_MULT", cfg.sens_mult, 0.01, 50.0),
-        ("YX_RATIO", cfg.yx_ratio, 0.01, 50.0),
-        ("INPUT_DPI", cfg.input_dpi, 50.0, 50_000.0),
-        ("ANGLE_ROTATION", cfg.angle_rotation, -180.0, 180.0),
-        ("ACCEL", cfg.accel, 0.0, 50.0),
-        ("OFFSET", cfg.offset, 0.0, 1000.0),
-        ("OUTPUT_CAP", cfg.output_cap, 0.0, 100.0),
-        ("DECAY_RATE", cfg.decay_rate, 0.0001, 100.0),
-        ("LIMIT", cfg.limit, 1.0, 100.0),
-        ("GAMMA", cfg.gamma, 0.0001, 100.0),
-        ("SMOOTH", cfg.smooth, 0.0, 1.0),
-        ("MOTIVITY", cfg.motivity, 1.0001, 100.0),
-        ("SYNC_SPEED", cfg.sync_speed, 0.0001, 1000.0),
-    ];
-
-    for (name, val, lo, hi) in scalar_pairs {
-        if !val.is_finite() || !(lo..=hi).contains(&val) {
-            return Err(format!("{name} must be between {lo} and {hi} (got {val})"));
-        }
-    }
-
-    let lut_path = params_dir.join("LUT_POINTS");
-    if cfg.mode == AccelMode::Lookup {
-        if !lut_path.is_file() {
-            return Err("Custom curves require mouseaccel with LUT_POINTS support.".into());
-        }
-        let encoded = encode_lut_points_sysfs(&cfg.lut_points)?;
-        std::fs::write(&lut_path, encoded)
-            .map_err(|e| format!("failed to write LUT_POINTS: {e}"))?;
-    }
-
-    for (name, val, _, _) in scalar_pairs {
-        let raw = (val * Q32_SCALE).round() as i64;
-        std::fs::write(params_dir.join(name), raw.to_string())
-            .map_err(|e| format!("failed to write {name}: {e}"))?;
-        if let Some(rd) = resets_dir {
-            let _ = std::fs::write(
-                rd.join(format!("set_last_{name}_value.sh")),
-                format!("echo {raw} > {}/{name};", params_dir.display()),
-            );
-        }
-    }
-
-    let mode_idx = cfg.mode.kernel_index();
-    std::fs::write(params_dir.join("MODE"), mode_idx.to_string())
-        .map_err(|e| format!("failed to write MODE: {e}"))?;
-    if let Some(rd) = resets_dir {
-        let _ = std::fs::write(
-            rd.join("set_last_MODE_value.sh"),
-            format!("echo {mode_idx} > {}/MODE;", params_dir.display()),
-        );
-    }
-
-    read_linux_accel_from_dir(params_dir)
-        .ok_or_else(|| "wrote accel parameters, but failed to read them back".into())
-}
+#[path = "accel/linux_io.rs"]
+mod linux_io;
+pub use linux_io::{apply_linux_accel_to_dir, read_linux_accel_from_dir};
 
 /// Apply `cfg` to the active OS acceleration backend.
 pub fn apply_live_accel(cfg: &AccelConfig) -> Result<AccelConfig, String> {
@@ -458,7 +350,7 @@ pub fn apply_live_accel(cfg: &AccelConfig) -> Result<AccelConfig, String> {
     if !status.loaded {
         return Err("No kernel acceleration backend is loaded.".into());
     }
-    if !status.writable {
+    if !status.writable || status.live_config.is_none() {
         return Err(status.detail);
     }
     #[cfg(target_os = "linux")]
@@ -487,18 +379,29 @@ pub fn detect_accel_backend() -> AccelBackendStatus {
             let params_dir = PathBuf::from("/sys/module").join(name).join("parameters");
             if params_dir.is_dir() {
                 let mode_path = params_dir.join("MODE");
-                let live_config = read_linux_accel_from_dir(&params_dir);
+                let config_result = linux_io::read_config_from_dir(&params_dir);
+                let live_config = config_result.as_ref().ok().cloned();
                 let active_mode = live_config.as_ref().map(|c| c.mode);
-                let writable = std::fs::OpenOptions::new().write(true).open(&mode_path).is_ok();
+                let writable = std::fs::OpenOptions::new()
+                    .write(true)
+                    .open(&mode_path)
+                    .is_ok();
                 let lut_path = params_dir.join("LUT_POINTS");
                 let lut_supported = lut_path.is_file();
                 let lut_writable = lut_supported
-                    && std::fs::OpenOptions::new().write(true).open(&lut_path).is_ok();
+                    && std::fs::OpenOptions::new()
+                        .write(true)
+                        .open(&lut_path)
+                        .is_ok();
                 let resets_dir = PathBuf::from("/var/opt").join(name).join("resets");
                 let detail = if writable {
                     format!("{label} loaded and writable")
                 } else {
                     format!("{label} loaded (read-only — add your user to the `{name}` group)")
+                };
+                let detail = match config_result {
+                    Ok(_) => detail,
+                    Err(error) => format!("{detail}. Live configuration unavailable: {error}"),
                 };
                 return AccelBackendStatus {
                     name: name.into(),
@@ -641,7 +544,7 @@ mod tests {
         let resets = tmp.path().join("resets");
         std::fs::create_dir_all(&params).unwrap();
         std::fs::create_dir_all(&resets).unwrap();
-        std::fs::write(params.join("LUT_POINTS"), "0,4294967296;42949672960,4294967296").unwrap();
+        linux_io::seed_fixture(&params);
 
         let cfg = AccelConfig {
             mode: AccelMode::Lookup,

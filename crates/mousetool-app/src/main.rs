@@ -298,6 +298,10 @@ impl App {
         (app, task)
     }
 
+    fn can_write_accel(&self) -> bool {
+        self.accel_backend.writable && self.accel_backend.live_config.is_some()
+    }
+
     fn theme(&self) -> Theme {
         theme::iced_theme(self.appearance)
     }
@@ -466,6 +470,9 @@ impl App {
                 if let Some(live) = self.accel_backend.live_config.clone() {
                     self.accel_live_cfg = live.clone();
                     self.accel_cfg = live;
+                }
+                if self.accel_backend.loaded && self.accel_backend.live_config.is_none() {
+                    self.status_toast = Some((self.accel_backend.detail.clone(), true));
                 }
                 return self.schedule_device_job();
             }
@@ -699,6 +706,9 @@ impl App {
                     self.accel_cfg.input_dpi = dpi_x as f64;
                 }
             }
+            Message::SaveAccel | Message::ResetAccelOff if !self.can_write_accel() => {
+                self.status_toast = Some((self.accel_backend.detail.clone(), true));
+            }
             Message::SaveAccel => match apply_live_accel(&self.accel_cfg) {
                 Ok(readback) => {
                     self.accel_live_cfg = readback.clone();
@@ -707,6 +717,7 @@ impl App {
                     self.status_toast = Some(("Acceleration curve saved to kernel driver".into(), false));
                 }
                 Err(err) => {
+                    self.accel_backend = detect_accel_backend();
                     self.status_toast = Some((err, true));
                 }
             },
@@ -721,6 +732,7 @@ impl App {
                         self.status_toast = Some(("Acceleration reset to Off".into(), false));
                     }
                     Err(err) => {
+                        self.accel_backend = detect_accel_backend();
                         self.status_toast = Some((err, true));
                     }
                 }
@@ -1410,7 +1422,13 @@ impl App {
                 text("06.1").size(11.5).color(t.faint),
                 text("Acceleration curve").size(15).color(t.ink),
                 Space::new().width(Length::Fill),
-                text(&self.accel_backend.detail).size(12).color(t.muted),
+                text(&self.accel_backend.detail).size(12).color(
+                    if self.accel_backend.loaded && self.accel_backend.live_config.is_none() {
+                        t.bad
+                    } else {
+                        t.muted
+                    }
+                ),
             ]
             .spacing(8)
             .align_y(Alignment::Center),
@@ -1614,19 +1632,39 @@ impl App {
                 );
         }
 
-        if self.accel_backend.writable {
+        if self.accel_backend.writable
+            || (self.accel_backend.loaded && self.accel_backend.live_config.is_none())
+        {
+            let can_write = self.can_write_accel();
+            let disabled_style = move |theme: &Theme, status| {
+                let mut style = theme::secondary_button(t, false)(theme, status);
+                style.text_color = t.muted;
+                style
+            };
             actions = actions
                 .push(
                     button(text("Reset to Off").size(12.5))
                         .padding([6, 11])
-                        .style(theme::secondary_button(t, false))
-                        .on_press(Message::ResetAccelOff),
+                        .style(move |theme, status| {
+                            if can_write {
+                                theme::secondary_button(t, false)(theme, status)
+                            } else {
+                                disabled_style(theme, status)
+                            }
+                        })
+                        .on_press_maybe(can_write.then_some(Message::ResetAccelOff)),
                 )
                 .push(
                     button(text("Save curve").size(12.5))
                         .padding([6, 14])
-                        .style(theme::primary_button(t))
-                        .on_press(Message::SaveAccel),
+                        .style(move |theme, status| {
+                            if can_write {
+                                theme::primary_button(t)(theme, status)
+                            } else {
+                                disabled_style(theme, status)
+                            }
+                        })
+                        .on_press_maybe(can_write.then_some(Message::SaveAccel)),
                 );
         } else {
             actions = actions.push(
